@@ -3808,27 +3808,36 @@ window.exportPDF = async () => {
 
     `;
 
-    const opt = {
-        margin: 0,
-        filename: `ERG_RPT_UN${m.un || m.UN}_${Date.now()}.pdf`,
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#0f172a' },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    window.showNotif("📄 جاري تجهيز نافذة الطباعة...", "success");
+
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+        window.showNotif("يرجى السماح بالنوافذ المنبثقة (Popups) لهذا الموقع من إعدادات المتصفح", "error");
+        return;
+    }
+    printWin.document.open();
+    printWin.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+            <meta charset="UTF-8">
+            <title>ERG_RPT_UN${m.un || m.UN}</title>
+            <style>
+                @page { size: A4; margin: 0; }
+                * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+                body { margin: 0; }
+            </style>
+        </head>
+        <body>${reportContent.outerHTML}</body>
+        </html>
+    `);
+    printWin.document.close();
+    printWin.onload = () => {
+        setTimeout(() => {
+            printWin.focus();
+            printWin.print();
+        }, 300);
     };
-
-    // إدراج العنصر فعليًا بالصفحة (خارج حدود الرؤية) ليُرسم بشكل صحيح قبل التصدير
-    reportContent.style.position = 'fixed';
-    reportContent.style.top = '0';
-    reportContent.style.left = '0';
-    reportContent.style.zIndex = '-9999';
-    document.body.appendChild(reportContent);
-
-    window.showNotif("📄 جاري تصدير التقرير الاحترافي...", "success");
-
-    setTimeout(() => {
-        html2pdf().set(opt).from(reportContent).save()
-            .then(() => document.body.removeChild(reportContent))
-            .catch(() => { if (reportContent.parentNode) document.body.removeChild(reportContent); });
-    }, 150);
 };
 
 // ===== تقرير الحادث الكامل PDF =====
