@@ -2213,6 +2213,33 @@ window.radialSections = [
 ];
 
 window.renderRadialMenu = () => {
+    const grid = document.getElementById('bentoGrid');
+    if (grid) {
+        grid.innerHTML = '';
+        const items = window.radialSections.filter(s => {
+            const btn = document.getElementById(s.app);
+            return btn && getComputedStyle(btn).display !== 'none';
+        });
+        items.forEach((s, i) => {
+            const el = document.createElement('button');
+            el.type = 'button';
+            el.className = 'bento-tile' + (i < 2 ? ' hero' : '');
+            el.style.setProperty('--tile-color', s.color + '80');
+            el.style.background = `linear-gradient(160deg, ${s.color}1c, rgba(255,255,255,0.02))`;
+            el.onclick = () => { window.toggleRadialMenu(); setTimeout(() => window.openWin(s.win), 180); };
+            const badgeHtml = s.badge ? `<span id="${s.badge}_radial" class="hidden absolute -top-1 -right-1 w-6 h-6 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-black">0</span>` : '';
+            el.innerHTML = `
+                <div class="bt-icon" style="position:relative; background:${s.color}22; border:1px solid ${s.color}55; box-shadow:0 0 16px ${s.color}33;">
+                    <svg class="w-6 h-6" style="color:${s.color}" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">${s.icon}</svg>
+                    ${badgeHtml}
+                </div>
+                <span class="bt-label">${s.label}</span>
+            `;
+            grid.appendChild(el);
+            setTimeout(() => el.classList.add('show'), i * 40);
+        });
+        return;
+    }
     const container = document.getElementById('radialItems');
     const particlesBox = document.getElementById('radialParticles');
     const linesBox = document.getElementById('radialLines');
@@ -2295,8 +2322,14 @@ window.toggleRadialMenu = () => {
     const icon = document.getElementById('radialTriggerIcon');
     const trigger = document.getElementById('radialTrigger');
     const label = document.getElementById('radialTriggerLabel');
+    const burst = document.getElementById('deckBurst');
     if (!overlay) return;
     const isOpen = !overlay.classList.contains('hidden');
+    if (!isOpen && burst) {
+        burst.classList.remove('burst-active');
+        void burst.offsetWidth;
+        burst.classList.add('burst-active');
+    }
     if (isOpen) {
         overlay.classList.add('hidden');
         icon.style.transform = 'rotate(0deg)';
@@ -2888,12 +2921,12 @@ window.launchOS = (role, key, msg) => {
         else _roleEl.textContent = '👤 Field Member — ERG Access';
     }
 
-    // التوجيه: العضو يذهب فوراً للنظام، المدير والقائد للوحة الإحصاء مباشرة
+    // التوجيه: العضو يذهب فوراً للنظام، المدير والقائد لسطح المكتب الرئيسي
     if(role === 'member') {
         window.openWin('winERG');
         window.renderLauncher?.();   // لتفعيل ظهور زر البلاغ الطارئ العائم للعضو
     } else {
-        window.openWin('winDashboard');
+        window.openWin('os_desktop');
     }
 
 
@@ -6087,7 +6120,7 @@ window.goHome = async () => { // تمت إضافة async هنا
         document.querySelectorAll('.app-window').forEach(w => {
             if(w.id !== 'os_desktop') w.classList.add('hidden');
         });
-        setTimeout(() => window.toggleRadialMenu(), 150);
+        document.getElementById('os_desktop')?.classList.remove('hidden');
     } else {
     
 window.showConfirm(
@@ -7175,6 +7208,18 @@ html, body {
 .account-type-btn { transition: transform .25s cubic-bezier(0.34,1.56,0.64,1), box-shadow .25s ease !important; }
 .account-type-btn:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
 
+#os_desktop .grid > button {
+    display: flex !important; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; padding: 28px 12px; border-radius: 28px; cursor: pointer;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.09);
+    transition: transform .25s cubic-bezier(0.34,1.56,0.64,1), box-shadow .25s ease, border-color .25s;
+    min-height: 160px;
+}
+#os_desktop .grid > button:hover {
+    transform: translateY(-6px) scale(1.03);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.4);
+}
+
 /* hover أقوى على بطاقات الدخول */
 #entryOptions button {
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -7700,7 +7745,7 @@ input:focus, select:focus, textarea:focus {
                 inset 0 2px 8px rgba(0,0,0,0.4) !important;
 }
 
-body:not(.desktop-active) #radialTrigger,
+body:not(.desktop-active) #commandDeckBar { display: none !important; }
 body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 #radialTrigger {
@@ -7737,8 +7782,8 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 #radialOverlay {
     position: fixed; inset: 0; z-index: 99997;
-    background: radial-gradient(circle at 50% 45%, rgba(35,22,70,0.55), rgba(5,5,15,0.88) 70%);
-    backdrop-filter: blur(10px) saturate(120%);
+    background: rgba(5,5,15,0.22);
+    backdrop-filter: blur(8px) saturate(140%);
 }
 #radialCenterLogo {
     width: 110px; height: 110px; border-radius: 50%;
@@ -7793,6 +7838,114 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
 }
+
+/* ===== شريط القيادة السفلي ===== */
+#commandDeckBar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 99998; display: flex; align-items: center; justify-content: center;
+    width: 220px; height: 74px; border-radius: 37px;
+    background: rgba(10,12,20,0.55); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.5); overflow: hidden;
+}
+#deckRadarSweep {
+    position: absolute; inset: 0; pointer-events: none;
+    background: conic-gradient(from 0deg, transparent 0%, rgba(139,92,246,0.25) 8%, transparent 20%, transparent 100%);
+    animation: erg-ring-spin 5s linear infinite;
+}
+#commandDeckBar #radialTrigger { z-index: 2; }
+#radialTriggerLabel {
+    display: block; position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.6); font-size: 10px; font-weight: 900;
+    white-space: nowrap; letter-spacing: .05em;
+}
+
+/* تأثير الانبثاق (Burst) عند فتح اللوحة */
+#deckBurst {
+    position: fixed; bottom: 55px; left: 50%; width: 10px; height: 10px;
+    border-radius: 50%; transform: translate(-50%, 50%) scale(0);
+    background: radial-gradient(circle, rgba(139,92,246,0.9), transparent 70%);
+    z-index: 99996; pointer-events: none; opacity: 0;
+}
+#deckBurst.burst-active {
+    animation: deck-burst-anim .6s ease-out forwards;
+}
+@keyframes deck-burst-anim {
+    0% { transform: translate(-50%, 50%) scale(0); opacity: .9; }
+    100% { transform: translate(-50%, 50%) scale(60); opacity: 0; }
+}
+
+/* ===== لوحة Bento المنزلقة ===== */
+#bentoPanel {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 99997;
+    max-height: 82vh; overflow-y: auto; overflow-x: hidden;
+    background:
+        radial-gradient(circle at 20% 0%, rgba(139,92,246,0.14), transparent 55%),
+        radial-gradient(circle at 85% 15%, rgba(56,189,248,0.12), transparent 50%),
+        linear-gradient(180deg, rgba(10,11,20,0.88), rgba(4,5,10,0.98));
+    backdrop-filter: blur(22px) saturate(140%);
+    border-top: 1px solid rgba(255,255,255,0.14);
+    border-radius: 36px 36px 0 0;
+    box-shadow: 0 -25px 70px rgba(0,0,0,0.65);
+    padding: 18px 20px 120px;
+    transform: translateY(100%); transition: transform .45s cubic-bezier(0.16,1,0.3,1);
+}
+#radialOverlay:not(.hidden) #bentoPanel { transform: translateY(0); }
+#bentoPanel::before {
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:.55; z-index:0;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 36px 36px;
+    animation: bento-grid-drift 16s linear infinite;
+}
+@keyframes bento-grid-drift {
+    from { background-position: 0 0, 0 0; }
+    to { background-position: 36px 36px, 36px 36px; }
+}
+#bentoHandle {
+    position: relative; z-index: 1;
+    width: 46px; height: 5px; border-radius: 999px; background: rgba(255,255,255,0.3);
+    margin: 0 auto 22px;
+}
+#bentoGrid {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px 14px;
+    max-width: 760px; margin: 0 auto;
+}
+
+/* بلاطات سداسية — بشكل حلقة البنزين */
+.bento-tile {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; padding: 24px 8px; cursor: pointer; aspect-ratio: 1 / 1;
+    background: rgba(255,255,255,0.035);
+    border: 1.5px solid var(--tile-color, rgba(255,255,255,0.15));
+    clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%);
+    transition: transform .25s cubic-bezier(0.34,1.56,0.64,1), filter .25s;
+    opacity: 0; transform: translateY(18px) scale(0.85);
+    box-shadow: 0 0 0 rgba(0,0,0,0);
+}
+.bento-tile.show { opacity: 1; transform: translateY(0) scale(1); transition: opacity .4s, transform .4s; }
+.bento-tile:hover {
+    transform: translateY(-6px) scale(1.1);
+    filter: brightness(1.2);
+    box-shadow: 0 15px 35px -8px var(--tile-color, rgba(139,92,246,0.6));
+}
+.bento-tile:active { transform: translateY(-2px) scale(1.02); }
+.bento-tile.hero {
+    grid-column: span 2; aspect-ratio: 2.1 / 1; padding: 20px 30px;
+    clip-path: polygon(14% 4%, 86% 4%, 100% 50%, 86% 96%, 14% 96%, 0% 50%);
+}
+.bento-tile .bt-icon {
+    width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+}
+.bento-tile.hero .bt-icon { width: 58px; height: 58px; border-radius: 16px; }
+.bento-tile .bt-label { color: #fff; font-weight: 900; font-size: 12px; text-align: center; }
+.bento-tile.hero .bt-label { font-size: 15px; }
+@media (max-width: 640px) {
+    #bentoGrid { grid-template-columns: repeat(2, 1fr); gap: 24px 10px; }
+    .bento-tile.hero { grid-column: span 2; }
+}
 #radialLines { transition: transform .4s ease-out; }
 .erg-energy-line { transition: stroke-opacity .6s ease; }
 </style>
@@ -7804,23 +7957,20 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 <body class="min-h-screen text-right">
 
-<div style="position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:99998; display:flex; flex-direction:column; align-items:center; gap:8px;">
-    <button id="radialTrigger" onclick="window.toggleRadialMenu()" aria-label="القائمة">
+<div id="commandDeckBar">
+    <div id="deckRadarSweep"></div>
+    <button id="radialTrigger" onclick="window.goHome()" aria-label="الرئيسية">
         <svg id="radialTriggerIcon" class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
         </svg>
     </button>
-    <span id="radialTriggerLabel" class="text-white text-[10px] font-black px-3 py-1 rounded-full transition-all" style="background:rgba(0,0,0,0.55); backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.15);">القائمة</span>
+    <span id="radialTriggerLabel">الرئيسية</span>
 </div>
 
 <div id="radialOverlay" class="hidden" onclick="if(event.target===this) window.toggleRadialMenu()">
-    <div id="radialParticles"></div>
-    <svg id="radialLines" style="position:fixed; inset:0; width:100%; height:100%; pointer-events:none;"></svg>
-    <div style="position:absolute; top:50%; left:50%; width:0; height:0;">
-        <div id="radialCenterLogo" style="position:absolute; left:-55px; top:-55px;">
-            <span class="font-black italic text-white text-sm">ERG</span>
-        </div>
-        <div id="radialItems"></div>
+    <div id="bentoPanel" onclick="event.stopPropagation()">
+        <div id="bentoHandle"></div>
+        <div id="bentoGrid"></div>
     </div>
 </div>
 
@@ -8740,8 +8890,8 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         </div>
     </div>
 
-    <!-- Grid منتظم 4×3 (مخفي دائمًا — تستخدمه القائمة الدائرية فقط لقراءة الصلاحيات) -->
-    <div class="relative z-10 grid grid-cols-4 gap-4" style="width:640px; display:none;">
+    <!-- سطح المكتب الرئيسي — بطاقات دائمة الظهور -->
+    <div class="relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5" style="max-width:980px; width:100%;">
 
         <!-- نظام الاستجابة -->
         <button id="app_erg" onclick="window.openWin('winERG')"
