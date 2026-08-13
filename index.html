@@ -285,8 +285,6 @@ window.saveBasePricing = async () => {
     } catch(e) { window.showNotif('فشل الحفظ', 'error'); }
 };
 
-window.FEATURE_CATALOG = ['radar', 'pdfExport', 'cloud', 'dashboard'];
-
 // تحقق عام من صلاحية القائد لميزة معينة حسب باقته — المدير والعضو غير متأثرين
 window.checkFeatureAccess = (key) => {
     if (window.userRole !== 'leader') return true;
@@ -297,7 +295,18 @@ window.checkFeatureAccess = (key) => {
     return false;
 };
 
+window.renderPkgFeatCheckboxes = () => {
+    const box = document.getElementById('pkgFeatContainer');
+    if (!box) return;
+    box.innerHTML = window.FEATURE_CATALOG.map(f => `
+        <label class="flex items-center gap-2 text-xs text-slate-300 font-bold rounded-lg p-2" style="background:rgba(255,255,255,0.03);">
+            <input type="checkbox" id="pkgFeat_${f}" class="w-4 h-4"> ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
+        </label>
+    `).join('');
+};
+
 window.resetPackageForm = () => {
+    window.renderPkgFeatCheckboxes();
     document.getElementById('pkgEditId').value = '';
     document.getElementById('pkgTitle').value = '';
     document.getElementById('pkgBadge').value = '';
@@ -341,6 +350,7 @@ window.savePackageForm = async () => {
 window.editPackageStart = (id) => {
     const p = (window._adminPackagesCache || []).find(x => x.id === id);
     if (!p) return;
+    window.renderPkgFeatCheckboxes();
     document.getElementById('pkgEditId').value = p.id;
     document.getElementById('pkgTitle').value = p.title || '';
     document.getElementById('pkgBadge').value = p.badge || '';
@@ -382,7 +392,7 @@ window.renderAdminPackagesList = () => {
             <<div class="text-right">
                 <p class="text-white font-black text-sm">${p.title} ${p.featured ? '⭐' : ''}</p>
                 <p class="text-slate-500 text-[10px]">${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء — <span class="text-emerald-400 font-black">${p.price}$</span></p>
-                <p class="text-slate-600 text-[9px] mt-1">${window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => ({radar:'📍',pdfExport:'📄',cloud:'☁️',dashboard:'📊'}[f])).join(' ') || 'مزايا أساسية فقط'}</p>
+                <p class="text-slate-600 text-[9px] mt-1">${window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ') || 'مزايا أساسية فقط'}</p>
             </div>
         </div>
     `).join('');
@@ -1395,48 +1405,62 @@ window.sendEmergencyReport = async () => {
 
 
 window.renderSubTable = () => {
-    const t = document.getElementById('subTableBody'); 
+    const t = document.getElementById('subTableBody');
     if(!t) return;
-    
+
     t.innerHTML = window.subscribers.map(s => {
-        const docId = s.id; 
-        const displayKey = s.isEncrypted ? `<span id="key-display-${docId}" title="مشفر" class="text-emerald-400">🔒 ${s.subKey}</span>` : `<span id="key-display-${docId}">${s.subKey}</span>`;
-
-return `
-        <tr class='border-b border-white/5 hover:bg-white/5 transition-all'
-            data-expired="${s.expiryDate && new Date(s.expiryDate) < new Date() ? 'true' : 'false'}">
-
-            <td class='p-6 text-right font-bold text-white'>${s.ownerName}</td>
-            <td class='p-6 text-right font-mono text-rose-500 font-bold'>${displayKey}</td>
-            <td class='p-6 text-center text-emerald-500 font-black'>
-                ${s.maxMembers || 5} <span class="text-[10px] opacity-60 italic">أعضاء</span>
-            </td>
-            <td class='p-6 text-center text-emerald-400 font-black'>
-                ${s.pricePaid ? s.pricePaid + ' $' : '—'}
-            </td>
-            <td class='p-6 text-center'>
-                ${s.paymentStatus === 'paid' ? '<span class="text-[10px] px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-black">✅ مدفوع</span>'
-                  : s.paymentStatus === 'comp' ? '<span class="text-[10px] px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 font-black">🎁 مجاني</span>'
-                  : s.paymentStatus === 'pending' ? '<span class="text-[10px] px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 font-black">⏳ معلّق</span>'
-                  : '<span class="text-[10px] px-2 py-1 rounded-full bg-slate-500/20 text-slate-400 font-black">—</span>'}
-            </td>
-            <td class='p-6 text-center text-slate-400 text-xs font-bold'>
-                ${s.expiryDate || 'غير محدد'}
-            </td>
-            <td class='p-6'>
-                <div class='flex gap-2 justify-center items-center'>
-                    <button onclick="window.manageLeaderTeam('${docId}', '${s.ownerName}')" title="عرض وإدارة فريق هذا القائد" class="text-indigo-400 hover:scale-125 transition-transform text-2xl mr-2">👥</button>
-                    <button onclick="window.revealKey('sub','${docId}')" title="كشف الشفرة (OTP)" class="text-cyan-500 hover:scale-125 transition-transform text-xl">👁️</button>
-                    <button onclick="window.changeUserKey('sub','${docId}')" title="تغيير الشفرة" class="text-purple-500 hover:scale-125 transition-transform text-xl">🔑</button>
-                    <button onclick="window.startEditSub('${docId}')" title="تعديل البيانات" class="text-amber-500 hover:scale-125 transition-transform text-xl">✏️</button>
-                    <button onclick="window.resetDevice('sub','${docId}')" title="تصفير الجهاز" class="text-blue-500 hover:scale-125 transition-transform text-xl">🔄</button>
-                    <button onclick="window.deleteEntry('sub','${docId}')" title="حذف نهائي" class="text-red-500 hover:scale-125 transition-transform text-xl">🗑️</button>
-                </div>
-            </td>
-        </tr>`;
+        const docId = s.id;
+        const isExpired = s.expiryDate && new Date(s.expiryDate) < new Date();
+        const statusColor = s.paymentStatus === 'paid' ? 'emerald' : s.paymentStatus === 'comp' ? 'cyan' : s.paymentStatus === 'pending' ? 'amber' : 'slate';
+        return `
+        <div class="leader-card cursor-pointer rounded-2xl p-4 text-center transition-all hover:scale-105 hover:-translate-y-1"
+             data-expired="${isExpired ? 'true' : 'false'}"
+             onclick="window.openSubDetail('${docId}')"
+             style="background:linear-gradient(160deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.08); box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+            <div class="w-12 h-12 mx-auto mb-2 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(220,38,38,0.2),rgba(245,158,11,0.08)); border:1px solid rgba(245,158,11,0.3);">🎖️</div>
+            <p class="leader-name text-white font-black text-sm truncate">${s.ownerName}</p>
+            <span class="inline-block mt-2 text-[9px] px-2 py-0.5 rounded-full font-black bg-${statusColor}-500/20 text-${statusColor}-400">
+                ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+            </span>
+        </div>`;
     }).join('');
 };
 
+window.openSubDetail = (docId) => {
+    const s = window.subscribers.find(x => x.id === docId);
+    if (!s) return;
+
+    document.getElementById('subDetail_name').textContent = s.ownerName || '—';
+    const keyEl = document.getElementById('subDetail_key');
+    keyEl.innerHTML = s.isEncrypted ? `<span class="text-emerald-400">🔒 ${s.subKey}</span>` : (s.subKey || '—');
+    document.getElementById('subDetail_capacity').textContent = (s.maxMembers || 5) + ' أعضاء';
+    document.getElementById('subDetail_price').textContent = s.pricePaid ? s.pricePaid + ' $' : '—';
+
+    const statusEl = document.getElementById('subDetail_status');
+    if (s.paymentStatus === 'paid') { statusEl.textContent = '✅ مدفوع'; statusEl.className = 'font-black text-sm text-emerald-400'; }
+    else if (s.paymentStatus === 'comp') { statusEl.textContent = '🎁 مجاني'; statusEl.className = 'font-black text-sm text-cyan-400'; }
+    else if (s.paymentStatus === 'pending') { statusEl.textContent = '⏳ معلّق'; statusEl.className = 'font-black text-sm text-amber-400'; }
+    else { statusEl.textContent = '—'; statusEl.className = 'font-black text-sm text-slate-400'; }
+
+    document.getElementById('subDetail_validity').textContent = s.expiryDate || 'غير محدد';
+
+    document.getElementById('subDetail_btnTeam').onclick = () => window.manageLeaderTeam(docId, s.ownerName);
+    document.getElementById('subDetail_btnReveal').onclick = () => window.revealKey('sub', docId);
+    document.getElementById('subDetail_btnChangeKey').onclick = () => window.changeUserKey('sub', docId);
+    document.getElementById('subDetail_btnEdit').onclick = () => { window.closeSubDetailModal(); window.startEditSub(docId); };
+    document.getElementById('subDetail_btnReset').onclick = () => window.resetDevice('sub', docId);
+    document.getElementById('subDetail_btnDelete').onclick = () => { window.closeSubDetailModal(); window.deleteEntry('sub', docId); };
+
+    const modal = document.getElementById('subDetailModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+};
+
+window.closeSubDetailModal = () => {
+    const modal = document.getElementById('subDetailModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+};
 
 
 window.filterPayments = (query) => {
@@ -1666,18 +1690,53 @@ window.loadPayments = async () => {
     if (!list) return;
     const subs = window.subscribers || [];
     if (subs.length === 0) { list.innerHTML = '<p class="text-center text-slate-600 text-xs py-10">لا يوجد مشتركون</p>'; return; }
-    list.innerHTML = subs.map(s => `
-<div class="payment-item
-        <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
-            <div class="text-right">
-                <p class="text-white text-xs font-black">${s.ownerName}</p>
-                <p class="text-slate-500 text-[10px] font-mono">${s.subKey}</p>
-                <p class="text-slate-600 text-[10px]">ينتهي: ${s.expiryDate || 'غير محدد'}</p>
+    list.innerHTML = subs.map(s => {
+        const feats = s.features || null; // null = بدون قيود (كل المزايا متاحة — اشتراك يدوي)
+        const checksHtml = window.FEATURE_CATALOG.map(f => `
+            <label class="flex items-center gap-1.5 text-[10px] text-slate-300 font-bold">
+                <input type="checkbox" class="subFeatCheck" data-feat="${f}" ${(!feats || feats[f]) ? 'checked' : ''}>
+                ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
+            </label>
+        `).join('');
+        return `
+        <div class="rounded-xl border border-white/5 bg-white/3 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3">
+                <div class="text-right">
+                    <p class="text-white text-xs font-black">${s.ownerName}</p>
+                    <p class="text-slate-500 text-[10px] font-mono">${s.subKey}</p>
+                    <p class="text-slate-600 text-[10px]">ينتهي: ${s.expiryDate || 'غير محدد'}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${s.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}">
+                        ${s.status === 'active' ? '✅ نشط' : '⛔ منتهي'}
+                    </span>
+                    <button onclick="window.toggleSubFeaturesPanel('${s.id}')" class="text-[10px] px-2 py-1 rounded-lg font-black text-indigo-300" style="background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);">✏️ المزايا</button>
+                </div>
             </div>
-            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${s.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}">
-                ${s.status === 'active' ? '✅ نشط' : '⛔ منتهي'}
-            </span>
-        </div>`).join('');
+            <div id="subFeatPanel_${s.id}" class="hidden px-4 pb-3 pt-2 flex items-center flex-wrap gap-3" style="border-top:1px solid rgba(255,255,255,0.06);">
+                ${checksHtml}
+                <button onclick="window.saveSubscriberFeatures('${s.id}')" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-emerald-300 mr-auto" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">💾 حفظ</button>
+            </div>
+        </div>`;
+    }).join('');
+};
+
+window.toggleSubFeaturesPanel = (id) => {
+    document.getElementById('subFeatPanel_' + id)?.classList.toggle('hidden');
+};
+
+window.saveSubscriberFeatures = async (id) => {
+    const panel = document.getElementById('subFeatPanel_' + id);
+    if (!panel) return;
+    const features = {};
+    panel.querySelectorAll('.subFeatCheck').forEach(cb => { features[cb.dataset.feat] = cb.checked; });
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', id), { features });
+        window.showNotif('✅ تم تحديث مزايا هذا المشترك', 'success');
+        panel.classList.add('hidden');
+    } catch(e) {
+        window.showNotif('فشل الحفظ', 'error');
+    }
 };
 
 
@@ -1933,25 +1992,170 @@ window.updatePlanPrice = () => {
     }
 };
 
-// تعبئة قائمة القادة للمدير
+// تعبئة شبكة القادة الجانبية للمدير
 window.populateLeaderFilter = () => {
-    const sel = document.getElementById('leaderFilterSelect');
-    if (!sel) return;
-    const leaders = window.subscribers || [];
-    sel.innerHTML = '<option value="">-- اختر قائداً لعرض فريقه --</option>' +
-        leaders.map(l => `<option value="${l.id}">${l.ownerName}</option>`).join('');
+    window.renderLeaderSidebar();
 };
 
-// فلترة الأعضاء عند اختيار قائد
-window.filterTeamByLeader = () => {
-    const sel = document.getElementById('leaderFilterSelect');
-    window.currentViewingLeader = sel?.value || '';
+window.renderLeaderSidebar = () => {
+    const list = document.getElementById('leaderSidebarList');
+    if (!list) return;
+    const searchTerm = (document.getElementById('leaderSidebarSearch')?.value || '').trim().toLowerCase();
+    let leaders = window.subscribers || [];
+    if (searchTerm) {
+        leaders = leaders.filter(l => (l.ownerName || '').toLowerCase().includes(searchTerm));
+    }
+    if (leaders.length === 0) {
+        list.innerHTML = `<div class="text-center opacity-40 text-xs italic p-6">لا يوجد قادة</div>`;
+        return;
+    }
+    list.innerHTML = leaders.map(l => {
+        const count = (window.teamMembers || []).filter(m => m.parentKey === l.id).length;
+        const max = parseInt(l.maxMembers || 5);
+        const pct = max > 0 ? Math.min(100, Math.round((count / max) * 100)) : 0;
+        const barColor = pct >= 100 ? '#f43f5e' : pct >= 70 ? '#f59e0b' : '#10b981';
+        const active = window.currentViewingLeader === l.id;
+        return `
+        <button onclick="window.selectLeaderInSidebar('${l.id}')"
+            class="text-right rounded-xl p-3 transition-all border ${active ? 'border-indigo-400/60' : 'border-white/8'}"
+            style="background:${active ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.02)'};">
+            <p class="text-white text-xs font-black truncate">${l.ownerName}</p>
+            <div class="flex items-center gap-2 mt-2">
+                <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.08);">
+                    <div style="width:${pct}%; height:100%; background:${barColor};"></div>
+                </div>
+                <span class="text-[10px] font-mono text-slate-400 shrink-0">${count}/${max}</span>
+            </div>
+        </button>`;
+    }).join('');
+};
+
+// اختيار قائد من الشريط الجانبي
+window.selectLeaderInSidebar = (leaderId) => {
+    window.currentViewingLeader = leaderId;
+    const leader = (window.subscribers || []).find(s => s.id === leaderId);
+    const headerTitle = document.getElementById('teamWinTitle');
+    if (headerTitle && leader) {
+        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${leader.ownerName}</span>`;
+    }
+    document.getElementById('teamDetailEmptyState')?.classList.add('hidden');
+    document.getElementById('teamDetailEmptyState')?.classList.remove('flex');
+    document.getElementById('teamDetailContent')?.classList.remove('hidden');
+    document.getElementById('teamDetailContent')?.classList.add('flex');
+    window.renderLeaderSidebar();
     window.renderTeamTable();
 };
 
+// حساب مؤشرات القياس التنفيذية الإجمالية (كل القادة)
+window.renderTeamExecStats = () => {
+    const leaders = window.subscribers || [];
+    const members = window.teamMembers || [];
+    const leaderIds = new Set(leaders.map(l => l.id));
+    const totalLeaders = leaders.length;
+    const totalMembers = members.length;
+    const orphanMembers = members.filter(m => !leaderIds.has(m.parentKey));
+
+    let occSum = 0, fullCount = 0, emptyCount = 0;
+    leaders.forEach(l => {
+        const count = members.filter(m => m.parentKey === l.id).length;
+        const max = parseInt(l.maxMembers || 5);
+        const pct = max > 0 ? (count / max) * 100 : 0;
+        occSum += pct;
+        if (max > 0 && count >= max) fullCount++;
+        if (max > 0 && count <= max * 0.2) emptyCount++;
+    });
+    const avgOcc = totalLeaders > 0 ? Math.round(occSum / totalLeaders) : 0;
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('exec_stat_leaders', totalLeaders);
+    set('exec_stat_members', totalMembers);
+    set('exec_stat_occupancy', avgOcc + '%');
+    set('exec_stat_full', fullCount);
+    set('exec_stat_empty', emptyCount);
+
+    window._orphanMembersCache = orphanMembers;
+    set('exec_orphan_count', orphanMembers.length);
+    const badge = document.getElementById('exec_orphan_badge');
+    if (badge) {
+        if (orphanMembers.length > 0) badge.classList.remove('hidden');
+        else badge.classList.add('hidden');
+    }
+
+    // تحديث قائمة نافذة التنظيف تلقائيًا إذا كانت مفتوحة
+    const cleanupModal = document.getElementById('orphanCleanupModal');
+    if (cleanupModal && !cleanupModal.classList.contains('hidden')) {
+        window.renderOrphanCleanupList();
+    }
+};
+
+// فتح/إغلاق نافذة تنظيف الأعضاء المعلّقين
+window.openOrphanCleanupModal = () => {
+    window.renderOrphanCleanupList();
+    const modal = document.getElementById('orphanCleanupModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeOrphanCleanupModal = () => {
+    const modal = document.getElementById('orphanCleanupModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+};
+
+window.renderOrphanCleanupList = () => {
+    const list = document.getElementById('orphanCleanupList');
+    if (!list) return;
+    const orphans = window._orphanMembersCache || [];
+    const selectAll = document.getElementById('orphanSelectAll');
+    if (selectAll) selectAll.checked = false;
+    if (orphans.length === 0) {
+        list.innerHTML = `<div class="text-center opacity-40 text-xs italic p-8">لا يوجد أعضاء معلّقون حاليًا 🎉</div>`;
+        return;
+    }
+    list.innerHTML = orphans.map(m => `
+        <div class="flex items-center justify-between gap-3 rounded-xl p-3 border border-white/8" style="background:rgba(255,255,255,0.02);">
+            <input type="checkbox" class="orphanCheckbox" value="${m.id}">
+            <div class="flex-1 min-w-0 text-right">
+                <p class="text-white text-xs font-black truncate">${m.memberName || '—'}</p>
+                <p class="text-[10px] font-mono text-slate-500 truncate">${m.teamKey || m.id} — قائد مفقود: ${m.parentKey || '—'}</p>
+            </div>
+            <button onclick="window.deleteEntry('member','${m.id}')" title="حذف" class="text-red-400 text-sm hover:scale-110 transition-all">🗑️</button>
+        </div>
+    `).join('');
+};
+
+window.toggleAllOrphans = (checked) => {
+    document.querySelectorAll('.orphanCheckbox').forEach(cb => cb.checked = checked);
+};
+
+window.deleteSelectedOrphans = () => {
+    const ids = Array.from(document.querySelectorAll('.orphanCheckbox:checked')).map(cb => cb.value);
+    if (ids.length === 0) return window.showNotif('حدد عضوًا واحدًا على الأقل', 'error');
+    window.showConfirm(
+        "حذف نهائي جماعي ⚠️",
+        `سيتم حذف ${ids.length} عضو معلّق نهائيًا من قاعدة البيانات. هذه العملية لا يمكن التراجع عنها. هل أنت متأكد؟`,
+        async () => {
+            try {
+                for (const id of ids) {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', id));
+                }
+                window.showNotif(`✅ تم حذف ${ids.length} عضو معلّق`, 'success');
+            } catch (e) {
+                window.showNotif('فشل حذف بعض السجلات، تحقق من الصلاحيات', 'error');
+            }
+        }
+    );
+};
 
 
 window.filterTeamSearch = () => { window.renderTeamTable(); };
+
+window.refreshTeamData = () => {
+    if (window.userRole === 'master') {
+        window.populateLeaderFilter();
+        window.renderTeamExecStats();
+    }
+    window.renderTeamTable();
+    window.showNotif('✅ تم تحديث قائمة الفريق', 'success');
+};
 
 window.renderTeamTable = () => {
     const gridBody = document.getElementById('teamGridBody');
@@ -1992,7 +2196,10 @@ window.renderTeamTable = () => {
     });
 
     if (currentTeam.length === 0) {
-        gridBody.innerHTML = `<div class="col-span-full p-10 text-center opacity-30 italic">لا يوجد أعضاء مطابقين</div>`;
+        const emptyMsg = (window.userRole === 'master' && !targetLeader)
+            ? '👈 اختر قائداً من القائمة أعلاه لعرض أعضاء فريقه'
+            : 'لا يوجد أعضاء مطابقين';
+        gridBody.innerHTML = `<div class="col-span-full p-10 text-center opacity-40 italic">${emptyMsg}</div>`;
         return;
     }
 
@@ -2087,13 +2294,32 @@ window.showNotif(`تم اعتماد العضو ${name} بنجاح`, "success");
         if (addBtn) addBtn.classList.remove('hidden');
         if (updateBtn) updateBtn.classList.add('hidden');
 
+        window.closeMemberFormModal();
+
     } catch (e) {
         window.showNotif("فشل في حفظ البيانات سحابياً", "error");
     }
 };
 
+window.openAddMemberModal = () => {
+    window._editingMemberId = null;
+    document.getElementById('new_mn').value = '';
+    document.getElementById('new_mk').value = '';
 
+    const titleEl = document.getElementById('memberFormModalTitle');
+    if (titleEl) titleEl.textContent = '➕ إضافة عضو جديد';
+    document.getElementById('addMemBtn')?.classList.remove('hidden');
+    document.getElementById('updateMemBtn')?.classList.add('hidden');
 
+    const modal = document.getElementById('memberFormModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeMemberFormModal = () => {
+    const modal = document.getElementById('memberFormModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    window._editingMemberId = null;
+};
 
 
 
@@ -2211,6 +2437,22 @@ window.radialSections = [
     { app:'app_config', win:'winConfig', label:'أمان النظام', color:'#ea580c', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>' },
     { app:'app_dashboard', win:'winDashboard', label:'لوحة الإحصاء', color:'#8b5cf6', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>' }
 ];
+
+// ===== كتالوج المزايا الديناميكي — يُبنى تلقائيًا من قائمة تطبيقات سطح المكتب =====
+// أي تطبيق يُستحدث مستقبلاً ويُضاف لقائمة radialSections يصبح ميزة قابلة للتفعيل تلقائيًا بلا أي تعديل إضافي
+window.APP_FEATURE_KEY = { app_map: 'radar', app_cloud: 'cloud', app_dashboard: 'dashboard' }; // مفاتيح قديمة محفوظة للتوافق مع بيانات محفوظة سابقًا
+window.FEATURE_ICONS = { radar:'📍', pdfExport:'📄', cloud:'☁️', dashboard:'📊', erg:'🧯', reps:'📋', subs:'👥', team:'🤝', finance:'💰', import:'⬆️', config:'🔐' };
+
+window.FEATURE_APPS = window.radialSections.map(s => ({
+    app: s.app,
+    key: window.APP_FEATURE_KEY[s.app] || s.app.replace(/^app_/, ''),
+    label: s.label
+}));
+
+window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(['pdfExport']);
+
+window.FEATURE_LABELS = { pdfExport: 'تصدير تقارير PDF' };
+window.FEATURE_APPS.forEach(f => { window.FEATURE_LABELS[f.key] = f.label; });
 
 window.renderRadialMenu = () => {
     const grid = document.getElementById('bentoGrid');
@@ -2363,6 +2605,38 @@ window.toggleRadialMenu = () => {
 // المتغير الذي سيحفظ القائد الذي يستعرضه المدير حالياً
 window.currentViewingLeader = null;
 
+// فتح شاشة إدارة الفريق مباشرة (من الأيقونة الرئيسية، بدون تحديد قائد مسبق)
+window.openTeamWinDirect = () => {
+    if (window.userRole === 'master') {
+        // المدير: يشوف شريط القياس + شبكة القادة، ويختار قائداً
+        window.currentViewingLeader = '';
+        const headerTitle = document.getElementById('teamWinTitle');
+        if (headerTitle) headerTitle.innerHTML = 'إدارة الفريق';
+
+        document.getElementById('leaderSidebarCol')?.classList.remove('hidden');
+        document.getElementById('leaderSidebarCol')?.classList.add('flex');
+        document.getElementById('teamExecStatsBar')?.classList.remove('hidden');
+        document.getElementById('teamExecStatsBar')?.classList.add('grid');
+        window.renderTeamExecStats();
+        window.populateLeaderFilter();
+
+        document.getElementById('teamDetailContent')?.classList.add('hidden');
+        document.getElementById('teamDetailContent')?.classList.remove('flex');
+        document.getElementById('teamDetailEmptyState')?.classList.remove('hidden');
+        document.getElementById('teamDetailEmptyState')?.classList.add('flex');
+    } else {
+        // القائد: يرى فريقه هو فقط مباشرة، بدون شريط قياس ولا شبكة قادة
+        window.currentViewingLeader = window.activeKey;
+        document.getElementById('leaderSidebarCol')?.classList.add('hidden');
+        document.getElementById('teamExecStatsBar')?.classList.add('hidden');
+        document.getElementById('teamDetailEmptyState')?.classList.add('hidden');
+        document.getElementById('teamDetailContent')?.classList.remove('hidden');
+        document.getElementById('teamDetailContent')?.classList.add('flex');
+    }
+    window.openWin('winTeam');
+    window.renderTeamTable();
+};
+
 // دالة فتح فريق قائد محدد
 window.manageLeaderTeam = (leaderId, leaderName) => {
     // المدير فقط يستطيع رؤية فريق قائد آخر
@@ -2378,18 +2652,23 @@ window.manageLeaderTeam = (leaderId, leaderName) => {
     if (headerTitle) {
         headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${leaderName}</span>`;
     }
-    
-    // إظهار فلتر القائد للمدير فقط
-    const filterRow = document.getElementById('leaderFilterRow');
+
     if (window.userRole === 'master') {
-        filterRow?.classList.remove('hidden');
+        document.getElementById('leaderSidebarCol')?.classList.remove('hidden');
+        document.getElementById('leaderSidebarCol')?.classList.add('flex');
+        document.getElementById('teamExecStatsBar')?.classList.remove('hidden');
+        document.getElementById('teamExecStatsBar')?.classList.add('grid');
+        window.renderTeamExecStats();
         window.populateLeaderFilter();
-        // ضبط القائمة المنسدلة على القائد المختار تلقائياً
-        const sel = document.getElementById('leaderFilterSelect');
-        if (sel) sel.value = leaderId;
     } else {
-        filterRow?.classList.add('hidden');
+        document.getElementById('leaderSidebarCol')?.classList.add('hidden');
+        document.getElementById('teamExecStatsBar')?.classList.add('hidden');
     }
+
+    document.getElementById('teamDetailEmptyState')?.classList.add('hidden');
+    document.getElementById('teamDetailContent')?.classList.remove('hidden');
+    document.getElementById('teamDetailContent')?.classList.add('flex');
+
     window.openWin('winTeam');
     window.renderTeamTable();
 };
@@ -2671,6 +2950,71 @@ window.updateSubPriceLive = () => {
 };
 
 
+window.loadPackagesForAdminAdd = async () => {
+    const sel = document.getElementById('new_lpackageSelect');
+    if (!sel) return;
+    try {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'packages'));
+        window._adminAddPackagesCache = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.active !== false);
+        sel.innerHTML = '<option value="">-- بدون باقة (حدد المزايا يدويًا) --</option>' +
+            window._adminAddPackagesCache.map(p => `<option value="${p.id}">${p.title} (${p.price}$)</option>`).join('');
+    } catch (e) {}
+};
+
+window.renderNewLeaderFeatCheckboxes = () => {
+    const box = document.getElementById('new_lfeatContainer');
+    if (!box) return;
+    box.innerHTML = window.FEATURE_CATALOG.map(f => `
+        <label class="flex items-center gap-1 text-[10px] text-slate-300 font-bold"><input type="checkbox" id="new_lfeat_${f}"> ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}</label>
+    `).join('');
+};
+
+window.openAddSubModal = () => {
+    window._editingSubId = null;
+    ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const lmax = document.getElementById('new_lmax');
+    if (lmax) lmax.value = '5';
+    document.getElementById('customMembersSubRow')?.classList.add('hidden');
+    const payStatusSel = document.getElementById('new_lpaystatus');
+    if (payStatusSel) payStatusSel.value = 'paid';
+    const payMethodSel = document.getElementById('new_lpaymethod');
+    if (payMethodSel) payMethodSel.value = 'CliQ';
+    const pkgSel = document.getElementById('new_lpackageSelect');
+    if (pkgSel) pkgSel.value = '';
+    window.renderNewLeaderFeatCheckboxes();
+    window.FEATURE_CATALOG.forEach(f => {
+        const cb = document.getElementById('new_lfeat_' + f);
+        if (cb) cb.checked = false;
+    });
+    window.updateSubPriceLive();
+
+    const titleEl = document.getElementById('subFormModalTitle');
+    if (titleEl) titleEl.textContent = '➕ إضافة قائد جديد';
+    document.getElementById('addSubBtn')?.classList.remove('hidden');
+    document.getElementById('updateSubBtn')?.classList.add('hidden');
+
+    const modal = document.getElementById('subFormModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeSubFormModal = () => {
+    const modal = document.getElementById('subFormModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    window._editingSubId = null;
+};
+
+window.applyPackageToNewLeaderForm = () => {
+    const sel = document.getElementById('new_lpackageSelect');
+    const p = (window._adminAddPackagesCache || []).find(x => x.id === sel?.value);
+    window.FEATURE_CATALOG.forEach(f => {
+        const cb = document.getElementById('new_lfeat_' + f);
+        if (cb) cb.checked = !!(p && p.features && p.features[f]);
+    });
+};
+
 window.addNewSub = async () => {
     const n = document.getElementById('new_ln').value, 
           plainKey = document.getElementById('new_lk').value, 
@@ -2691,6 +3035,9 @@ window.addNewSub = async () => {
         const hashedKey = await hashInput(plainKey, MASTER_SALT);
         const maskedKey = plainKey.substring(0, 4) + "***" + plainKey.slice(-2);
 
+        const features = {};
+        window.FEATURE_CATALOG.forEach(f => { features[f] = document.getElementById('new_lfeat_' + f)?.checked || false; });
+
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hashedKey);
         await setDoc(ref, { 
             ownerName: n, 
@@ -2704,6 +3051,7 @@ window.addNewSub = async () => {
             status: 'active',
             expiryDate: ex, 
             maxMembers: members, 
+            features: features,
             updatedAt: Date.now() 
         }, { merge: true });
 
@@ -2725,6 +3073,8 @@ window.addNewSub = async () => {
         const updateBtn = document.getElementById('updateSubBtn');
         if (addBtn) addBtn.classList.remove('hidden');
         if (updateBtn) updateBtn.classList.add('hidden');
+
+        window.closeSubFormModal();
 
     } catch (err) { 
         window.showNotif("فشل في المزامنة السحابية", "error"); 
@@ -3034,16 +3384,12 @@ setTimeout(() => {
             radial-gradient(ellipse at 100% 50%, rgba(6, 182, 212, 0.12) 0%, transparent 40%),
             linear-gradient(160deg, #071a10 0%, #0a1f14 40%, #071a10 100%)`;
 
-// إظهار أيقونات القائد — الأساسيات دائمًا + المزايا حسب باقة القائد
-        ['app_erg', 'app_reps', 'app_team'].forEach(id => {
-            const el = document.getElementById(id);
-            if(el) el.style.display = 'flex';
-        });
+// إظهار أيقونات القائد بالكامل حسب مزايا باقته — كل تطبيق (حالي أو مستقبلي) مرتبط تلقائيًا بميزة
         const feats = window.myFeatures; // null = اشتراك يدوي = كل المزايا متاحة
         const hasFeature = (key) => !feats || feats[key] === true;
-        [['app_map','radar'], ['app_cloud','cloud'], ['app_dashboard','dashboard']].forEach(([appId, featKey]) => {
-            const el = document.getElementById(appId);
-            if (el) el.style.display = hasFeature(featKey) ? 'flex' : 'none';
+        window.FEATURE_APPS.forEach(f => {
+            const el = document.getElementById(f.app);
+            if (el) el.style.display = hasFeature(f.key) ? 'flex' : 'none';
         });
 
         if(b) {
@@ -3696,6 +4042,8 @@ const filteredReports = window.userRole === 'master'
     onSnapshot(teamQuery, (snapshot) => {
         window.teamMembers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (window.renderTeamTable) window.renderTeamTable();
+        if (window.renderTeamExecStats) window.renderTeamExecStats();
+        if (window.renderLeaderSidebar) window.renderLeaderSidebar();
     });
 
     // 5. مزامنة المشتركين (للمدير فقط)
@@ -4297,25 +4645,49 @@ window.updateSub = async () => {
 
     const n = document.getElementById('new_ln')?.value.trim();
     const ex = document.getElementById('new_lexp')?.value;
-    const max = parseInt(document.getElementById('new_lmax')?.value || 5);
+    const maxSel = document.getElementById('new_lmax');
+    const max = maxSel?.value === 'custom'
+        ? (parseInt(document.getElementById('new_lmax_custom')?.value) || 5)
+        : (parseInt(maxSel?.value) || 5);
 
     if (!n) return window.showNotif("أدخل اسم القائد", "error");
+
+    const payStatus = document.getElementById('new_lpaystatus')?.value || 'paid';
+    const payMethod = document.getElementById('new_lpaymethod')?.value || '-';
+    const price = calcPrice(max, 1);
+
+    const features = {};
+    window.FEATURE_CATALOG.forEach(f => { features[f] = document.getElementById('new_lfeat_' + f)?.checked || false; });
 
     try {
         await updateDoc(
             doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', docId),
-            { ownerName: n, expiryDate: ex, maxMembers: max, updatedAt: Date.now() }
+            { 
+                ownerName: n, 
+                expiryDate: ex, 
+                maxMembers: max, 
+                paymentStatus: payStatus,
+                paymentMethod: payMethod,
+                isPaid: payStatus === 'paid' || payStatus === 'comp',
+                pricePaid: price,
+                features: features,
+                updatedAt: Date.now() 
+            }
         );
+        window.logActivity('subscription_payment', `تعديل بيانات قائد: ${n} — ${max} أعضاء — ${price}$ (${payMethod}) — الحالة: ${payStatus}`);
         window.showNotif(`✅ تم تحديث بيانات: ${n}`, "success");
         window._editingSubId = null;
-        ['new_ln', 'new_lk', 'new_lexp'].forEach(id => {
+        ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
         const lmax = document.getElementById('new_lmax');
         if (lmax) lmax.value = '5';
+        document.getElementById('customMembersSubRow')?.classList.add('hidden');
+        window.updateSubPriceLive?.();
         document.getElementById('addSubBtn')?.classList.remove('hidden');
         document.getElementById('updateSubBtn')?.classList.add('hidden');
+        window.closeSubFormModal();
     } catch (e) {
         window.showNotif("فشل في التحديث السحابي", "error");
         console.error(e);
@@ -4341,6 +4713,7 @@ window.updateMember = async () => {
         document.getElementById('new_mk').value = '';
         document.getElementById('addMemBtn')?.classList.remove('hidden');
         document.getElementById('updateMemBtn')?.classList.add('hidden');
+        window.closeMemberFormModal();
     } catch (e) {
         window.showNotif("فشل في التحديث السحابي", "error");
         console.error(e);
@@ -4362,14 +4735,55 @@ window.startEditSub = (k) => {
         document.getElementById('new_ln').value = s.ownerName; 
         document.getElementById('new_lk').value = s.subKey;
         document.getElementById('new_lexp').value = s.expiryDate; 
-        
+
+        // تعبئة عدد الأعضاء (قياسي أو مخصص)
+        const maxSel = document.getElementById('new_lmax');
+        const customRow = document.getElementById('customMembersSubRow');
+        const customInput = document.getElementById('new_lmax_custom');
+        const stdValues = ['5', '10', '20'];
+        const currentMax = String(s.maxMembers || 5);
+        if (maxSel) {
+            if (stdValues.includes(currentMax)) {
+                maxSel.value = currentMax;
+                customRow?.classList.add('hidden');
+            } else {
+                maxSel.value = 'custom';
+                customRow?.classList.remove('hidden');
+                if (customInput) customInput.value = currentMax;
+            }
+        }
+
+        // تعبئة حالة وطريقة الدفع الحاليتين
+        const payStatusSel = document.getElementById('new_lpaystatus');
+        if (payStatusSel) payStatusSel.value = s.paymentStatus || 'paid';
+        const payMethodSel = document.getElementById('new_lpaymethod');
+        if (payMethodSel) payMethodSel.value = s.paymentMethod || '-';
+
+        // تصفير اختيار الباقة الجاهزة (التعديل يدوي دائمًا، الباقة غير مرتبطة دائمًا بالقائد)
+        const pkgSel = document.getElementById('new_lpackageSelect');
+        if (pkgSel) pkgSel.value = '';
+
+        // تعبئة مربعات المزايا حسب الحالة المحفوظة فعليًا لهذا القائد (بلا قيود = الكل مفعّل)
+        window.renderNewLeaderFeatCheckboxes();
+        window.FEATURE_CATALOG.forEach(f => {
+            const cb = document.getElementById('new_lfeat_' + f);
+            if (cb) cb.checked = !s.features || s.features[f] === true;
+        });
+
+        window.updateSubPriceLive();
+
+        const titleEl = document.getElementById('subFormModalTitle');
+        if (titleEl) titleEl.textContent = '✏️ تعديل بيانات القائد: ' + s.ownerName;
+
         const addBtn = document.getElementById('addSubBtn');
         if(addBtn) addBtn.classList.add('hidden');
         const updateBtn = document.getElementById('updateSubBtn');
         if(updateBtn) updateBtn.classList.remove('hidden');
+
+        const modal = document.getElementById('subFormModal');
+        if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
         
-        window.showNotif("تنبيه: لا يمكن تعديل الشفرة، يمكنك تعديل البيانات الأخرى فقط", "info"); 
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.showNotif("تنبيه: لا يمكن تعديل الشفرة، يمكنك تعديل بقية البيانات والمزايا ثم الضغط تحديث", "info"); 
     } 
 };
 
@@ -4381,16 +4795,20 @@ window.startEditMember = (k) => {
         document.getElementById('new_mn').value = m.memberName; 
         document.getElementById('new_mk').value = m.teamKey;
 
+        const titleEl = document.getElementById('memberFormModalTitle');
+        if (titleEl) titleEl.textContent = '✏️ تعديل بيانات العضو: ' + m.memberName;
+
         const addBtn = document.getElementById('addMemBtn');
         if(addBtn) addBtn.classList.add('hidden');
         const updateBtn = document.getElementById('updateMemBtn');
         if(updateBtn) updateBtn.classList.remove('hidden');
+
+        const modal = document.getElementById('memberFormModal');
+        if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
         
         window.showNotif("تنبيه: لا يمكن تعديل الشفرة، يمكنك تعديل الاسم فقط", "info"); 
-        window.scrollTo({ top: 0, behavior: 'smooth' }); 
     } 
 };
-
 
 
 // --- بروتوكول القفل التلقائي (Auto-Lock Protocol) ---
@@ -5206,23 +5624,23 @@ window.initAutoLock = () => {
 window.filterSubs = () => {
     const query = document.getElementById('subSearchInput')?.value.trim().toLowerCase() || '';
     const status = document.getElementById('subStatusFilter')?.value || 'all';
-    const rows = document.querySelectorAll('#subTableBody tr');
+    const cards = document.querySelectorAll('#subTableBody .leader-card');
     let visible = 0, active = 0, expired = 0;
-    rows.forEach(row => {
-        const name = row.querySelector('td:first-child')?.textContent?.toLowerCase() || '';
-        const isExpired = row.dataset.expired === 'true';
+    cards.forEach(card => {
+        const name = card.querySelector('.leader-name')?.textContent?.toLowerCase() || '';
+        const isExpired = card.dataset.expired === 'true';
         const matchName = !query || name.includes(query);
         const matchStatus = status === 'all' ||
             (status === 'active' && !isExpired) ||
             (status === 'expired' && isExpired);
-        row.style.display = (matchName && matchStatus) ? '' : 'none';
+        card.style.display = (matchName && matchStatus) ? '' : 'none';
         if (matchName && matchStatus) visible++;
         if (!isExpired) active++; else expired++;
     });
     const empty = document.getElementById('subEmptyMsg');
     if (empty) empty.classList.toggle('hidden', visible > 0);
     // تحديث الإحصائيات
-    const total = rows.length;
+    const total = cards.length;
     const sa = document.getElementById('subs_stat_active');
     const se = document.getElementById('subs_stat_expired');
     const st = document.getElementById('subs_stat_total');
@@ -5230,8 +5648,6 @@ window.filterSubs = () => {
     if (se) se.textContent = expired;
     if (st) st.textContent = total;
 };
-
-
 
 
 
@@ -6020,6 +6436,13 @@ window.refreshDashboard = async () => {
 const _origOpenWin = window.openWin;
 window.openWin = (id) => {
     _origOpenWin(id);
+if (id === 'winSubs') {
+        setTimeout(window.renderNewLeaderFeatCheckboxes, 150);
+        setTimeout(window.loadPackagesForAdminAdd, 200);
+    }
+if (id === 'winFinance') {
+        setTimeout(window.renderPkgFeatCheckboxes, 150);
+    }
 if (id === 'winDashboard') {
         setTimeout(window.refreshDashboard, 200);
         setTimeout(() => {
@@ -6076,6 +6499,55 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+
+// ===== نظام قفل الخمول — يُفعَّل بعد ساعتين من عدم التفاعل =====
+window._idleTimeoutMs = 2 * 60 * 60 * 1000; // ساعتان
+window._idleTimer = null;
+
+window.resetIdleTimer = () => {
+    if (!document.body.classList.contains('desktop-active')) return; // يعمل فقط بعد تسجيل الدخول
+    if (!document.getElementById('idleLockScreen')?.classList.contains('hidden')) return; // متوقف أثناء القفل نفسه
+    clearTimeout(window._idleTimer);
+    window._idleTimer = setTimeout(window.triggerIdleLock, window._idleTimeoutMs);
+};
+
+window.triggerIdleLock = () => {
+    document.getElementById('idleLockScreen')?.classList.remove('hidden');
+};
+
+window.idleUnlock = async () => {
+    const input = document.getElementById('idleUnlockInput');
+    const msg = document.getElementById('idleUnlockMsg');
+    const raw = input?.value.trim();
+    if (!raw) return;
+    if (msg) { msg.textContent = 'جاري التحقق...'; msg.style.color = '#94a3b8'; }
+
+    try {
+        if (window.userRole === 'master') {
+            const inputHash = await hashInput(raw, MASTER_SALT);
+            if (inputHash !== MASTER_HASH) { if(msg){msg.textContent='⛔ كلمة مرور خاطئة'; msg.style.color='#ef4444';} return; }
+        } else {
+            const prefix = (window.userRole === 'leader') ? 'LDR-' : 'MEM-';
+            const key = raw.toUpperCase().startsWith(prefix) ? raw.toUpperCase() : (prefix + raw.toUpperCase());
+            const inputHash = await hashInput(key, MASTER_SALT);
+            if (inputHash !== window.activeKey && key !== window.activeKey) {
+                if(msg){msg.textContent='⛔ الرمز لا يطابق الحساب الحالي'; msg.style.color='#ef4444';}
+                return;
+            }
+        }
+        document.getElementById('idleLockScreen')?.classList.add('hidden');
+        if (input) input.value = '';
+        if (msg) msg.textContent = '';
+        window.resetIdleTimer();
+        window.showNotif('✅ تم فتح القفل — أهلاً بعودتك', 'success');
+    } catch(e) {
+        if (msg) { msg.textContent = '⛔ حدث خطأ، حاول مجدداً'; msg.style.color = '#ef4444'; }
+    }
+};
+
+['mousemove','keydown','click','touchstart','scroll'].forEach(evt => {
+    document.addEventListener(evt, window.resetIdleTimer, { passive: true });
+});
 
 window.goHome = async () => { // تمت إضافة async هنا
     const fullLogout = () => {
@@ -7564,9 +8036,37 @@ body.desktop-active {
 #winGuide {
     background: linear-gradient(160deg, #0d1a2e 0%, #0a1020 100%) !important;
 }
-#winSubs {
-    background: linear-gradient(160deg, #1a0d0d 0%, #1f0f0f 50%, #1a0d0d 100%) !important;
+/* ===== خلفية كريستالية زرقاء متحركة — إدارة القادة ===== */
+@keyframes crystalShift {
+    0%   { background-position: 0% 0%, 100% 100%, 50% 50%; }
+    50%  { background-position: 100% 100%, 0% 0%, 60% 40%; }
+    100% { background-position: 0% 0%, 100% 100%, 50% 50%; }
 }
+@keyframes crystalShimmer {
+    0%   { opacity: 0.15; transform: translateX(-30%) rotate(8deg); }
+    50%  { opacity: 0.4;  transform: translateX(30%) rotate(8deg); }
+    100% { opacity: 0.15; transform: translateX(-30%) rotate(8deg); }
+}
+#winSubs {
+    background:
+        radial-gradient(ellipse at 15% 20%, rgba(125,211,252,0.24) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 80%, rgba(56,189,248,0.20) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(191,219,254,0.12) 0%, transparent 60%),
+        linear-gradient(160deg, #071a2e 0%, #0c2745 45%, #0a2038 100%) !important;
+    background-size: 200% 200%, 200% 200%, 150% 150%, 100% 100% !important;
+    animation: crystalShift 14s ease-in-out infinite !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+#winSubs::before {
+    content: '';
+    position: absolute; inset: -50%;
+    background: linear-gradient(115deg, transparent 35%, rgba(186,230,253,0.14) 48%, rgba(224,242,254,0.26) 50%, rgba(186,230,253,0.14) 52%, transparent 65%);
+    animation: crystalShimmer 6s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+#winSubs > * { position: relative; z-index: 1; }
 
 
 
@@ -7627,6 +8127,26 @@ input:focus, select:focus, textarea:focus {
 
 #winTeam {
     background: linear-gradient(160deg, #071a10 0%, #0a1f14 50%, #071a10 100%) !important;
+}
+.team-stat-card {
+    position: relative;
+    overflow: hidden;
+    transition: all .25s cubic-bezier(.4,0,.2,1);
+}
+.team-stat-card::before {
+    content: '';
+    position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(245,158,11,0.3), rgba(255,255,255,0.45), rgba(245,158,11,0.3), transparent);
+}
+.team-stat-card:hover {
+    transform: translateY(-3px);
+    filter: brightness(1.08);
+}
+.erg-input {
+    transition: all .22s cubic-bezier(.4,0,.2,1) !important;
+}
+.erg-input:focus {
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.18) !important;
 }
 #publicPackagesRow {
     display: flex; align-items: flex-end; justify-content: center;
@@ -7948,6 +8468,214 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 }
 #radialLines { transition: transform .4s ease-out; }
 .erg-energy-line { transition: stroke-opacity .6s ease; }
+/* ============================================================
+   🔮 التصميم الكريستالي المتحرك الجديد لكل واجهات التطبيق
+   (ينطبق تلقائيًا على كل النوافذ app-window، ولا يمس سطح المكتب أو شاشة الدخول)
+   ============================================================ */
+.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(16, 185, 129, 0.16) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(99, 102, 241, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(6, 182, 212, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(168, 85, 247, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #0a1120 0%, #0d1b2e 30%, #101a2b 60%, #0c0f1e 100%) !important;
+    background-size: 220% 220%, 220% 220%, 220% 220%, 220% 220%, 100% 100%;
+    animation: crystalShift 22s ease-in-out infinite;
+}
+
+@keyframes crystalShift {
+    0%   { background-position: 0% 0%, 100% 100%, 100% 0%,  0% 100%, 0 0; }
+    50%  { background-position: 100% 100%, 0% 0%, 0% 100%, 100% 0%, 0 0; }
+    100% { background-position: 0% 0%, 100% 100%, 100% 0%,  0% 100%, 0 0; }
+}
+
+/* شبكة كريستالية زجاجية خفيفة خلف المحتوى */
+.app-window::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+        linear-gradient(rgba(148, 210, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 210, 255, 0.035) 1px, transparent 1px);
+    background-size: 55px 55px;
+}
+
+/* توهج فخم متحرك خلف المحتوى */
+.app-window::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% -10%, rgba(16, 185, 129, 0.12) 0%, transparent 55%);
+    animation: crystalGlow 6s ease-in-out infinite;
+}
+@keyframes crystalGlow {
+    0%, 100% { opacity: 0.4; }
+    50%      { opacity: 1; }
+}
+
+
+
+
+/* ============================================================
+   🎨 هوية لونية مستقلة لكل واجهة (باستثناء نظام الاستجابة winERG)
+   ============================================================ */
+#winImport.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(6, 182, 212, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(37, 99, 235, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(14, 165, 233, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(8, 145, 178, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #071620 0%, #0a1c2e 30%, #0b1622 60%, #060d14 100%) !important;
+}
+#winConfig.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(100, 116, 139, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(99, 102, 241, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(148, 163, 184, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(79, 70, 229, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #12141c 0%, #171a26 30%, #12141d 60%, #0b0c12 100%) !important;
+}
+#winFinance.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(245, 158, 11, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(16, 185, 129, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(234, 179, 8, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(5, 150, 105, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #1a1406 0%, #1c1a0d 30%, #14170f 60%, #0d0f0a 100%) !important;
+}
+#winSubs.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(139, 92, 246, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(217, 70, 239, 0.16) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(168, 85, 247, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(192, 38, 211, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #170a24 0%, #1d0f2c 30%, #150c20 60%, #0d0714 100%) !important;
+}
+#winTeam.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(16, 185, 129, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(20, 184, 166, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(5, 150, 105, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(13, 148, 136, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #06180f 0%, #0a1f16 30%, #081712 60%, #050f0b 100%) !important;
+}
+#winReports.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(245, 158, 11, 0.18) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(244, 63, 94, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(251, 146, 60, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(225, 29, 72, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #1c0e08 0%, #200f10 30%, #170a0c 60%, #0f0706 100%) !important;
+}
+#winMap.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(6, 182, 212, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(20, 184, 166, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(45, 212, 191, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(8, 145, 178, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #061a1a 0%, #0a1f1e 30%, #081715 60%, #050e0e 100%) !important;
+}
+#winCloud.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(245, 158, 11, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(249, 115, 22, 0.16) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(234, 179, 8, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(217, 119, 6, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #1c1206 0%, #201509 30%, #170f07 60%, #0f0a05 100%) !important;
+}
+#winDashboard.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(99, 102, 241, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(139, 92, 246, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(129, 140, 248, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(109, 40, 217, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #0e0d21 0%, #131029 30%, #0f0d1f 60%, #090714 100%) !important;
+}
+#winGuide.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(59, 130, 246, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(6, 182, 212, 0.16) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(96, 165, 250, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(8, 145, 178, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #0a1424 0%, #0d192c 30%, #0a1420 60%, #060c14 100%) !important;
+}
+#winPayment.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(234, 179, 8, 0.22) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(245, 158, 11, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(250, 204, 21, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(217, 119, 6, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #1c1605 0%, #201a09 30%, #171207 60%, #0f0c05 100%) !important;
+}
+#winOrderTracking.app-window {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(20, 184, 166, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(16, 185, 129, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(45, 212, 191, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(5, 150, 105, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #071a16 0%, #0a1f1a 30%, #081714 60%, #050f0c 100%) !important;
+}
+
+/* ============================================================
+   🚨 توسيع نفس النظام الكريستالي ليشمل نوافذ لا تحمل app-window
+   (بلاغ طارئ، المحادثة، ماسح الباركود) دون المساس بـ winERG
+   ============================================================ */
+#winEmergencyReport, #winChat, #barcodeScannerModal {
+    animation: crystalShift 22s ease-in-out infinite;
+    background-size: 220% 220%, 220% 220%, 220% 220%, 220% 220%, 100% 100% !important;
+    position: fixed;
+}
+#winEmergencyReport {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(220, 38, 38, 0.24) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(244, 63, 94, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(239, 68, 68, 0.14) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(185, 28, 28, 0.12) 0%, transparent 45%),
+        linear-gradient(160deg, #1f0808 0%, #260a0a 30%, #180707 60%, #0f0505 100%) !important;
+}
+#winChat {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(37, 99, 235, 0.20) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(79, 70, 229, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(59, 130, 246, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(67, 56, 202, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #0a0f21 0%, #0d1329 30%, #0a0d1f 60%, #060714 100%) !important;
+}
+#barcodeScannerModal {
+    background:
+        radial-gradient(ellipse at 15% 0%,  rgba(6, 182, 212, 0.22) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 100%, rgba(14, 165, 233, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 10%, rgba(34, 211, 238, 0.12) 0%, transparent 42%),
+        radial-gradient(ellipse at 0% 90%,   rgba(8, 145, 178, 0.10) 0%, transparent 45%),
+        linear-gradient(160deg, #071820 0%, #0a1e28 30%, #08151d 60%, #050d12 100%) !important;
+}
+#winEmergencyReport::before, #winChat::before, #barcodeScannerModal::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+        linear-gradient(rgba(148, 210, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 210, 255, 0.035) 1px, transparent 1px);
+    background-size: 55px 55px;
+}
+#winEmergencyReport::after, #winChat::after, #barcodeScannerModal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% -10%, rgba(255, 255, 255, 0.06) 0%, transparent 55%);
+    animation: crystalGlow 6s ease-in-out infinite;
+}
+
+
+
 </style>
 
 
@@ -7964,7 +8692,25 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
             <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
         </svg>
     </button>
-    <span id="radialTriggerLabel">الرئيسية</span>
+    <<span id="radialTriggerLabel">الرئيسية</span>
+</div>
+
+<div id="idleLockScreen" class="hidden fixed inset-0 z-[999999] flex items-center justify-center p-4" style="background:rgba(0,0,0,0.92); backdrop-filter:blur(20px);">
+    <div class="w-full max-w-sm text-center space-y-5 p-8 rounded-[2.5rem]" style="background:rgba(15,17,28,0.92); border:1px solid rgba(255,255,255,0.12); box-shadow:0 30px 70px rgba(0,0,0,0.6);">
+        <div class="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto" style="background:linear-gradient(145deg,#dc2626,#7f1d1d); box-shadow:0 10px 30px rgba(220,38,38,0.4);">
+            <span class="text-4xl">🔒</span>
+        </div>
+        <div>
+            <h3 class="text-white font-black text-xl italic">تم قفل الجلسة بسبب الخمول</h3>
+            <p class="text-slate-400 text-xs font-bold mt-1">أدخل رمز الوصول الخاص بك للمتابعة من حيث توقفت تمامًا</p>
+        </div>
+        <input type="text" id="idleUnlockInput" placeholder="رمز الوصول..." dir="ltr"
+            class="w-full bg-black/50 border border-white/10 p-4 rounded-2xl text-center text-white outline-none focus:border-rose-500 text-lg font-mono">
+        <p id="idleUnlockMsg" class="text-rose-400 text-xs font-bold min-h-[16px]"></p>
+        <button onclick="window.idleUnlock()" class="w-full py-4 rounded-2xl font-black text-white text-sm uppercase italic transition-all active:scale-95" style="background:linear-gradient(135deg,#dc2626,#991b1b); box-shadow:0 8px 25px rgba(220,38,38,0.35);">
+            فتح القفل ←
+        </button>
+    </div>
 </div>
 
 <div id="radialOverlay" class="hidden" onclick="if(event.target===this) window.toggleRadialMenu()">
@@ -8893,6 +9639,19 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     <!-- سطح المكتب الرئيسي — بطاقات دائمة الظهور -->
     <div class="relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5" style="max-width:980px; width:100%;">
 
+
+
+        <!-- لوحة الإحصاء -->
+        <button id="app_dashboard" onclick="window.openWin('winDashboard')"
+            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.25);height:140px;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(139,92,246,0.2);">
+                <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+            </div>
+            <span class="text-white text-xs font-black text-center">لوحة الإحصاء</span>
+        </button>
+
+
         <!-- نظام الاستجابة -->
         <button id="app_erg" onclick="window.openWin('winERG')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
@@ -8914,13 +9673,23 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         </button>
 
         <!-- إدارة الفريق -->
-        <button id="app_team" onclick="window.openWin('winTeam')"
+        <button id="app_team" onclick="window.openTeamWinDirect()"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(79,70,229,0.1);border:1px solid rgba(79,70,229,0.25);height:140px;">
             <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(79,70,229,0.2);">
                 <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">إدارة الفريق</span>
+        </button>
+
+<!-- بلاغ طارئ — للعضو فقط -->
+        <button id="app_emergency" onclick="window.openEmergencyReport()"
+            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="display:none; background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.4);height:140px; animation:pulse 2s infinite;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(220,38,38,0.2);">
+                <span style="font-size:1.5rem;">🚨</span>
+            </div>
+            <span class="text-rose-400 text-xs font-black text-center">بلاغ طارئ</span>
         </button>
 
         <!-- سجل البلاغات -->
@@ -8954,26 +9723,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
             <span class="text-white text-xs font-black text-center">الأرشيف الرقمي</span>
         </button>
 
-        <!-- أمان النظام -->
-        <button id="app_config" onclick="window.openWin('winConfig')"
-            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
-            style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(234,88,12,0.2);">
-                <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
-            </div>
-            <span class="text-white text-xs font-black text-center">أمان النظام</span>
-        </button>
-
-        <!-- رفع بيانات ERG -->
-        <button id="app_import" onclick="window.openWin('winImport')"
-            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
-            style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(34,211,238,0.15);">
-                <svg class="w-6 h-6 text-cyan-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
-            </div>
-            <span class="text-white text-xs font-black text-center">رفع بيانات ERG</span>
-        </button>
-
+        
         <!-- المالية والاشتراكات -->
         <button id="app_finance" onclick="window.openWin('winFinance')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
@@ -8986,27 +9736,30 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 
 
-<!-- بلاغ طارئ — للعضو فقط -->
-        <button id="app_emergency" onclick="window.openEmergencyReport()"
+        <!-- رفع بيانات ERG -->
+        <button id="app_import" onclick="window.openWin('winImport')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
-            style="display:none; background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.4);height:140px; animation:pulse 2s infinite;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(220,38,38,0.2);">
-                <span style="font-size:1.5rem;">🚨</span>
+            style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);height:140px;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(34,211,238,0.15);">
+                <svg class="w-6 h-6 text-cyan-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
             </div>
-            <span class="text-rose-400 text-xs font-black text-center">بلاغ طارئ</span>
+            <span class="text-white text-xs font-black text-center">رفع بيانات ERG</span>
         </button>
 
-        <!-- لوحة الإحصاء -->
-        <button id="app_dashboard" onclick="window.openWin('winDashboard')"
+
+
+<!-- أمان النظام -->
+        <button id="app_config" onclick="window.openWin('winConfig')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
-            style="background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(139,92,246,0.2);">
-                <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+            style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.25);height:140px;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(234,88,12,0.2);">
+                <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
             </div>
-            <span class="text-white text-xs font-black text-center">لوحة الإحصاء</span>
+            <span class="text-white text-xs font-black text-center">أمان النظام</span>
         </button>
 
     </div>
+
 
     <!-- شريط الإحصائيات -->
     <div id="desktopStats" class="hidden relative z-10 mt-6" style="width:640px;">
@@ -9060,21 +9813,22 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 <!-- ============================================ -->
 <div id="winImport" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.1),transparent); border-bottom:1px solid rgba(6,182,212,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(6,182,212,0.55),transparent);"></div>
             <button onclick="window.closeWin('winImport')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-wider">📥 محرر بيانات ERG</p>
                     <p class="text-cyan-400/50 text-[10px] font-mono uppercase tracking-widest">Data Import & Sync Engine</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25);">⚙️</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(6,182,212,0.26),rgba(245,158,11,0.08) 70%,rgba(6,182,212,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(6,182,212,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">⚙️</div>
             </div>
         </div>
         <div class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
 
 
         <!-- إحصائيات قاعدة البيانات الحالية -->
-        <div class="glass p-6 rounded-[2rem] border border-white/5 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+        <div class="team-stat-card glass p-6 rounded-[2rem] border border-white/5 grid grid-cols-2 md:grid-cols-4 gap-4 text-center" style="box-shadow:0 8px 32px rgba(6,182,212,0.06), inset 0 1px 0 rgba(255,255,255,0.03);">
             <div>
                 <div id="imp_count_cloud" class="text-4xl font-black text-cyan-400 italic">--</div>
                 <div class="text-[10px] text-slate-500 uppercase font-black mt-1">مواد في السحابة</div>
@@ -9097,9 +9851,9 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <div class="glass p-8 rounded-[2.5rem] border-t-[8px] border-cyan-500 space-y-6 flex-1 flex flex-col">
 
             <!-- Tabs الاختيار -->
-            <div class="flex gap-3 bg-black/40 p-2 rounded-2xl">
+            <div class="flex gap-3 p-2 rounded-2xl" style="background:rgba(0,0,0,0.4); box-shadow:inset 0 2px 6px rgba(0,0,0,0.3);">
                 <button id="impTab1" onclick="window.switchImportTab(1)"
-                    class="flex-1 py-3 rounded-xl font-black text-sm transition-all bg-cyan-600 text-white">
+                    class="flex-1 py-3 rounded-xl font-black text-sm transition-all text-white" style="background:linear-gradient(135deg,#0891b2,#0e7490); box-shadow:0 4px 14px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.15);">
                     📁 رفع ملف JSON
                 </button>
                 <button id="impTab2" onclick="window.switchImportTab(2)"
@@ -9128,7 +9882,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     ondragover="event.preventDefault(); this.classList.add('border-cyan-400')"
                     ondragleave="this.classList.remove('border-cyan-400')"
                     ondrop="event.preventDefault(); this.classList.remove('border-cyan-400'); window.handleERGFileSelect(event.dataTransfer.files[0])"
-                    class="flex-1 border-2 border-dashed border-white/10 rounded-[2rem] flex flex-col items-center justify-center gap-5 cursor-pointer hover:border-cyan-500 hover:bg-cyan-600/5 transition-all min-h-[200px] p-10">
+                    class="flex-1 border-2 border-dashed border-white/10 rounded-[2rem] flex flex-col items-center justify-center gap-5 cursor-pointer hover:border-cyan-500 hover:bg-cyan-600/5 transition-all min-h-[200px] p-10" style="background:rgba(6,182,212,0.02);">
                     <span class="text-6xl">📂</span>
                     <div class="text-center">
                         <p class="text-white font-black text-lg italic">اسحب ملف JSON هنا أو اضغط للاختيار</p>
@@ -9271,14 +10025,15 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     <!-- أمان النظام ومزامنة السحابة (مجمد) -->
 <div id="winConfig" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(245,158,11,0.1),transparent); border-bottom:1px solid rgba(245,158,11,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(245,158,11,0.14),rgba(245,158,11,0.03) 65%,transparent); border-bottom:1px solid rgba(245,158,11,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(245,158,11,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(255,255,255,0.5),rgba(245,158,11,0.6),transparent);"></div>
             <button onclick="window.closeWin('winConfig')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-wider">أمان النظام والتحكم</p>
                     <p class="text-amber-400/50 text-[10px] font-mono uppercase tracking-widest">System Security Control</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25);">🛡️</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(245,158,11,0.28),rgba(255,255,255,0.06) 70%,rgba(245,158,11,0.06)); border:1px solid rgba(245,158,11,0.4); box-shadow:0 4px 18px rgba(245,158,11,0.22), 0 0 24px rgba(245,158,11,0.1), inset 0 1px 0 rgba(255,255,255,0.12);">🛡️</div>
             </div>
         </div>
         <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
@@ -9347,17 +10102,18 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان -->
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(16,185,129,0.1),transparent); border-bottom:1px solid rgba(16,185,129,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(16,185,129,0.14),rgba(16,185,129,0.03) 65%,transparent); border-bottom:1px solid rgba(16,185,129,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(16,185,129,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(16,185,129,0.55),transparent);"></div>
             <div class="flex items-center gap-3">
                 <button onclick="window.closeWin('winFinance')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
-                <button onclick="window.loadFinanceStats()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-black text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 transition-all">🔄 تحديث</button>
+                <button onclick="window.loadFinanceStats()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-black text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03));">🔄 تحديث</button>
             </div>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-widest">المالية والاشتراكات</p>
                     <p class="text-emerald-500/50 text-[10px] font-mono uppercase tracking-widest">Finance & Subscriptions</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25);">💰</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(16,185,129,0.26),rgba(245,158,11,0.08) 70%,rgba(16,185,129,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(16,185,129,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">💰</div>
             </div>
         </div>
 
@@ -9368,7 +10124,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <div class="flex gap-1 px-6 py-3 shrink-0" style="background:#080b12; border-bottom:1px solid rgba(255,255,255,0.05);">
             <button onclick="window.financeTab('pending')" id="ftab_pending"
                 class="finance-tab active-ftab flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black text-emerald-400 transition-all"
-                style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3);">
+                style="background:linear-gradient(135deg,rgba(16,185,129,0.16),rgba(16,185,129,0.06)); border:1px solid rgba(16,185,129,0.35); box-shadow:0 2px 10px rgba(16,185,129,0.1);">
                 ⏳ الطلبات المعلقة
                 <span id="ftab_pending_badge" class="hidden text-[9px] font-black px-1.5 py-0.5 rounded-full" style="background:rgba(16,185,129,0.3);">0</span>
             </button>
@@ -9486,21 +10242,8 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                         </div>
                     </div>
                     <div class="mb-3">
-                        <p class="text-[9px] text-slate-500 mb-2 font-black uppercase">المزايا المتاحة بهذي الباقة (الأساسيات متوفرة دائمًا بكل الباقات)</p>
-                        <div class="grid grid-cols-2 gap-2">
-                            <label class="flex items-center gap-2 text-xs text-slate-300 font-bold rounded-lg p-2" style="background:rgba(255,255,255,0.03);">
-                                <input type="checkbox" id="pkgFeat_radar" class="w-4 h-4"> 📍 رادار المواقع GPS
-                            </label>
-                            <label class="flex items-center gap-2 text-xs text-slate-300 font-bold rounded-lg p-2" style="background:rgba(255,255,255,0.03);">
-                                <input type="checkbox" id="pkgFeat_pdfExport" class="w-4 h-4"> 📄 تصدير تقارير PDF
-                            </label>
-                            <label class="flex items-center gap-2 text-xs text-slate-300 font-bold rounded-lg p-2" style="background:rgba(255,255,255,0.03);">
-                                <input type="checkbox" id="pkgFeat_cloud" class="w-4 h-4"> ☁️ الأرشيف الرقمي
-                            </label>
-                            <label class="flex items-center gap-2 text-xs text-slate-300 font-bold rounded-lg p-2" style="background:rgba(255,255,255,0.03);">
-                                <input type="checkbox" id="pkgFeat_dashboard" class="w-4 h-4"> 📊 لوحة الإحصاء
-                            </label>
-                        </div>
+                        <p class="text-[9px] text-slate-500 mb-2 font-black uppercase">المزايا المتاحة بهذي الباقة (تشمل تلقائيًا كل تطبيقات سطح المكتب، بما فيها أي تطبيق يُستحدث مستقبلاً)</p>
+                        <div class="grid grid-cols-2 gap-2" id="pkgFeatContainer"></div>
                     </div>
 
                     <div class="flex items-center justify-between gap-3">
@@ -9528,19 +10271,25 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان -->
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(220,38,38,0.1),transparent); border-bottom:1px solid rgba(220,38,38,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(220,38,38,0.14),rgba(220,38,38,0.03) 65%,transparent); border-bottom:1px solid rgba(220,38,38,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(220,38,38,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(220,38,38,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.closeWin('winSubs')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
                 <input type="text" id="subSearchInput" oninput="window.filterSubs()" placeholder="بحث..." dir="rtl"
-                    class="border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs outline-none transition-all w-32"
+                    class="erg-input border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs outline-none transition-all w-32"
                     style="background:rgba(0,0,0,0.4);">
                 <select id="subStatusFilter" onchange="window.filterSubs()"
-                    class="border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs outline-none transition-all"
+                    class="erg-input border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs outline-none transition-all"
                     style="background:rgba(0,0,0,0.4);">
                     <option value="all">الكل</option>
                     <option value="active">✅ نشط</option>
                     <option value="expired">⛔ منتهي</option>
                 </select>
+                <button onclick="window.openAddSubModal()"
+                    class="flex items-center gap-1 border border-sky-400/30 rounded-xl px-3 py-1.5 text-sky-300 text-xs font-black transition-all hover:bg-sky-500/15 active:scale-95"
+                    style="background:linear-gradient(135deg,rgba(56,189,248,0.12),rgba(56,189,248,0.04)); box-shadow:0 2px 10px rgba(56,189,248,0.1);">
+                    ➕ إضافة قائد
+                </button>
             </div>
             <div class="flex items-center gap-4">
                 <div>
@@ -9550,21 +10299,21 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     </div>
                     <p class="text-rose-400/50 text-[10px] font-mono uppercase tracking-widest">Sovereign Leaders Management</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(220,38,38,0.12); border:1px solid rgba(220,38,38,0.25);">🎖️</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(220,38,38,0.26),rgba(245,158,11,0.08) 70%,rgba(220,38,38,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(220,38,38,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">🎖️</div>
             </div>
         </div>
 
         <!-- إحصائيات سريعة -->
         <div class="grid grid-cols-3 gap-3 px-6 py-4 shrink-0" style="border-bottom:1px solid rgba(255,255,255,0.05);">
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03)); border:1px solid rgba(16,185,129,0.25); box-shadow:0 4px 16px rgba(16,185,129,0.08);">
                 <p id="subs_stat_active" class="text-2xl font-black text-emerald-400">0</p>
                 <p class="text-[10px] text-slate-500 font-black uppercase mt-1">✅ نشطون</p>
             </div>
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(220,38,38,0.1),rgba(220,38,38,0.03)); border:1px solid rgba(220,38,38,0.25); box-shadow:0 4px 16px rgba(220,38,38,0.08);">
                 <p id="subs_stat_expired" class="text-2xl font-black text-rose-400">0</p>
                 <p class="text-[10px] text-slate-500 font-black uppercase mt-1">⛔ منتهون</p>
             </div>
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(245,158,11,0.1),rgba(245,158,11,0.03)); border:1px solid rgba(245,158,11,0.25); box-shadow:0 4px 16px rgba(245,158,11,0.08);">
                 <p id="subs_stat_total" class="text-2xl font-black text-amber-400">0</p>
                 <p class="text-[10px] text-slate-500 font-black uppercase mt-1">👥 الإجمالي</p>
             </div>
@@ -9573,19 +10322,27 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <!-- المحتوى الرئيسي: نموذج + جدول -->
         <div class="flex flex-col flex-1 overflow-hidden p-4 gap-3">
 
-            <!-- نموذج الإضافة المدمج -->
-            <div class="rounded-xl border border-rose-500/20 p-3 shrink-0" style="background:rgba(220,38,38,0.05);">
+            <!-- نافذة منبثقة لإضافة/تعديل قائد -->
+            <div id="subFormModal" class="hidden fixed inset-0 z-[5000] items-center justify-center p-4" style="background:rgba(5,10,20,0.75); backdrop-filter: blur(6px);" onclick="window.closeSubFormModal()">
+            <div class="w-full max-w-4xl rounded-2xl border border-sky-400/25 p-5 relative" style="background:linear-gradient(160deg,#0c2745,#0a2038); box-shadow:0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04); max-height:90vh; overflow-y:auto; border-top:2px solid rgba(245,158,11,0.45);" onclick="event.stopPropagation()">
+                <div class="flex items-center justify-between mb-4">
+                    <button onclick="window.closeSubFormModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+                    <div class="flex items-center gap-2.5">
+                        <p id="subFormModalTitle" class="text-white font-black text-sm uppercase tracking-wider">➕ إضافة قائد جديد</p>
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,rgba(245,158,11,0.22),rgba(56,189,248,0.1)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 0 12px rgba(245,158,11,0.15);">🎖️</div>
+                    </div>
+                </div>
                 <div class="grid grid-cols-5 gap-2 items-end">
                     <div>
                         <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">اسم القائد</p>
                         <input type="text" id="new_ln" placeholder="الاسم الكامل"
-                            class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500 text-right">
+                            class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500 text-right">
                     </div>
                     <div>
                         <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">كود الوصول</p>
                         <div class="relative">
                             <input type="text" id="new_lk" readonly placeholder="LDR-XXXXXX"
-                                class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs font-mono uppercase outline-none focus:border-rose-500">
+                                class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs font-mono uppercase outline-none focus:border-rose-500">
                             <button onclick="window.initiatePaidActivation()"
                                 class="absolute left-1.5 top-1/2 -translate-y-1/2 text-rose-400 hover:text-rose-300 text-xs">⚡</button>
                         </div>
@@ -9594,7 +10351,8 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                         <div>
                             <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">عدد الأعضاء</p>
                             <select id="new_lmax" onchange="window.updateSubPriceLive()"
-                                class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
+                                class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
+                                style="background:#1a1a2e;">
                                 style="background:#1a1a2e;">
                                 <option value="5">5 أعضاء</option>
                                 <option value="10">10 أعضاء</option>
@@ -9605,19 +10363,19 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                         <div>
                             <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">انتهاء</p>
                             <input type="date" id="new_lexp"
-                                class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none">
+                                class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none">
                         </div>
                     </div>
                     <div id="customMembersSubRow" class="hidden">
                         <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">عدد الأعضاء المخصص</p>
                         <input type="number" id="new_lmax_custom" min="1" placeholder="مثال: 35" oninput="window.updateSubPriceLive()"
-                            class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500">
+                            class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500">
                     </div>
                     <div class="col-span-2 flex gap-2 items-end">
                         <div class="flex-1">
                             <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">حالة الدفع</p>
                             <select id="new_lpaystatus"
-                                class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
+                                class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
                                 style="background:#1a1a2e;">
                                 <option value="paid">✅ مدفوع بالكامل</option>
                                 <option value="pending">⏳ بانتظار الدفع</option>
@@ -9626,8 +10384,8 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                         </div>
                         <div class="flex-1">
                             <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">طريقة الدفع</p>
-                            <select id="new_lpaymethod"
-                                class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
+                            <<select id="new_lpaymethod"
+                                class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500"
                                 style="background:#1a1a2e;">
                                 <option value="CliQ">CliQ</option>
                                 <option value="PayPal">PayPal</option>
@@ -9636,6 +10394,17 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                                 <option value="-">غير محدد</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">تطبيق مزايا باقة جاهزة (اختياري)</p>
+                        <select id="new_lpackageSelect" onchange="window.applyPackageToNewLeaderForm()"
+                            class="erg-input w-full bg-black/40 border border-white/10 rounded-lg p-2 text-white text-xs outline-none focus:border-rose-500" style="background:#1a1a2e;">
+                            <option value="">-- بدون باقة (حدد المزايا يدويًا) --</option>
+                        </select>
+                    </div>
+                    <div class="col-span-2 flex items-center flex-wrap gap-3 bg-black/30 border border-amber-500/20 rounded-lg p-2.5">
+                        <span class="text-[9px] text-amber-400 font-black uppercase">⚠️ المزايا المفعّلة لهذا القائد:</span>
+                        <span id="new_lfeatContainer" class="flex items-center flex-wrap gap-3"></span>
                     </div>
                     <div class="col-span-2 bg-black/40 border border-rose-500/20 rounded-lg p-2 text-center">
                         <span class="text-[9px] text-slate-500 uppercase font-black">المبلغ المستحق: </span>
@@ -9653,24 +10422,55 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     </div>
                 </div>
             </div>
+            </div>
 
-            <!-- الجدول -->
-            <div class="flex-1 rounded-xl border border-white/5 overflow-hidden flex flex-col" style="background:rgba(255,255,255,0.02);">
-                <table class="w-full text-right border-collapse text-xs">
-                    <thead class="sticky top-0 border-b border-white/5" style="background:#0f0f18;">
-                        <tr>
-                            <th class="px-4 py-2.5 text-right text-slate-500 font-black uppercase text-[10px]">القائد</th>
-                            <th class="px-4 py-2.5 text-right text-rose-500/70 font-black uppercase text-[10px]">كود الوصول</th>
-                            <th class="px-4 py-2.5 text-center text-slate-500 font-black uppercase text-[10px]">السعة</th>
-                            <th class="px-4 py-2.5 text-center text-slate-500 font-black uppercase text-[10px]">الصلاحية</th>
-                            <th class="px-4 py-2.5 text-center text-slate-500 font-black uppercase text-[10px]">إجراءات</th>
-                        </tr>
-                    </thead>
-                    <tbody id="subTableBody" class="text-white divide-y divide-white/5"></tbody>
-                </table>
-                <tr id="subEmptyMsg" class="hidden">
-                    <td colspan="7" class="text-center text-slate-600 text-xs font-black py-10">لا توجد نتائج</td>
-                </tr>
+            <!-- بطاقات القادة -->
+            <div class="flex-1 rounded-xl border border-white/5 overflow-y-auto p-4" style="background:rgba(255,255,255,0.02);">
+                <div id="subTableBody" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+                <p id="subEmptyMsg" class="hidden text-center text-slate-600 text-xs font-black py-10">لا توجد نتائج</p>
+            </div>
+
+            <!-- نافذة تفاصيل القائد -->
+            <div id="subDetailModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4" style="background:rgba(5,10,20,0.75); backdrop-filter: blur(6px);" onclick="window.closeSubDetailModal()">
+                <div class="w-full max-w-lg rounded-2xl border border-sky-400/25 p-5 relative" style="background:linear-gradient(160deg,#0c2745,#0a2038); box-shadow:0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04); max-height:90vh; overflow-y:auto; border-top:2px solid rgba(245,158,11,0.45);" onclick="event.stopPropagation()">
+                    <div class="flex items-center justify-between mb-4">
+                        <button onclick="window.closeSubDetailModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+                        <div class="flex items-center gap-2.5">
+                            <p id="subDetail_name" class="text-white font-black text-sm uppercase tracking-wider">—</p>
+                            <div class="w-7 h-7 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,rgba(245,158,11,0.22),rgba(56,189,248,0.1)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 0 12px rgba(245,158,11,0.15);">🎖️</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        <div class="bg-black/30 border border-white/10 rounded-xl p-3">
+                            <p class="text-[9px] text-slate-500 font-black uppercase mb-1">كود الوصول</p>
+                            <p id="subDetail_key" class="text-rose-400 font-mono font-bold text-sm">—</p>
+                        </div>
+                        <div class="bg-black/30 border border-white/10 rounded-xl p-3">
+                            <p class="text-[9px] text-slate-500 font-black uppercase mb-1">السعة</p>
+                            <p id="subDetail_capacity" class="text-emerald-400 font-black text-sm">—</p>
+                        </div>
+                        <div class="bg-black/30 border border-white/10 rounded-xl p-3">
+                            <p class="text-[9px] text-slate-500 font-black uppercase mb-1">السعر المدفوع</p>
+                            <p id="subDetail_price" class="text-emerald-400 font-black text-sm">—</p>
+                        </div>
+                        <div class="bg-black/30 border border-white/10 rounded-xl p-3">
+                            <p class="text-[9px] text-slate-500 font-black uppercase mb-1">حالة الدفع</p>
+                            <p id="subDetail_status" class="font-black text-sm">—</p>
+                        </div>
+                        <div class="bg-black/30 border border-white/10 rounded-xl p-3 col-span-2">
+                            <p class="text-[9px] text-slate-500 font-black uppercase mb-1">الصلاحية</p>
+                            <p id="subDetail_validity" class="text-slate-300 font-bold text-sm">—</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap gap-2 justify-center border-t border-white/10 pt-4">
+                        <button id="subDetail_btnTeam" class="flex items-center gap-1 px-3 py-2 rounded-xl text-indigo-400 hover:bg-indigo-500/10 border border-indigo-500/20 text-xs font-black transition-all">👥 إدارة الفريق</button>
+                        <button id="subDetail_btnReveal" class="flex items-center gap-1 px-3 py-2 rounded-xl text-cyan-400 hover:bg-cyan-500/10 border border-cyan-500/20 text-xs font-black transition-all">👁️ كشف الشفرة</button>
+                        <button id="subDetail_btnChangeKey" class="flex items-center gap-1 px-3 py-2 rounded-xl text-purple-400 hover:bg-purple-500/10 border border-purple-500/20 text-xs font-black transition-all">🔑 تغيير الشفرة</button>
+                        <button id="subDetail_btnEdit" class="flex items-center gap-1 px-3 py-2 rounded-xl text-amber-400 hover:bg-amber-500/10 border border-amber-500/20 text-xs font-black transition-all">✏️ تعديل البيانات</button>
+                        <button id="subDetail_btnReset" class="flex items-center gap-1 px-3 py-2 rounded-xl text-blue-400 hover:bg-blue-500/10 border border-blue-500/20 text-xs font-black transition-all">🔄 تصفير الجهاز</button>
+                        <button id="subDetail_btnDelete" class="flex items-center gap-1 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/10 border border-red-500/20 text-xs font-black transition-all">🗑️ حذف نهائي</button>
+                    </div>
+                </div>
             </div>
 
         </div>
@@ -9682,88 +10482,171 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 <div id="winTeam" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.1),transparent); border-bottom:1px solid rgba(99,102,241,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <button onclick="window.closeTeamWin()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
                 <div>
                     <p id="teamWinTitle" class="text-white font-black text-sm uppercase tracking-wider">إدارة الفريق</p>
                     <p class="text-indigo-400/50 text-[10px] font-mono uppercase tracking-widest">Team Management</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.25);">👥</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.26),rgba(245,158,11,0.08) 70%,rgba(99,102,241,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(99,102,241,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">👥</div>
             </div>
         </div>
-        <div class="grid grid-cols-3 gap-3 px-6 py-4 shrink-0" style="border-bottom:1px solid rgba(255,255,255,0.05);">
-            <div class="rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); box-shadow:0 0 20px rgba(16,185,129,0.08);">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">✅</div>
-                <div class="text-right">
-                    <p id="team_stat_active" class="text-2xl font-black text-emerald-400 leading-none">0</p>
-                    <p class="text-[10px] text-slate-500 font-black uppercase mt-1">نشطون</p>
-                </div>
+        <!-- شريط القياس التنفيذي (للمدير فقط) -->
+        <div id="teamExecStatsBar" class="hidden grid-cols-2 sm:grid-cols-5 gap-3 px-6 py-4 shrink-0" style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(99,102,241,0.1),rgba(99,102,241,0.03)); border:1px solid rgba(99,102,241,0.25); box-shadow:0 4px 16px rgba(99,102,241,0.06);">
+                <p id="exec_stat_leaders" class="text-xl font-black text-indigo-300 leading-none">0</p>
+                <p class="text-[9px] text-slate-500 font-black uppercase mt-1">إجمالي القادة</p>
             </div>
-            <div class="rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); box-shadow:0 0 20px rgba(99,102,241,0.08);">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);">👥</div>
-                <div class="text-right">
-                    <p id="team_stat_total" class="text-2xl font-black text-indigo-400 leading-none">0</p>
-                    <p class="text-[10px] text-slate-500 font-black uppercase mt-1">الإجمالي</p>
-                </div>
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03)); border:1px solid rgba(16,185,129,0.25); box-shadow:0 4px 16px rgba(16,185,129,0.06);">
+                <p id="exec_stat_members" class="text-xl font-black text-emerald-400 leading-none">0</p>
+                <p class="text-[9px] text-slate-500 font-black uppercase mt-1">إجمالي الأعضاء</p>
+                <button id="exec_orphan_badge" onclick="window.openOrphanCleanupModal()" class="hidden mt-1 text-[9px] font-black text-rose-400 hover:text-rose-300 underline decoration-dotted mx-auto">⚠️ <span id="exec_orphan_count">0</span> معلّق — تنظيف</button>
             </div>
-            <div class="rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); box-shadow:0 0 20px rgba(245,158,11,0.08);">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">📊</div>
-                <div class="text-right">
-                    <p id="team_stat_capacity" class="text-2xl font-black text-amber-400 leading-none">0</p>
-                    <p class="text-[10px] text-slate-500 font-black uppercase mt-1">المتبقي</p>
-                </div>
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(245,158,11,0.1),rgba(245,158,11,0.03)); border:1px solid rgba(245,158,11,0.25); box-shadow:0 4px 16px rgba(245,158,11,0.06);">
+                <p id="exec_stat_occupancy" class="text-xl font-black text-amber-400 leading-none">0%</p>
+                <p class="text-[9px] text-slate-500 font-black uppercase mt-1">متوسط الإشغال</p>
+            </div>
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(220,38,38,0.1),rgba(220,38,38,0.03)); border:1px solid rgba(220,38,38,0.25); box-shadow:0 4px 16px rgba(220,38,38,0.06);">
+                <p id="exec_stat_full" class="text-xl font-black text-rose-400 leading-none">0</p>
+                <p class="text-[9px] text-slate-500 font-black uppercase mt-1">فرق ممتلئة</p>
+            </div>
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(6,182,212,0.1),rgba(6,182,212,0.03)); border:1px solid rgba(6,182,212,0.25); box-shadow:0 4px 16px rgba(6,182,212,0.06);">
+                <p id="exec_stat_empty" class="text-xl font-black text-cyan-400 leading-none">0</p>
+                <p class="text-[9px] text-slate-500 font-black uppercase mt-1">شبه فارغة</p>
             </div>
         </div>
-        <div class="flex flex-col flex-1 overflow-hidden p-4 gap-3">
-            <div id="leaderFilterRow" class="hidden shrink-0">
-                <select id="leaderFilterSelect" onchange="window.filterTeamByLeader()"
-                    class="w-full border border-indigo-500/30 rounded-2xl px-4 py-3 text-white text-xs font-bold outline-none focus:border-indigo-500 text-right"
-                    style="background:rgba(0,0,0,0.4);">
-                    <option value="">-- اختر قائداً لعرض فريقه --</option>
-                </select>
+
+        <!-- نافذة تنظيف الأعضاء المعلّقين -->
+        <div id="orphanCleanupModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4" style="background:rgba(5,10,20,0.8); backdrop-filter: blur(6px);" onclick="window.closeOrphanCleanupModal()">
+        <div class="w-full max-w-2xl rounded-2xl border border-rose-400/25 p-4 relative" style="background:linear-gradient(160deg,#2a1414,#1a0e0e); box-shadow:0 20px 60px rgba(0,0,0,0.5); max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between mb-3">
+                <button onclick="window.closeOrphanCleanupModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+                <p class="text-rose-300 text-xs font-black uppercase tracking-widest">⚠️ تنظيف الأعضاء المعلّقين</p>
             </div>
-            <div class="rounded-2xl p-4 shrink-0" style="background:rgba(99,102,241,0.07); border:1px solid rgba(99,102,241,0.22); box-shadow:0 0 25px rgba(99,102,241,0.06);">
-                <div class="flex items-center gap-2 mb-3">
-                    <div class="w-6 h-6 rounded-lg flex items-center justify-center text-xs" style="background:rgba(99,102,241,0.18); border:1px solid rgba(99,102,241,0.35);">➕</div>
-                    <p class="text-indigo-300 text-[10px] font-black uppercase tracking-widest">إضافة / تعديل عضو</p>
+            <div class="rounded-xl p-3 mb-3 text-center" style="background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2);">
+                <p class="text-rose-300 text-xs font-bold">هؤلاء أعضاء غير مرتبطين بأي قائد فعلي حاليًا بالنظام. راجعهم بعناية قبل الحذف — هذا الإجراء نهائي ولا يمكن التراجع عنه.</p>
+            </div>
+            <div class="flex items-center justify-between mb-2">
+                <button onclick="window.deleteSelectedOrphans()" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition-all">🗑️ حذف المحدد</button>
+                <label class="flex items-center gap-2 text-xs text-slate-300 font-bold">
+                    <input type="checkbox" id="orphanSelectAll" onchange="window.toggleAllOrphans(this.checked)">
+                    تحديد الكل
+                </label>
+            </div>
+            <div id="orphanCleanupList" class="flex flex-col gap-2"></div>
+        </div>
+        </div>
+
+        <div class="flex flex-1 overflow-hidden">
+            <!-- عمود شبكة القادة (للمدير فقط) -->
+            <div id="leaderSidebarCol" class="hidden w-full sm:w-72 shrink-0 flex-col border-l border-white/5 p-3 gap-3 overflow-hidden" style="background:rgba(0,0,0,0.15);">
+                <input type="text" id="leaderSidebarSearch" oninput="window.renderLeaderSidebar()" placeholder="🔍 ابحث عن قائد..."
+                    class="w-full border border-white/10 rounded-xl p-2.5 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all shrink-0"
+                    style="background:rgba(255,255,255,0.03);">
+                <div id="leaderSidebarList" class="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pl-1"></div>
+            </div>
+
+            <!-- لوحة تفاصيل الفريق -->
+            <div class="flex-1 flex flex-col overflow-hidden p-4 gap-3">
+                <div id="teamDetailEmptyState" class="hidden flex-1 flex-col items-center justify-center gap-3 opacity-50">
+                    <div class="text-5xl">👈</div>
+                    <p class="text-slate-400 text-sm font-bold">اختر قائداً من القائمة لعرض أعضاء فريقه</p>
                 </div>
+
+                <div id="teamDetailContent" class="flex flex-col flex-1 overflow-hidden gap-3">
+                    <div class="grid grid-cols-3 gap-3 shrink-0">
+                        <div class="team-stat-card rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:linear-gradient(160deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03)); border:1px solid rgba(16,185,129,0.25); box-shadow:0 4px 20px rgba(16,185,129,0.1);">
+                            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">✅</div>
+                            <div class="text-right">
+                                <p id="team_stat_active" class="text-2xl font-black text-emerald-400 leading-none">0</p>
+                                <p class="text-[10px] text-slate-500 font-black uppercase mt-1">نشطون</p>
+                            </div>
+                        </div>
+                        <div class="team-stat-card rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:linear-gradient(160deg,rgba(99,102,241,0.1),rgba(99,102,241,0.03)); border:1px solid rgba(99,102,241,0.25); box-shadow:0 4px 20px rgba(99,102,241,0.1);">
+                            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);">👥</div>
+                            <div class="text-right">
+                                <p id="team_stat_total" class="text-2xl font-black text-indigo-400 leading-none">0</p>
+                                <p class="text-[10px] text-slate-500 font-black uppercase mt-1">الإجمالي</p>
+                            </div>
+                        </div>
+                        <div class="team-stat-card rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:linear-gradient(160deg,rgba(245,158,11,0.1),rgba(245,158,11,0.03)); border:1px solid rgba(245,158,11,0.25); box-shadow:0 4px 20px rgba(245,158,11,0.1);">
+                            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">📊</div>
+                            <div class="text-right">
+                                <p id="team_stat_capacity" class="text-2xl font-black text-amber-400 leading-none">0</p>
+                                <p class="text-[10px] text-slate-500 font-black uppercase mt-1">المتبقي</p>
+                            </div>
+                        </div>
+                        <div class="rounded-2xl p-4 flex items-center gap-3 justify-center" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); box-shadow:0 0 20px rgba(245,158,11,0.08);">
+                            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">📊</div>
+                            <div class="text-right">
+                                <p id="team_stat_capacity" class="text-2xl font-black text-amber-400 leading-none">0</p>
+                                <p class="text-[10px] text-slate-500 font-black uppercase mt-1">المتبقي</p>
+                            </div>
+                        </div>
+                    </div>
+            <!-- نافذة منبثقة لإضافة/تعديل عضو -->
+            <div id="memberFormModal" class="hidden fixed inset-0 z-[5000] items-center justify-center p-4" style="background:rgba(5,10,20,0.75); backdrop-filter: blur(6px);" onclick="window.closeMemberFormModal()">
+            <div class="w-full max-w-lg rounded-2xl border border-indigo-400/25 p-5 relative" style="background:linear-gradient(160deg,#12163a,#0c0e28); box-shadow:0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04); max-height:90vh; overflow-y:auto; border-top:2px solid rgba(245,158,11,0.45);" onclick="event.stopPropagation()">
+                <div class="flex items-center justify-between mb-4">
+                    <button onclick="window.closeMemberFormModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+                    <div class="flex items-center gap-2.5">
+                        <p id="memberFormModalTitle" class="text-indigo-300 text-xs font-black uppercase tracking-widest">➕ إضافة عضو جديد</p>
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,rgba(245,158,11,0.22),rgba(99,102,241,0.1)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 0 12px rgba(245,158,11,0.15);">👤</div>
+                    </div>
+                </div>
+                <div class="rounded-xl p-3.5" style="background:rgba(99,102,241,0.05); border:1px solid rgba(99,102,241,0.15);">
                 <div class="flex gap-2 items-end">
                     <div class="flex-1">
                         <p class="text-[9px] text-slate-500 mb-1.5 font-black uppercase">الاسم الكامل</p>
                         <input type="text" id="new_mn" placeholder="اسم العضو..."
-                            class="w-full border border-white/10 rounded-xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
+                            class="erg-input w-full border border-white/10 rounded-xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
                             style="background:rgba(0,0,0,0.4);">
                     </div>
                     <div class="flex-1">
                         <p class="text-[9px] text-slate-500 mb-1.5 font-black uppercase">كود العضو</p>
                         <div class="relative">
                             <input type="text" id="new_mk" placeholder="MEM-XXXXXX"
-                                class="w-full border border-white/10 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none focus:border-indigo-500 transition-all"
+                                class="erg-input w-full border border-white/10 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none focus:border-indigo-500 transition-all"
                                 style="background:rgba(0,0,0,0.4);">
                             <button onclick="window.genMemberKey('new_mk')" class="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-400 text-sm hover:scale-125 transition-all">⚡</button>
                         </div>
                     </div>
                     <div class="flex flex-col gap-2">
-                        <button id="addMemBtn" onclick="window.addNewMember()" class="py-3 px-4 rounded-xl text-white text-xs font-black transition-all active:scale-95" style="background:rgba(16,185,129,0.8);">✅ اعتماد</button>
-                        <button id="updateMemBtn" onclick="window.updateMember()" class="hidden py-3 px-4 rounded-xl text-white text-xs font-black transition-all active:scale-95" style="background:rgba(245,158,11,0.8);">🔄 تحديث</button>
+                        <button id="addMemBtn" onclick="window.addNewMember()" class="py-3 px-4 rounded-xl text-white text-xs font-black transition-all active:scale-95 hover:brightness-110" style="background:linear-gradient(135deg,rgba(16,185,129,0.95),rgba(5,150,105,0.85) 60%,rgba(16,185,129,0.95)); box-shadow:0 4px 16px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.2); border:1px solid rgba(16,185,129,0.5);">✅ اعتماد</button>
+                        <button id="updateMemBtn" onclick="window.updateMember()" class="hidden py-3 px-4 rounded-xl text-white text-xs font-black transition-all active:scale-95 hover:brightness-110" style="background:linear-gradient(135deg,rgba(245,158,11,0.95),rgba(217,119,6,0.85) 60%,rgba(245,158,11,0.95)); box-shadow:0 4px 16px rgba(245,158,11,0.3), inset 0 1px 0 rgba(255,255,255,0.25); border:1px solid rgba(245,158,11,0.5);">🔄 تحديث</button>
                     </div>
                 </div>
+                </div>
+            </div>
             </div>
             <div class="flex items-center gap-2 shrink-0">
+                <button onclick="window.refreshTeamData()" title="تحديث القائمة"
+                    class="w-11 h-11 flex items-center justify-center rounded-2xl border border-white/10 text-slate-300 hover:text-indigo-300 hover:border-indigo-400/40 hover:rotate-180 transition-all duration-500 shrink-0"
+                    style="background:rgba(255,255,255,0.03);">🔄</button>
                 <input type="text" id="teamSearchInput" oninput="window.filterTeamSearch()" placeholder="🔍 ابحث بالاسم أو الكود..."
-                    class="flex-1 border border-white/10 rounded-2xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
-                    style="background:rgba(255,255,255,0.02);">
-                <select id="teamSortSelect" onchange="window.renderTeamTable()"
-                    class="border border-white/10 rounded-2xl px-3 py-3 text-white text-[10px] font-black outline-none focus:border-indigo-500"
-                    style="background:rgba(255,255,255,0.02);">
-                    <option value="newest">الأحدث أولاً</option>
-                    <option value="name">حسب الاسم</option>
-                </select>
+                    class="erg-input flex-1 border border-white/10 rounded-2xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
+                    style="background:rgba(255,255,255,0.03);">
+                <div class="erg-input flex items-center gap-1.5 border border-white/10 rounded-2xl px-3 shrink-0 focus-within:border-indigo-500" style="background:rgba(255,255,255,0.03);">
+                    <span class="text-indigo-400 text-xs">⇅</span>
+                    <select id="teamSortSelect" onchange="window.renderTeamTable()"
+                        class="bg-transparent text-white text-xs font-black outline-none py-3 min-w-[110px]">
+                        <option value="newest" style="background:#0f1420;">الأحدث أولاً</option>
+                        <option value="name" style="background:#0f1420;">حسب الاسم</option>
+                    </select>
+                </div>
+                <button onclick="window.openAddMemberModal()"
+                    class="flex items-center gap-1.5 border border-indigo-400/30 rounded-2xl px-4 py-3 text-indigo-300 text-xs font-black transition-all hover:bg-indigo-500/15 hover:border-indigo-400/50 active:scale-95 shrink-0"
+                    style="background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(99,102,241,0.04)); box-shadow:0 4px 14px rgba(99,102,241,0.1);">
+                    ➕ إضافة عضو
+                </button>
             </div>
             <div class="flex-1 rounded-2xl border border-white/5 overflow-hidden" style="background:rgba(255,255,255,0.01);">
-                <div class="overflow-y-auto custom-scrollbar h-full p-4">
-                    <div id="teamGridBody" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></div>
+                        <div class="overflow-y-auto custom-scrollbar h-full p-4">
+                            <div id="teamGridBody" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -9777,11 +10660,12 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان -->
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.1),transparent); border-bottom:1px solid rgba(99,102,241,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
-                <button onclick="window.loadReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-400 border border-white/10 hover:bg-white/5 transition-all">🔄 تحديث</button>
-                <button onclick="window.exportReportsPDF()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/10 transition-all">📄 PDF</button>
+                <button onclick="window.loadReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-400 border border-white/10 hover:bg-white/5 hover:rotate-180 transition-all duration-500">🔄 تحديث</button>
+                <button onclick="window.exportReportsPDF()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/10 transition-all" style="box-shadow:0 2px 10px rgba(99,102,241,0.12);">📄 PDF</button>
                 <button onclick="window.clearAllReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 transition-all">🗑️ تصفير</button>
             </div>
             <div class="flex items-center gap-4">
@@ -9789,21 +10673,21 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     <p class="text-white font-black text-sm uppercase tracking-wider">سجل البلاغات الميدانية</p>
                     <p class="text-indigo-400/50 text-[10px] font-mono uppercase tracking-widest">Field Reports Log</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.25);">📻</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.26),rgba(245,158,11,0.08) 70%,rgba(99,102,241,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(99,102,241,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">📻</div>
             </div>
         </div>
 
         <!-- إحصاءات سريعة -->
         <div class="grid grid-cols-3 gap-4 px-6 py-4 shrink-0" style="border-bottom:1px solid rgba(255,255,255,0.05);">
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(220,38,38,0.1),rgba(220,38,38,0.03)); border:1px solid rgba(220,38,38,0.25); box-shadow:0 4px 16px rgba(220,38,38,0.08);">
                 <div id="rep_countHigh" class="text-2xl font-black text-rose-400">0</div>
                 <div class="text-[10px] text-slate-500 font-black uppercase mt-1">⚠️ عاجل</div>
             </div>
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03)); border:1px solid rgba(16,185,129,0.25); box-shadow:0 4px 16px rgba(16,185,129,0.08);">
                 <div id="rep_countNormal" class="text-2xl font-black text-emerald-400">0</div>
                 <div class="text-[10px] text-slate-500 font-black uppercase mt-1">✅ عادي</div>
             </div>
-            <div class="rounded-2xl p-3 text-center" style="background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.2);">
+            <div class="team-stat-card rounded-2xl p-3 text-center" style="background:linear-gradient(160deg,rgba(59,130,246,0.1),rgba(59,130,246,0.03)); border:1px solid rgba(59,130,246,0.25); box-shadow:0 4px 16px rgba(59,130,246,0.08);">
                 <div id="rep_countAll" class="text-2xl font-black text-blue-400">0</div>
                 <div class="text-[10px] text-slate-500 font-black uppercase mt-1">📋 الكل</div>
             </div>
@@ -9812,7 +10696,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <!-- فلتر بحث -->
         <div class="flex gap-3 px-6 py-3 shrink-0" style="border-bottom:1px solid rgba(255,255,255,0.05);">
             <select id="repPriorityFilter" onchange="window.filterReports()"
-                class="rounded-2xl px-4 py-2.5 text-white font-black text-xs outline-none transition-all"
+                class="erg-input rounded-2xl px-4 py-2.5 text-white font-black text-xs outline-none transition-all"
                 style="background:#0d1117; border:1px solid rgba(255,255,255,0.1);">
                 <option value="all">الكل</option>
                 <option value="high">⚠️ عاجل</option>
@@ -9820,7 +10704,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
             </select>
             <input id="repSearchInput" type="text" oninput="window.filterReports()"
                 placeholder="ابحث باسم المادة أو العضو..."
-                class="flex-1 rounded-2xl px-4 py-2.5 text-white font-bold text-sm outline-none transition-all text-right"
+                class="erg-input flex-1 rounded-2xl px-4 py-2.5 text-white font-bold text-sm outline-none transition-all text-right"
                 style="background:#0d1117; border:1px solid rgba(255,255,255,0.1);">
         </div>
 
@@ -9835,22 +10719,23 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 <div id="winMap" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.1),transparent); border-bottom:1px solid rgba(6,182,212,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(6,182,212,0.55),transparent);"></div>
             <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-wider">رادار GPS الميداني</p>
                     <p class="text-cyan-400/50 text-[10px] font-mono uppercase tracking-widest">Field GPS Radar</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25);">📍</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(6,182,212,0.26),rgba(245,158,11,0.08) 70%,rgba(6,182,212,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(6,182,212,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">📍</div>
             </div>
         </div>
         <!-- أدوات التحكم -->
-        <div class="flex items-center gap-2 px-4 py-3 shrink-0" style="border-bottom:1px solid rgba(6,182,212,0.1);">
-            <button onclick="window.mapLocateMe()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/10 transition-all" style="background:rgba(6,182,212,0.06);">📍 موقعي</button>
-            <button onclick="window.mapShowAll()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 transition-all" style="background:rgba(16,185,129,0.06);">👥 الفريق</button>
-            <button onclick="window.mapShowReports()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 transition-all" style="background:rgba(220,38,38,0.06);">🚨 البلاغات</button>
-            <button onclick="window.toggleMapLayer()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-violet-400 border border-violet-500/30 hover:bg-violet-500/10 transition-all" style="background:rgba(139,92,246,0.06);">🛰️ قمر صناعي</button>
+        <div class="flex items-center gap-2 px-4 py-3 shrink-0" style="border-bottom:1px solid rgba(6,182,212,0.1); background:rgba(255,255,255,0.015);">
+            <button onclick="window.mapLocateMe()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(6,182,212,0.1),rgba(6,182,212,0.03)); box-shadow:0 2px 10px rgba(6,182,212,0.08);">📍 موقعي</button>
+            <button onclick="window.mapShowAll()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.03)); box-shadow:0 2px 10px rgba(16,185,129,0.08);">👥 الفريق</button>
+            <button onclick="window.mapShowReports()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.1),rgba(220,38,38,0.03)); box-shadow:0 2px 10px rgba(220,38,38,0.08);">🚨 البلاغات</button>
+            <button onclick="window.toggleMapLayer()" class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-violet-400 border border-violet-500/30 hover:bg-violet-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.03)); box-shadow:0 2px 10px rgba(139,92,246,0.08);">🛰️ قمر صناعي</button>
             <div class="flex-1"></div>
             <span id="mapMembersCount" class="text-[10px] text-slate-500 font-black">0 عضو على الخريطة</span>
         </div>
@@ -9862,14 +10747,15 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 <div id="winCloud" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.1),transparent); border-bottom:1px solid rgba(99,102,241,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-wider">الأرشيف المركزي</p>
                     <p class="text-indigo-400/50 text-[10px] font-mono uppercase tracking-widest">Cloud Storage Protocol</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.25);">📂</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.26),rgba(245,158,11,0.08) 70%,rgba(99,102,241,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(99,102,241,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">📂</div>
             </div>
         </div>
         <div id="archiveLog" class="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar"></div>
@@ -10054,18 +10940,19 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 <!-- ===== لوحة الإحصاء ===== -->
 <div id="winDashboard" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(139,92,246,0.1),transparent); border-bottom:1px solid rgba(139,92,246,0.12);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(139,92,246,0.14),rgba(139,92,246,0.03) 65%,transparent); border-bottom:1px solid rgba(139,92,246,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(139,92,246,0.1);">
+            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(139,92,246,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
-                <button onclick="window.refreshDashboard()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-violet-400 border border-violet-500/30 hover:bg-violet-500/10 transition-all">🔄 تحديث</button>
-                <button onclick="window.exportDashboardPDF()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 transition-all">📄 PDF</button>
+                <button onclick="window.refreshDashboard()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-violet-400 border border-violet-500/30 hover:bg-violet-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.03));">🔄 تحديث</button>
+                <button onclick="window.exportDashboardPDF()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/15 active:scale-95 transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.1),rgba(220,38,38,0.03));">📄 PDF</button>
             </div>
             <div class="flex items-center gap-4">
                 <div>
                     <p class="text-white font-black text-sm uppercase tracking-wider">لوحة الإحصاء التشغيلي</p>
                     <p class="text-violet-400/50 text-[10px] font-mono uppercase tracking-widest">Operational Intelligence Dashboard</p>
                 </div>
-                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25);">📊</div>
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(139,92,246,0.26),rgba(245,158,11,0.08) 70%,rgba(139,92,246,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(139,92,246,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">📊</div>
             </div>
         </div>
         <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
