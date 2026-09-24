@@ -175,7 +175,7 @@ self.addEventListener('fetch', e => {
 <script type="module">
 // استيراد المكتبات (تمت إضافة getFirestore للعمل كخطة طوارئ)
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, onSnapshot, doc, setDoc, getDoc, updateDoc, query, addDoc, deleteDoc, getDocs, writeBatch, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, onSnapshot, doc, setDoc, getDoc, updateDoc, query, addDoc, deleteDoc, getDocs, writeBatch, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
 // --- 1. إعدادات Firebase السيادية المعتمدة ---
@@ -196,6 +196,24 @@ let MASTER_SALT = "";
 window.AUTH_APP_ENABLED = true;
 window._adminOtpPhase = 0; 
 let MASTER_TOTP_SECRET = "MZXW6YTBHJSG65DS";
+window.getSecret = () => MASTER_TOTP_SECRET;
+
+let _totpTimeOffsetMs = 0;
+async function syncServerTime() {
+    try {
+        const t0 = Date.now();
+        const probeRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', '_time_probe');
+        await setDoc(probeRef, { ts: serverTimestamp() });
+        const snap = await getDoc(probeRef);
+        const t1 = Date.now();
+        const serverMs = snap.data().ts.toMillis();
+        _totpTimeOffsetMs = serverMs - Math.round((t0 + t1) / 2);
+    } catch (e) {
+        console.warn("تعذرت مزامنة وقت الخادم، سيُعتمد وقت الجهاز المحلي", e);
+        _totpTimeOffsetMs = 0;
+    }
+}
+window.getTotpNow = () => Date.now() + _totpTimeOffsetMs;
 // ===== إعدادات EmailJS =====
 const EMAILJS_SERVICE_ID = "service_994erg";
 const EMAILJS_PUBLIC_KEY = "ILBL6O_BexWvmQ1B3";
@@ -243,6 +261,7 @@ async function hashInput(text, salt) {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+
 
 // --- تفعيل التخزين المؤقت المتقدم بأمان (مع خطة طوارئ) ---
 let db;
@@ -1350,7 +1369,7 @@ window.confirmRevealKey = async () => {
         algorithm: "SHA1", digits: 6, period: 30 
     });
 
-    if (totp.validate({ token: code, window: 2 }) !== null) {
+    if (totp.validate({ token: code, window: 2, timestamp: window.getTotpNow() }) !== null) {
         window.closeOtpRevealModal();
 
         const path = ctx.type === 'sub' ? 'subscribers' : 'team_keys';
@@ -1441,7 +1460,7 @@ window.verifyOTP = async () => {
     // مسار دخول الإدارة القديم (تطبيق المصادقة)
     if (window._adminOtpPhase === 1 || window._adminOtpPhase === 2) {
         const totp = new OTPAuth.TOTP({ secret: MASTER_TOTP_SECRET, algorithm: "SHA1", digits: 6, period: 30 });
-        if (totp.validate({ token: code, window: 2 }) !== null) {
+        if (totp.validate({ token: code, window: 2, timestamp: window.getTotpNow() }) !== null) {
             document.getElementById('otpModal').classList.replace('flex', 'hidden');
             document.getElementById('otpInput').value = '';
             if (window._adminOtpPhase === 1) {
@@ -5381,6 +5400,7 @@ window.installPWA = async () => {
                     if (user) { 
                         // جلب إعدادات المفاتيح والأمان من السحابة
                         await fetchSecurityConfig(); 
+                        await syncServerTime(); 
                         
                         // إذا كان المستخدم مسجلاً دخول سابقاً، يتم تفعيله تلقائياً
                         if (window.activeSubKey) { 
