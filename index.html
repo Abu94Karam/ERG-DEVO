@@ -5,12 +5,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="description" content="ERG — منصة الاستجابة الطارئة: دليل المواد الخطرة وإدارة الفرق الميدانية والبلاغات العاجلة.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ERG - منصة الاستجابة الطارئة">
+<meta property="og:description" content="دليل المواد الخطرة وإدارة الفرق الميدانية والبلاغات العاجلة.">
+<meta property="og:locale" content="ar_AR">
 <meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ERG SYSTEM">
 <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiRVJHIFNZU1RFTSIsInNob3J0X25hbWUiOiJFUkciLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwMDAwMDAiLCJ0aGVtZV9jb2xvciI6IiMxMGI5ODEiLCJpY29ucyI6W3sic3JjIjoiaHR0cHM6Ly9jZG4taWNvbnMtcG5nLmZsYXRpY29uLmNvbS81MTIvMTY4MC8xNjgwNzg0LnBuZyIsInNpemVzIjoiNTEyeDUxMiIsInR5cGUiOiJpbWFnZS9wbmcifV19">
+<script>
+// ===== دوال أمان مساعدة (تنظيف HTML + حماية محاولات الدخول) =====
+window.esc = function(s){
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+};
+// للقيم داخل onclick="fn('...')" : تهريب JS أولاً ثم HTML
+window.escJs = function(s){
+    return window.esc(String(s === null || s === undefined ? '' : s)
+        .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,' '));
+};
+window._loginGuard = {
+    KEY: 'erg_lg',
+    state: function(){ try { return JSON.parse(localStorage.getItem(this.KEY) || '{}'); } catch(e) { return {}; } },
+    save: function(s){ try { localStorage.setItem(this.KEY, JSON.stringify(s)); } catch(e) {} },
+    remaining: function(){ var s = this.state(); return (s.until && s.until > Date.now()) ? Math.ceil((s.until - Date.now())/1000) : 0; },
+    fail: function(){
+        var s = this.state(); s.n = (s.n || 0) + 1;
+        if (s.n % 5 === 0) { var lvl = Math.min(s.n/5, 7); s.until = Date.now() + Math.pow(2, lvl-1) * 60000; }
+        this.save(s);
+    },
+    reset: function(){ try { localStorage.removeItem(this.KEY); } catch(e) {} }
+};
+</script>
 <script>
 // ===== Service Worker للعمل بدون إنترنت =====
 if ('serviceWorker' in navigator) {
@@ -144,9 +174,9 @@ self.addEventListener('fetch', e => {
 
 <script type="module">
 // استيراد المكتبات (تمت إضافة getFirestore للعمل كخطة طوارئ)
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, onSnapshot, doc, setDoc, getDoc, updateDoc, query, addDoc, deleteDoc, getDocs, writeBatch, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
 // --- 1. إعدادات Firebase السيادية المعتمدة ---
 const firebaseConfig = {
@@ -387,8 +417,8 @@ window.renderAdminPackagesList = () => {
                 <button onclick="window.deletePackageEntry('${p.id}')" class="text-red-400 text-sm p-1.5">🗑️</button>
                 <button onclick="window.togglePackageActive('${p.id}', ${p.active !== false})" class="text-[10px] font-black px-2 py-1 rounded-full" style="background:${p.active !== false ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.15)'}; color:${p.active !== false ? '#10b981' : '#64748b'};">${p.active !== false ? 'نشطة' : 'موقوفة'}</button>
             </div>
-            <<div class="text-right">
-                <p class="text-white font-black text-sm">${p.title} ${p.featured ? '⭐' : ''}</p>
+            <div class="text-right">
+                <p class="text-white font-black text-sm">${esc(p.title)} ${p.featured ? '⭐' : ''}</p>
                 <p class="text-slate-500 text-[10px]">${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء — <span class="text-emerald-400 font-black">${p.price}$</span></p>
                 <p class="text-slate-600 text-[9px] mt-1">${window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ') || 'مزايا أساسية فقط'}</p>
             </div>
@@ -452,6 +482,7 @@ window.startPublicPayment = () => {
     const paypalLink = document.getElementById('paypalLink');
     if (paypalLink) paypalLink.href = `https://paypal.me/momoom1994/${totalPrice}`;
 
+        window.setActiveStep(3);
         window.openWin('winPayment');
 };
 
@@ -585,6 +616,7 @@ window.requestRenewal = () => {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', 'RNW-' + Date.now()), {
                     name: name,
                     type: 'renewal',
+                    leaderKey: window.activeKey,
                     status: 'Pending Payment Verification',
                     timestamp: Date.now()
                 });
@@ -1026,6 +1058,11 @@ window.rejectTrialByAdmin = async (phoneHash, name) => {
 };
 
 window.activateApp = async () => {
+    const emailField = document.getElementById('loginEmailInput');
+    const emailVal = emailField ? emailField.value.trim() : '';
+    if (emailVal) {
+        return window.activateAppByEmail();
+    }
     const loginType = window._loginType;
     if (!loginType) return;
 
@@ -1041,6 +1078,8 @@ window.activateApp = async () => {
 
     const msgLabel = document.getElementById('loginMsg'); 
     if(!key) return;
+    const _lockSec = window._loginGuard.remaining();
+    if (_lockSec > 0) { window.showNotif('⛔ محاولات خاطئة كثيرة. أعد المحاولة بعد ' + _lockSec + ' ثانية', 'error'); return; }
 
     // مؤشر تحميل على الزر
     const loginBtn = document.querySelector('[onclick="window.activateApp()"]');
@@ -1086,6 +1125,7 @@ window.activateApp = async () => {
             }
 
             if(msgLabel) msgLabel.innerText = "⛔ كود الإدارة غير صحيح";
+            window._loginGuard.fail();
             window.showNotif("كود الإدارة غير صحيح", "error");
             if (loginBtn) { loginBtn.textContent = 'دخول ←'; loginBtn.removeAttribute('disabled'); }
             return;
@@ -1130,11 +1170,15 @@ window.activateApp = async () => {
                 window.myLeaderName = subData.ownerName || "قائد ميداني";
                 window.myFeatures = subData.features || null;
                 window._leaderSubKey = subSnap.id;
+                window.myCompanyId = subData.companyId || subSnap.id;
+                window.isCompanyOwner = subData.isCompanyOwner === true;
+                window.myCompanyName = subData.companyName || subData.ownerName || "";
                 window.listenLeaderEmergencies(subSnap.id);
                 return window.launchOS('leader', subSnap.id, "تم التحقق: أهلاً بك أيها القائد");
             }
 
             if(msgLabel) msgLabel.innerText = "⛔ كود القائد غير صحيح أو غير مسجل";
+            window._loginGuard.fail();
             window.showNotif("كود القائد غير صحيح", "error");
             return;
         }
@@ -1172,6 +1216,7 @@ window.activateApp = async () => {
             }
 
             if(msgLabel) msgLabel.innerText = "⛔ كود العضو غير صحيح أو غير مسجل";
+            window._loginGuard.fail();
             window.showNotif("كود العضو غير صحيح", "error");
             return;
         }
@@ -1188,6 +1233,74 @@ window.activateApp = async () => {
 
 
 
+
+
+
+
+window.activateAppByEmail = async () => {
+    const msgLabel = document.getElementById('loginMsg');
+    const loginBtn = document.querySelector('[onclick="window.activateApp()"]');
+    const email = document.getElementById('loginEmailInput').value.trim();
+    const password = document.getElementById('activationInput').value;
+    if (!email || !password) { window.showNotif('أدخل البريد وكلمة المرور', 'error'); return; }
+
+    const _lockSec = window._loginGuard.remaining();
+    if (_lockSec > 0) { window.showNotif('⛔ محاولات خاطئة كثيرة. أعد المحاولة بعد ' + _lockSec + ' ثانية', 'error'); return; }
+
+    if (loginBtn) loginBtn.setAttribute('disabled', '');
+    try {
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        const uid = cred.user.uid;
+        const memSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'memberships', uid));
+        if (!memSnap.exists()) {
+            await signOut(auth);
+            window._loginGuard.fail();
+            window.showNotif('⛔ هذا الحساب غير مُفعَّل في النظام. تواصل مع الإدارة.', 'error');
+            return;
+        }
+        const m = memSnap.data();
+        window._loginGuard.reset();
+
+        if (m.role === 'master') {
+            window.activeKey = 'MASTER_SESSION';
+            return window.launchOS('master', 'MASTER_SESSION', 'دخول الإدارة');
+        }
+        if (m.role === 'leader') {
+            const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', m.docId));
+            const subData = subSnap.exists() ? subSnap.data() : {};
+            if (!subData.isPaid || subData.status !== 'active') {
+                await signOut(auth);
+                window.showNotif('⛔ الاشتراك غير مفعل', 'error');
+                return;
+            }
+            window.activeKey = m.docId;
+            window.myLeaderName = subData.ownerName || 'قائد ميداني';
+            window.myFeatures = subData.features || null;
+            window._leaderSubKey = m.docId;
+            window.myCompanyId = subData.companyId || m.docId;
+            window.isCompanyOwner = subData.isCompanyOwner === true;
+            window.myCompanyName = subData.companyName || subData.ownerName || '';
+            window.listenLeaderEmergencies(m.docId);
+            return window.launchOS('leader', m.docId, 'أهلاً بك أيها القائد');
+        }
+        if (m.role === 'member') {
+            const memDocSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', m.docId));
+            const d = memDocSnap.exists() ? memDocSnap.data() : {};
+            window.activeKey = m.docId;
+            window.myMemberName = d.memberName || 'عضو ميداني';
+            window.activeParentKey = d.parentKey;
+            return window.launchOS('member', m.docId, 'دخول العضو الميداني');
+        }
+        await signOut(auth);
+        window.showNotif('⛔ دور الحساب غير معروف', 'error');
+    } catch (e) {
+        window._loginGuard.fail();
+        const known = { 'auth/invalid-credential': 'بيانات الدخول غير صحيحة', 'auth/user-not-found': 'الحساب غير موجود', 'auth/wrong-password': 'كلمة المرور غير صحيحة', 'auth/too-many-requests': 'محاولات كثيرة، أعد المحاولة لاحقاً' };
+        window.showNotif(known[e.code] || 'تعذر تسجيل الدخول', 'error');
+    } finally {
+        if (loginBtn) loginBtn.removeAttribute('disabled');
+    }
+};
 
 
 
@@ -1299,41 +1412,63 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // دالة التحقق من الرمز الثاني للمدير (محدثة لتتوافق مع التشفير)
-window.verifyOTP = () => {
+window.verifyOTP = async () => {
     const code = document.getElementById('otpInput').value.trim();
-    const totp = new OTPAuth.TOTP({ secret: MASTER_TOTP_SECRET, algorithm: "SHA1", digits: 6, period: 30 });
 
-    if (totp.validate({ token: code, window: 2 }) !== null) {
-        document.getElementById('otpModal').classList.replace('flex', 'hidden');
-        document.getElementById('otpInput').value = '';
-
-        if (_adminOtpPhase === 1) {
-            // ✅ المرحلة الأولى نجحت — أظهر حقل رمز الإدارة
-            _adminOtpPhase = 0;
-            const prefixRow = document.getElementById('prefixedInputRow');
-            const passwordInput = document.getElementById('activationInput');
-            prefixRow?.classList.add('hidden');
-            passwordInput?.classList.remove('hidden');
-            if (passwordInput) { passwordInput.value = ''; passwordInput.focus(); }
-            document.getElementById('codeInputWrap')?.classList.remove('hidden');
-            document.getElementById('loginActionBtns')?.classList.remove('hidden');
-            window.showNotif("✅ التحقق الأول نجح — أدخل رمز الإدارة", "success");
-
-        } else if (_adminOtpPhase === 2) {
-            // ✅ المرحلة الثانية نجحت — دخول النظام
-            _adminOtpPhase = 0;
-            window.activeKey = 'MASTER_SESSION';
-            window.launchOS('master', 'MASTER_SESSION', "تم التحقق السيادي بنجاح");
-
+    if (window._logoutCheckActive) {
+        const inputHash = await hashInput(code, MASTER_SALT);
+        if (inputHash === window._logoutCheckHash) {
+            window._logoutCheckActive = false;
+            window._logoutCheckHash = null;
+            document.getElementById('otpModal').classList.replace('flex', 'hidden');
+            document.getElementById('otpInput').value = '';
+            await signOut(auth).catch(() => {});
+            localStorage.removeItem('app_activation_key');
+            window.activeSubKey = null;
+            window.activeKey = null;
+            window.userRole = null;
+            document.body.classList.remove('desktop-active');
+            window.showNotif("تم تسجيل الخروج", "success");
+            setTimeout(() => { location.reload(); }, 800);
         } else {
-            // مسار عادي قديم
-            window.activeKey = 'MASTER_SESSION';
-            window.launchOS('master', 'MASTER_SESSION', "تم التحقق السيادي بنجاح");
+            window._loginGuard.fail();
+            window.showNotif("⛔ كود الخروج غير صحيح", "error");
+            document.getElementById('otpInput').value = '';
         }
-    } else {
-        window.showNotif("⛔ رمز المصادقة غير صحيح", "error");
-        document.getElementById('otpInput').value = '';
+        return;
     }
+
+    // مسار دخول الإدارة القديم (تطبيق المصادقة)
+    if (window._adminOtpPhase === 1 || window._adminOtpPhase === 2) {
+        const totp = new OTPAuth.TOTP({ secret: MASTER_TOTP_SECRET, algorithm: "SHA1", digits: 6, period: 30 });
+        if (totp.validate({ token: code, window: 2 }) !== null) {
+            document.getElementById('otpModal').classList.replace('flex', 'hidden');
+            document.getElementById('otpInput').value = '';
+            if (window._adminOtpPhase === 1) {
+                window._adminOtpPhase = 0;
+                const prefixRow = document.getElementById('prefixedInputRow');
+                const passwordInput = document.getElementById('activationInput');
+                prefixRow?.classList.add('hidden');
+                passwordInput?.classList.remove('hidden');
+                if (passwordInput) { passwordInput.value = ''; passwordInput.focus(); }
+                document.getElementById('codeInputWrap')?.classList.remove('hidden');
+                document.getElementById('loginActionBtns')?.classList.remove('hidden');
+                window.showNotif("✅ التحقق الأول نجح — أدخل رمز الإدارة", "success");
+            } else {
+                window._adminOtpPhase = 0;
+                window.activeKey = 'MASTER_SESSION';
+                window.launchOS('master', 'MASTER_SESSION', "تم التحقق السيادي بنجاح");
+            }
+        } else {
+            window._loginGuard.fail();
+            window.showNotif("⛔ رمز المصادقة غير صحيح", "error");
+            document.getElementById('otpInput').value = '';
+        }
+        return;
+    }
+
+    window.showNotif("⛔ لا يوجد طلب تحقق نشط", "error");
+    document.getElementById('otpModal').classList.replace('flex', 'hidden');
 };
 
 
@@ -1416,7 +1551,7 @@ window.renderSubTable = () => {
              onclick="window.openSubDetail('${docId}')"
              style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015)); border:1.5px solid rgba(255,255,255,0.1); box-shadow:0 6px 22px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);">
             <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center text-3xl transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.25),rgba(245,158,11,0.1)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 4px 14px rgba(220,38,38,0.15), inset 0 1px 0 rgba(255,255,255,0.1);">🎖️</div>
-            <p class="leader-name text-white font-black text-base truncate">${s.ownerName}</p>
+            <p class="leader-name text-white font-black text-base truncate">${esc(s.ownerName)}</p>
             <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-${statusColor}-500/20 text-${statusColor}-400 border border-${statusColor}-400/30">
                 ${isExpired ? '⛔ منتهي' : '✅ نشط'}
             </span>
@@ -1610,35 +1745,35 @@ window.loadFinancePending = async () => {
             <div class="rounded-2xl p-4 text-right transition-all" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07);">
                 <div class="flex items-start justify-between gap-4">
                     <div class="flex gap-2 shrink-0 mt-1">
-                        <button onclick="window.approveRequest('${r.id}','${r.name}','${r.phone}')"
+                        <button onclick="window.approveRequest('${escJs(r.id)}','${escJs(r.name)}','${escJs(r.phone)}')"
                             class="px-4 py-2 rounded-xl text-[11px] font-black text-white transition-all"
                             style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.4);">✅ اعتماد</button>
-                        <button onclick="window.rejectRequest('${r.id}','${r.name}')"
+                        <button onclick="window.rejectRequest('${escJs(r.id)}','${escJs(r.name)}')"
                             class="px-4 py-2 rounded-xl text-[11px] font-black text-white transition-all"
                             style="background:rgba(220,38,38,0.15); border:1px solid rgba(220,38,38,0.3);">❌ رفض</button>
                     </div>
                     <div class="flex-1">
                         <div class="flex items-center justify-end gap-3 mb-2">
                             <span class="text-[10px] font-black px-2 py-0.5 rounded-full" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">⏳ بانتظار المراجعة</span>
-                            <p class="text-white font-black text-sm">${r.name}</p>
+                            <p class="text-white font-black text-sm">${esc(r.name)}</p>
                         </div>
                         <div class="grid grid-cols-3 gap-2">
                             <div class="rounded-xl p-2 text-center" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.15);">
-                                <p class="text-indigo-400 font-black text-xs">${r.payMethod || 'CliQ'}</p>
+                                <p class="text-indigo-400 font-black text-xs">${esc(r.payMethod || 'CliQ')}</p>
                                 <p class="text-slate-600 text-[9px] uppercase">طريقة الدفع</p>
                             </div>
                             <div class="rounded-xl p-2 text-center" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.15);">
-                                <p class="text-emerald-400 font-black text-xs">${r.price || 0} $</p>
+                                <p class="text-emerald-400 font-black text-xs">${esc(r.price || 0)} $</p>
                                 <p class="text-slate-600 text-[9px] uppercase">المبلغ</p>
                             </div>
                             <div class="rounded-xl p-2 text-center" style="background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.15);">
-                                <p class="text-purple-400 font-black text-xs">${r.totalLeaders || 1} قائد</p>
+                                <p class="text-purple-400 font-black text-xs">${esc(r.totalLeaders || 1)} قائد</p>
                                 <p class="text-slate-600 text-[9px] uppercase">عدد القادة</p>
                             </div>
                         </div>
                         <div class="flex items-center justify-between mt-2">
                             <p class="text-slate-600 text-[10px]">${new Date(r.timestamp).toLocaleString('ar-SA')}</p>
-                            <p class="text-slate-500 text-[10px]">📞 ${r.phone} &nbsp;|&nbsp; 🔑 ${r.transferRef || '—'}</p>
+                            <p class="text-slate-500 text-[10px]">📞 ${esc(r.phone)} &nbsp;|&nbsp; 🔑 ${esc(r.transferRef || '—')}</p>
                         </div>
                     </div>
                 </div>
@@ -1669,22 +1804,22 @@ window.loadTrials = async () => {
                 : `<span class="text-[10px] px-2 py-0.5 rounded-full font-black bg-slate-500/20 text-slate-400">⛔ منتهي</span>`;
 
             const actions = isPending ? `
-                <button onclick="window.activateTrialByAdmin('${t.id}','${t.name}','${t.phone}','${t.email||''}')"
+                <button onclick="window.activateTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}','${escJs(t.phone)}','${escJs(t.email||'')}')"
                     class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-emerald-600/30">✅ موافقة</button>
-                <button onclick="window.rejectTrialByAdmin('${t.id}','${t.name}')"
+                <button onclick="window.rejectTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}')"
                     class="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-rose-600/30">❌ رفض</button>
             ` : `
-                <button onclick="window.blockTrial('${t.id}','${t.name}')"
+                <button onclick="window.blockTrial('${escJs(t.id)}','${escJs(t.name)}')"
                     class="px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600 text-orange-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-orange-600/30">🚫 حظر</button>
-                <button onclick="window.deleteTrial('${t.id}')"
+                <button onclick="window.deleteTrial('${escJs(t.id)}')"
                     class="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-400 rounded-lg text-[10px] font-black transition-all">🗑️ حذف</button>
             `;
 
             return `
             <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
                 <div class="text-right space-y-1">
-                    <p class="text-white text-xs font-black">${t.name}</p>
-                    <p class="text-slate-500 text-[10px]">${t.phone}</p>
+                    <p class="text-white text-xs font-black">${esc(t.name)}</p>
+                    <p class="text-slate-500 text-[10px]">${esc(t.phone)}</p>
                     ${statusBadge}
                 </div>
                 <div class="flex gap-2">${actions}</div>
@@ -1710,9 +1845,9 @@ window.loadPayments = async () => {
         <div class="rounded-xl border border-white/5 bg-white/3 overflow-hidden">
             <div class="flex items-center justify-between px-4 py-3">
                 <div class="text-right">
-                    <p class="text-white text-xs font-black">${s.ownerName}</p>
-                    <p class="text-slate-500 text-[10px] font-mono">${s.subKey}</p>
-                    <p class="text-slate-600 text-[10px]">ينتهي: ${s.expiryDate || 'غير محدد'}</p>
+                    <p class="text-white text-xs font-black">${esc(s.ownerName)}</p>
+                    <p class="text-slate-500 text-[10px] font-mono">${esc(s.subKey)}</p>
+                    <p class="text-slate-600 text-[10px]">ينتهي: ${esc(s.expiryDate || 'غير محدد')}</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${s.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}">
@@ -1775,9 +1910,9 @@ window.exportSubscribersPDF = () => {
         ${subs.map((s, i) => `
             <tr>
                 <td>${i+1}</td>
-                <td>${s.ownerName || '—'}</td>
+                <td>${esc(s.ownerName || '—')}</td>
                 <td style="font-family:monospace;font-size:10px;">${s.subKey?.substring(0,8)}***</td>
-                <td>${s.maxMembers || 5} أعضاء</td>
+                <td>${esc(s.maxMembers || 5)} أعضاء</td>
                 <td>${s.expiryDate || '—'}</td>
                 <td class="${s.status === 'active' ? 'active' : 'expired'}">${s.status === 'active' ? '✅ نشط' : '⛔ منتهي'}</td>
             </tr>`).join('')}
@@ -1802,10 +1937,10 @@ window.loadBlocked = async () => {
         list.innerHTML = blocked.map(b => `
             <div class="flex items-center justify-between bg-white/3 border border-rose-500/10 rounded-xl px-4 py-3">
                 <div class="text-right">
-                    <p class="text-white text-xs font-black">${b.name}</p>
-                    <p class="text-slate-500 text-[10px]">${b.phone}</p>
+                    <p class="text-white text-xs font-black">${esc(b.name)}</p>
+                    <p class="text-slate-500 text-[10px]">${esc(b.phone)}</p>
                 </div>
-                <button onclick="window.unblockTrial('${b.id}')"
+                <button onclick="window.unblockTrial('${escJs(b.id)}')"
                     class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-emerald-600/30">✅ رفع الحظر</button>
             </div>`).join('');
     } catch(e) {}
@@ -1838,6 +1973,31 @@ window.unblockTrial = async (id) => {
 
 // إضافة صف قائد جديد
 window._leaderCounter = 0;
+window.setActiveStep = (n) => {
+    const labels = ['١', '٢', '٣'];
+    for (let i = 1; i <= 3; i++) {
+        const dot = document.getElementById('stepDot' + i);
+        if (!dot) continue;
+        if (i < n) {
+            dot.textContent = '✓';
+            dot.style.background = 'rgba(16,185,129,0.2)';
+            dot.style.border = '1px solid rgba(16,185,129,0.4)';
+            dot.style.color = '#10b981';
+        } else if (i === n) {
+            dot.textContent = labels[i - 1];
+            dot.style.background = '#10b981';
+            dot.style.border = '1px solid #10b981';
+            dot.style.color = '#000';
+        } else {
+            dot.textContent = labels[i - 1];
+            dot.style.background = 'rgba(255,255,255,0.04)';
+            dot.style.border = '1px solid rgba(255,255,255,0.08)';
+            dot.style.color = '#4b5563';
+        }
+    }
+};
+
+
 window.loadPublicPackages = async () => {
     const box = document.getElementById('publicPackagesRow');
     const divider = document.getElementById('pkgDivider');
@@ -1865,14 +2025,17 @@ window.loadPublicPackages = async () => {
             box.innerHTML = '';
             document.getElementById('packagesStepView')?.classList.add('hidden');
             manualSection?.classList.remove('hidden');
+            window.setActiveStep(2);
             return;
         }
 
         // فيه باقات — نعرض خطوة الباقات ونخفي نموذج البيانات لحين الاختيار
+        window.setActiveStep(1);
         document.getElementById('packagesStepView')?.classList.remove('hidden');
         manualToggle?.classList.remove('hidden');
         manualSection?.classList.add('hidden');
-        const featLabels = { radar: '📍 رادار المواقع GPS', pdfExport: '📄 تصدير تقارير PDF', cloud: '☁️ الأرشيف الرقمي', dashboard: '📊 لوحة الإحصاء' };
+        window._featLabels = { radar: '📍 رادار المواقع GPS', pdfExport: '📄 تصدير تقارير PDF', cloud: '☁️ الأرشيف الرقمي', dashboard: '📊 لوحة الإحصاء' };
+        const featLabels = window._featLabels;
         box.innerHTML = packages.map(p => {
             const featuresRows = [
                 `<div class="feat-row"><span>⚡ نظام الاستجابة</span><span class="fcheck">✓</span></div>`,
@@ -1900,6 +2063,20 @@ window.loadPublicPackages = async () => {
 window.showManualCustomize = () => {
     document.getElementById('packagesStepView')?.classList.add('hidden');
     document.getElementById('manualCustomizeSection')?.classList.remove('hidden');
+    window.setActiveStep(2);
+
+    window._selectedPackagePrice = null;
+    window._selectedPackageId = null;
+    window._selectedPackageFeatures = null;
+    document.getElementById('selectedPackageSummary')?.classList.add('hidden');
+    document.getElementById('addLeaderBtn')?.classList.remove('hidden');
+    document.getElementById('leadersEditableArea')?.classList.remove('hidden');
+    document.getElementById('leadersStaticSummary')?.classList.add('hidden');
+
+    const container = document.getElementById('leadersContainer');
+    if (container) container.innerHTML = '';
+    window._leaderCounter = 0;
+    window.addLeaderRow();
 };
 
 window.backToPackagesStep = () => {
@@ -1912,6 +2089,7 @@ window.selectPackage = (id) => {
     if (!p) return;
     document.getElementById('packagesStepView')?.classList.add('hidden');
     document.getElementById('manualCustomizeSection')?.classList.remove('hidden');
+    window.setActiveStep(2);
     window._applyingPackage = true;
     const container = document.getElementById('leadersContainer');
     if (container) container.innerHTML = '';
@@ -1927,6 +2105,40 @@ window.selectPackage = (id) => {
     window._selectedPackageId = p.id;
     window._selectedPackageFeatures = p.features || {};
     window.updatePlanPrice();
+
+    // ===== تعبئة بطاقة الباقة المختارة =====
+    const featLabels = window._featLabels || {};
+    const featuresRows = [
+        `<div class="feat-row"><span>⚡ نظام الاستجابة</span><span class="fcheck">✓</span></div>`,
+        `<div class="feat-row"><span>🔔 سجل البلاغات</span><span class="fcheck">✓</span></div>`,
+        `<div class="feat-row"><span>👥 إدارة الفريق</span><span class="fcheck">✓</span></div>`,
+        ...Object.entries(featLabels).map(([key, label]) => {
+            const on = p.features && p.features[key] === true;
+            return `<div class="feat-row"><span>${label}</span><span class="${on ? 'fcheck' : 'fdash'}">${on ? '✓' : '—'}</span></div>`;
+        })
+    ].join('');
+    const badgeEl = document.getElementById('selectedPkgBadge');
+    if (badgeEl) {
+        if (p.badge) { badgeEl.textContent = p.badge; badgeEl.classList.remove('hidden'); }
+        else badgeEl.classList.add('hidden');
+    }
+    const titleEl = document.getElementById('selectedPkgTitle');
+    if (titleEl) titleEl.textContent = p.title;
+    const subEl = document.getElementById('selectedPkgSub');
+    if (subEl) subEl.textContent = `${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء`;
+    const priceEl = document.getElementById('selectedPkgPrice');
+    if (priceEl) priceEl.textContent = `${p.price} $`;
+    const featEl = document.getElementById('selectedPkgFeatures');
+    if (featEl) featEl.innerHTML = featuresRows;
+    document.getElementById('selectedPackageSummary')?.classList.remove('hidden');
+
+    // ===== ملخص ثابت للقادة بدل الصفوف القابلة للتعديل =====
+    document.getElementById('addLeaderBtn')?.classList.add('hidden');
+    document.getElementById('leadersEditableArea')?.classList.add('hidden');
+    const staticText = document.getElementById('leadersStaticText');
+    if (staticText) staticText.textContent = `${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء`;
+    document.getElementById('leadersStaticSummary')?.classList.remove('hidden');
+
     window.showNotif(`✅ تم اختيار باقة "${p.title}" — يرجى تعبئة بياناتك بالأسفل`, 'success');
 
     };
@@ -2033,7 +2245,7 @@ window.renderLeaderSidebar = () => {
             class="leader-side-card ${active ? 'leader-side-card-active' : ''}">
             <div class="leader-avatar-lux" style="background:linear-gradient(135deg, ${barColor}33, rgba(245,158,11,0.08)); border-color:${barColor}88;">${initial}</div>
             <div class="flex-1 min-w-0">
-                <p class="text-white text-xs font-black truncate">${l.ownerName}</p>
+                <p class="text-white text-xs font-black truncate">${esc(l.ownerName)}</p>
                 <div class="flex items-center gap-2 mt-2.5">
                     <div class="leader-progress-track">
                         <div class="leader-progress-fill" style="width:${pct}%; background:${barColor}; box-shadow:0 0 8px ${barColor}aa;"></div>
@@ -2051,7 +2263,7 @@ window.selectLeaderInSidebar = (leaderId) => {
     const leader = (window.subscribers || []).find(s => s.id === leaderId);
     const headerTitle = document.getElementById('teamWinTitle');
     if (headerTitle && leader) {
-        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${leader.ownerName}</span>`;
+        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${esc(leader.ownerName)}</span>`;
     }
     document.getElementById('teamDetailEmptyState')?.classList.add('hidden');
     document.getElementById('teamDetailEmptyState')?.classList.remove('flex');
@@ -2129,7 +2341,7 @@ window.renderOrphanCleanupList = () => {
         <div class="flex items-center justify-between gap-3 rounded-xl p-3 border border-white/8" style="background:rgba(255,255,255,0.02);">
             <input type="checkbox" class="orphanCheckbox" value="${m.id}">
             <div class="flex-1 min-w-0 text-right">
-                <p class="text-white text-xs font-black truncate">${m.memberName || '—'}</p>
+                <p class="text-white text-xs font-black truncate">${esc(m.memberName || '—')}</p>
                 <p class="text-[10px] font-mono text-slate-500 truncate">${m.teamKey || m.id} — قائد مفقود: ${m.parentKey || '—'}</p>
             </div>
             <button onclick="window.deleteEntry('member','${m.id}')" title="حذف" class="text-red-400 text-sm hover:scale-110 transition-all">🗑️</button>
@@ -2236,7 +2448,7 @@ window.renderTeamTable = () => {
         return `
         <div class="team-card${compactClass}" onclick="window.openMemberDetail('${docId}')">
             <div class="team-card-avatar">${seqNumber}</div>
-            <p class="text-white font-black text-base truncate">${member.memberName}</p>
+            <p class="text-white font-black text-base truncate">${esc(member.memberName)}</p>
             <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
                 👤 عضو فريق
             </span>
@@ -2425,7 +2637,7 @@ window.showNotif = (t, type) => {
 
     el.innerHTML = `
         <span class="text-xl flex-shrink-0">${icons[type] || '⚠️'}</span>
-        <span class="flex-1 text-right">${t}</span>
+        <span class="flex-1 text-right">${esc(t)}</span>
         <button onclick="document.getElementById('notif').style.display='none'" 
                 class="flex-shrink-0 opacity-40 hover:opacity-100 text-lg leading-none transition-opacity">✕</button>
     `;
@@ -2453,7 +2665,68 @@ window.showNotif = (t, type) => {
 
 
 
+// ===== أداة ترحيل الحسابات الحالية إلى Firebase Authentication =====
+// تُستخدم مرة واحدة لكل حساب قديم (قائد/عضو/إدارة)، من داخل Console (F12) وأنت مسجّل دخولاً كـ Master.
+window.migrateAccountToAuth = async (opts) => {
+    // opts = { email, password, role, docId }
+    // role: 'master' | 'leader' | 'member'
+    // docId: مطلوب لـ leader/member فقط = معرّف مستنده الحالي في subscribers/team_keys (window.activeKey سابقاً)
+    if (!opts || !opts.email || !opts.password || !opts.role) {
+        console.error('استخدم: window.migrateAccountToAuth({email, password, role, docId})');
+        return;
+    }
+    const secondaryApp = initializeApp(firebaseConfig, 'migration_' + Date.now());
+    const secondaryAuth = getAuth(secondaryApp);
+    try {
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, opts.email, opts.password);
+        const uid = cred.user.uid;
+        const membershipData = { role: opts.role, createdAt: Date.now() };
+        if (opts.role !== 'master') membershipData.docId = opts.docId;
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'memberships', uid), membershipData);
+        await signOut(secondaryAuth);
+        console.log('✅ تم إنشاء الحساب وربطه:', opts.email, '-> uid:', uid);
+        return uid;
+    } catch (e) {
+        console.error('❌ فشل الترحيل:', opts.email, e.code || e.message);
+    } finally {
+        await deleteApp(secondaryApp).catch(() => {});
+    }
+};
 
+// ===== تعيين/تغيير كود تسجيل الخروج لقائد أو عضو (تُستخدم من واجهة الشركة لاحقاً) =====
+window.setLogoutCode = async (role, docId, newCode) => {
+    const collName = role === 'member' ? 'team_keys' : 'subscribers';
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', collName, docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { window.showNotif('⛔ الحساب غير موجود', 'error'); return; }
+    const data = snap.data();
+    const isFirstTime = !data.logoutCodeHash;
+    const allowed = typeof data.logoutChangesAllowed === 'number' ? data.logoutChangesAllowed : 1;
+
+    if (!isFirstTime && allowed <= 0) {
+        window.showNotif('⛔ استُنفد التغيير المجاني. تواصل مع مدير النظام لمنحك تغييراً إضافياً.', 'error');
+        return;
+    }
+
+    const codeHash = await hashInput(newCode, MASTER_SALT);
+    const update = { logoutCodeHash: codeHash };
+    if (!isFirstTime) update.logoutChangesAllowed = allowed - 1;
+    else update.logoutChangesAllowed = allowed;
+
+    await updateDoc(ref, update);
+    window.showNotif(isFirstTime ? '✅ تم تعيين كود الخروج' : `✅ تم تغيير كود الخروج (تبقّى ${allowed - 1} تغيير مجاني)`, 'success');
+};
+
+// ===== منح تغييرات إضافية لكود الخروج (الإدارة فقط) =====
+window.grantLogoutChanges = async (role, docId, extraChanges) => {
+    const collName = role === 'member' ? 'team_keys' : 'subscribers';
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', collName, docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { window.showNotif('⛔ الحساب غير موجود', 'error'); return; }
+    const current = snap.data().logoutChangesAllowed || 0;
+    await updateDoc(ref, { logoutChangesAllowed: current + Number(extraChanges) });
+    window.showNotif(`✅ أصبح لديه الآن ${current + Number(extraChanges)} تغيير متاح`, 'success');
+};
 
 
 
@@ -2730,7 +3003,7 @@ window.openLeaderQuickRoster = (leaderId, leaderName) => {
             return `
             <div class="team-card${compactClass}" onclick="window.openMemberDetail('${member.id}')">
                 <div class="team-card-avatar">${seqNumber}</div>
-                <p class="text-white font-black text-base truncate">${member.memberName}</p>
+                <p class="text-white font-black text-base truncate">${esc(member.memberName)}</p>
                 <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
                     👤 عضو فريق
                 </span>
@@ -3069,7 +3342,7 @@ window.loadPackagesForAdminAdd = async () => {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'packages'));
         window._adminAddPackagesCache = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.active !== false);
         sel.innerHTML = '<option value="">-- بدون باقة (حدد المزايا يدويًا) --</option>' +
-            window._adminAddPackagesCache.map(p => `<option value="${p.id}">${p.title} (${p.price}$)</option>`).join('');
+            window._adminAddPackagesCache.map(p => `<option value="${esc(p.id)}">${esc(p.title)} (${esc(p.price)}$)</option>`).join('');
     } catch (e) {}
 };
 
@@ -3083,6 +3356,7 @@ window.renderNewLeaderFeatCheckboxes = () => {
 
 window.openAddSubModal = () => {
     window._editingSubId = null;
+    window.populateLinkCompanyDropdown();
     ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -3127,6 +3401,22 @@ window.applyPackageToNewLeaderForm = () => {
     });
 };
 
+window.populateLinkCompanyDropdown = () => {
+    const sel = document.getElementById('new_l_linkCompany');
+    if (!sel) return;
+    const subs = window.subscribers || [];
+    const seen = new Set();
+    let options = '<option value="">-- شركة جديدة مستقلة --</option>';
+    subs.forEach(s => {
+        const cId = s.companyId || s.id;
+        if (seen.has(cId)) return;
+        seen.add(cId);
+        const label = s.companyName || s.ownerName || cId;
+        options += `<option value="${esc(cId)}">${esc(label)}</option>`;
+    });
+    sel.innerHTML = options;
+};
+
 window.addNewSub = async () => {
     const n = document.getElementById('new_ln').value, 
           plainKey = document.getElementById('new_lk').value, 
@@ -3150,6 +3440,9 @@ window.addNewSub = async () => {
         const features = {};
         window.FEATURE_CATALOG.forEach(f => { features[f] = document.getElementById('new_lfeat_' + f)?.checked || false; });
 
+        const linkedCompanyId = document.getElementById('new_l_linkCompany')?.value || '';
+        const linkedCompany = linkedCompanyId ? (window.subscribers || []).find(s => (s.companyId || s.id) === linkedCompanyId) : null;
+
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hashedKey);
         await setDoc(ref, { 
             ownerName: n, 
@@ -3164,6 +3457,9 @@ window.addNewSub = async () => {
             expiryDate: ex, 
             maxMembers: members, 
             features: features,
+            companyId: linkedCompanyId || hashedKey,
+            companyName: linkedCompany ? (linkedCompany.companyName || linkedCompany.ownerName) : n,
+            isCompanyOwner: !linkedCompanyId,
             updatedAt: Date.now() 
         }, { merge: true });
 
@@ -3287,6 +3583,7 @@ window.clearAllReports = () => {
 
 // --- محرك تشغيل النظام والواجهة (محدث بقوة الإظهار) ---
 window.launchOS = (role, key, msg) => {
+    window._loginGuard?.reset();
     // تحديد نوع الجلسة
     // تحديد نوع الجلسة
     const _keepTrial = window.isTrial === true;
@@ -3625,13 +3922,13 @@ const mode = window.searchMode || 'un';
     // 3. بناء قائمة النتائج
     if (results.length > 0) {
         dropdown.innerHTML = results.map(item => `
-            <div onclick="window.pickMat('${item.un || item.UN}')" 
+            <div onclick="window.pickMat('${escJs(item.un || item.UN)}')" 
                  class="p-5 border-b border-white/5 cursor-pointer hover:bg-white/10 flex justify-between items-center transition-all group">
                 <span class="bg-blue-600/20 text-blue-400 group-hover:bg-blue-600 group-hover:text-white px-4 py-1.5 rounded-full text-[11px] font-black tracking-widest font-mono">
-                    UN ${item.un || item.UN}
+                    UN ${esc(item.un || item.UN)}
                 </span>
                 <span class="text-sm font-bold text-white group-hover:text-blue-400 transition-colors italic">
-                    ${item.name || item.Name}
+                    ${esc(item.name || item.Name)}
                 </span>
             </div>
         `).join('');
@@ -3662,7 +3959,11 @@ window.mapShowAll = () => {
 window.mapShowReports = async () => {
     if (!window.map) return;
     try {
-        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'emergency_reports'));
+        const emergencyColl = collection(db, 'artifacts', appId, 'public', 'data', 'emergency_reports');
+        const emergencyQ = (window.userRole === 'leader')
+            ? query(emergencyColl, where('parentKey', '==', window.activeKey))
+            : emergencyColl;
+        const snap = await getDocs(emergencyQ);
         snap.forEach(doc => {
             const d = doc.data();
             if (d.location?.lat) {
@@ -3673,7 +3974,7 @@ window.mapShowReports = async () => {
                         iconSize: [32, 32]
                     })
                 }).addTo(window.map)
-                  .bindPopup(`<b>${d.memberName}</b><br>${d.material}<br>${new Date(d.timestamp).toLocaleString('ar-SA')}`);
+                  .bindPopup(`<b>${esc(d.memberName)}</b><br>${esc(d.material)}<br>${new Date(d.timestamp).toLocaleString('ar-SA')}`);
             }
         });
         window.showNotif("✅ تم تحميل مواقع البلاغات", "success");
@@ -3769,8 +4070,8 @@ const myReports = window.userRole === 'master'
                 const marker = L.marker([r.coords.lat, r.coords.lng], {icon: icon})
                     .bindPopup(`
                         <div class="text-right font-tajawal" dir="rtl">
-                            <strong style="color:${markerColor}; font-size: 16px;">${r.materialName} (UN ${r.un})</strong><br>
-                            <b>المصدر:</b> ${r.memberName}<br>
+                            <strong style="color:${markerColor}; font-size: 16px;">${esc(r.materialName)} (UN ${esc(r.un)})</strong><br>
+                            <b>المصدر:</b> ${esc(r.memberName)}<br>
                             <b>الوقت:</b> ${new Date(r.timestamp).toLocaleTimeString('ar-SA')}<br>
                             <span style="font-size: 11px; color: gray;">الحالة: ${r.priority === 'high' ? 'عاجل ⚠️' : 'نشط 📡'}</span>
                         </div>
@@ -4078,8 +4379,25 @@ hideLoader();
 
 
 
+// دالة تجيب كل مفاتيح القادة التابعين لنفس الشركة (لو كان المستخدم مالك شركة)
+window.getMyScopeKeys = async () => {
+    if (window.userRole !== 'leader') return [window.activeKey];
+    if (!window.isCompanyOwner || !window.myCompanyId) return [window.activeKey];
+    try {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId));
+        const snap = await getDocs(q);
+        const keys = snap.docs.map(d => d.id);
+        return keys.length > 0 ? keys : [window.activeKey];
+    } catch(e) { return [window.activeKey]; }
+};
+
 // 3. مزامنة البلاغات الميدانية الحية (نسخة الإنذار الذكي المفلتر)
-onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reports'), (snapshot) => {
+window._myScopeKeys = await window.getMyScopeKeys();
+const reportsListenerRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
+const reportsListenerQuery = (window.userRole === 'master')
+    ? query(reportsListenerRef)
+    : query(reportsListenerRef, where('parentKey', 'in', window._myScopeKeys));
+onSnapshot(reportsListenerQuery, (snapshot) => {
     
     snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
@@ -4150,7 +4468,7 @@ const filteredReports = window.userRole === 'master'
     // 4. مزامنة أعضاء الفريق (حسب الرتبة)
     const teamRef = collection(db, 'artifacts', appId, 'public', 'data', 'team_keys');
     const teamQuery = (window.userRole === 'leader' || window.userRole === 'sub')
-        ? query(teamRef, where("parentKey", "==", window.activeKey))
+        ? query(teamRef, where("parentKey", "in", window._myScopeKeys || [window.activeKey]))
         : teamRef;
 
     onSnapshot(teamQuery, (snapshot) => {
@@ -4398,7 +4716,7 @@ window.exportPDF = async () => {
                         ● HAZARDOUS MATERIAL IDENTIFIED
                     </div>
                     <div style="font-size:36px; font-weight:900; color:#fff; line-height:1.1; margin-bottom:8px;">
-                        ${m.name || m.Name}
+                        ${esc(m.name || m.Name)}
                     </div>
                     <div style="font-size:16px; color:#60a5fa; font-family:monospace; letter-spacing:2px;">
                         ${(m.formula || '--').replace(/(\d+)/g, '<sub>$1</sub>')}
@@ -4526,7 +4844,7 @@ window.exportPDF = async () => {
             <div style="font-size:11px; color:#00d1ff; letter-spacing:3px; text-transform:uppercase; margin-bottom:14px;">
                 ● PLUME DISPERSION SIMULATION — محاكاة انتشار السحابة
             </div>
-            <img src="${plumeImage}" style="width:100%; border-radius:12px;
+            <img src="${plumeImage}" alt="محاكاة انتشار السحابة الكيميائية" style="width:100%; border-radius:12px;
                  border:1px solid #334155; display:block;"/>
             <div style="display:flex; justify-content:space-between; margin-top:8px;">
                 <span style="font-size:10px; color:#475569; font-family:monospace;">
@@ -4626,7 +4944,7 @@ window.exportFullIncidentPDF = async () => {
             </tr>
             <tr style="background:#fef2f2;">
                 <td style="padding:8px 12px; font-weight:700; width:40%;">اسم المادة</td>
-                <td style="padding:8px 12px;">${m.name || m.NAME || '—'}</td>
+                <td style="padding:8px 12px;">${esc(m.name || m.NAME || '—')}</td>
             </tr>
             <tr>
                 <td style="padding:8px 12px; font-weight:700;">رقم UN</td>
@@ -5178,19 +5496,19 @@ window.runCommandSearch = (q) => {
     let html = '';
     if (members.length) {
         html += `<div class="cmd-result-cat">👤 الأعضاء</div>`;
-        html += members.map(m => `<div class="cmd-result-item" onclick="window.cmdGoMember('${m.id}')"><span>👤</span><span class="flex-1 text-white text-sm font-bold">${m.name || m.Name}</span></div>`).join('');
+        html += members.map(m => `<div class="cmd-result-item" onclick="window.cmdGoMember('${escJs(m.id)}')"><span>👤</span><span class="flex-1 text-white text-sm font-bold">${esc(m.name || m.Name)}</span></div>`).join('');
     }
     if (leaders.length) {
         html += `<div class="cmd-result-cat">🎖️ القادة</div>`;
-        html += leaders.map(s => `<div class="cmd-result-item" onclick="window.cmdGoLeader('${s.id}')"><span>🎖️</span><span class="flex-1 text-white text-sm font-bold">${s.ownerName}</span></div>`).join('');
+        html += leaders.map(s => `<div class="cmd-result-item" onclick="window.cmdGoLeader('${escJs(s.id)}')"><span>🎖️</span><span class="flex-1 text-white text-sm font-bold">${esc(s.ownerName)}</span></div>`).join('');
     }
     if (materials.length) {
         html += `<div class="cmd-result-cat">⚠️ المواد الخطرة</div>`;
-        html += materials.map(m => `<div class="cmd-result-item" onclick="window.cmdGoMaterial('${(m.name || m.Name || '').replace(/'/g, "\\'")}')"><span>⚠️</span><span class="flex-1 text-white text-sm font-bold">${m.name || m.Name} <span class="text-slate-500 font-mono text-xs">UN ${m.un || '--'}</span></span></div>`).join('');
+        html += materials.map(m => `<div class="cmd-result-item" onclick="window.cmdGoMaterial('${escJs(m.name || m.Name || '')}')"><span>⚠️</span><span class="flex-1 text-white text-sm font-bold">${esc(m.name || m.Name)} <span class="text-slate-500 font-mono text-xs">UN ${esc(m.un || '--')}</span></span></div>`).join('');
     }
     if (reports.length) {
         html += `<div class="cmd-result-cat">🚨 البلاغات</div>`;
-        html += reports.map(r => `<div class="cmd-result-item" onclick="window.cmdGoReport()"><span>🚨</span><span class="flex-1 text-white text-sm font-bold">${r.materialName || '--'} <span class="text-slate-500 text-xs">— ${r.memberName || ''}</span></span></div>`).join('');
+        html += reports.map(r => `<div class="cmd-result-item" onclick="window.cmdGoReport()"><span>🚨</span><span class="flex-1 text-white text-sm font-bold">${esc(r.materialName || '--')} <span class="text-slate-500 text-xs">— ${esc(r.memberName || '')}</span></span></div>`).join('');
     }
     results.innerHTML = html;
 };
@@ -5211,7 +5529,7 @@ window.renderNotifCenter = () => {
     const icons = { success: '✅', error: '❌', info: 'ℹ️' };
     list.innerHTML = window._notifHistory.map(n => `
         <div class="notif-item">
-            <span>${icons[n.type] || '⚠️'} ${n.text}</span>
+            <span>${icons[n.type] || '⚠️'} ${esc(n.text)}</span>
             <div class="notif-time">${new Date(n.time).toLocaleTimeString('ar-SA', {hour:'2-digit', minute:'2-digit'})}</div>
         </div>
     `).join('');
@@ -5377,8 +5695,8 @@ window.exportDashboardPDF = () => {
     // آخر البلاغات
     const feedRows = reports.slice(0, 10).map(r => `
         <tr style="border-bottom:1px solid #1e293b;">
-            <td style="padding:10px 14px; font-size:12px; color:#cbd5e1;">${r.materialName || '--'}</td>
-            <td style="padding:10px 14px; font-size:12px; color:#94a3b8;">${r.memberName || '--'}</td>
+            <td style="padding:10px 14px; font-size:12px; color:#cbd5e1;">${esc(r.materialName || '--')}</td>
+            <td style="padding:10px 14px; font-size:12px; color:#94a3b8;">${esc(r.memberName || '--')}</td>
             <td style="padding:10px 14px; font-size:11px; color:#64748b; font-family:monospace;">
                 ${new Date(r.timestamp).toLocaleString('ar-SA')}
             </td>
@@ -5648,8 +5966,8 @@ window.loadPendingRequests = async () => {
         <!-- الهيدر -->
         <div class="flex justify-between items-start">
             <div>
-                <p class="font-black text-white text-lg">👤 ${r.name || '--'}</p>
-                <p class="text-slate-400 text-sm font-bold mt-1">📞 ${r.phone || '--'}</p>
+                <p class="font-black text-white text-lg">👤 ${esc(r.name || '--')}</p>
+                <p class="text-slate-400 text-sm font-bold mt-1">📞 ${esc(r.phone || '--')}</p>
             </div>
             <span class="text-xs bg-amber-600/20 text-amber-400 px-3 py-1.5 rounded-full font-black border border-amber-600/30 flex-shrink-0">
                 ⏳ بانتظار التحقق
@@ -5660,11 +5978,11 @@ window.loadPendingRequests = async () => {
         <div class="grid grid-cols-2 gap-3">
             <div class="bg-white/5 rounded-xl p-3 text-center">
                 <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">طريقة الدفع</p>
-                <p class="text-cyan-400 font-black text-sm">${r.payMethod || 'غير محدد'}</p>
+                <p class="text-cyan-400 font-black text-sm">${esc(r.payMethod || 'غير محدد')}</p>
             </div>
             <div class="bg-white/5 rounded-xl p-3 text-center">
                 <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">مرجع التحويل</p>
-                <p class="text-emerald-400 font-mono font-black text-sm">${r.transferRef || '---'}</p>
+                <p class="text-emerald-400 font-mono font-black text-sm">${esc(r.transferRef || '---')}</p>
             </div>
         </div>
 
@@ -5675,11 +5993,18 @@ window.loadPendingRequests = async () => {
 
         <!-- الأزرار -->
         <div class="flex gap-3 pt-1">
-            <button onclick="window.approveRequest('${r.id}', '${r.name}', '${r.phone}')"
+            ${r.type === 'renewal' ? `
+            <button onclick="window.approveRenewal('${escJs(r.id)}', '${escJs(r.leaderKey || '')}')"
+                class="flex-1 py-3 bg-sky-600 rounded-2xl font-black text-white text-sm hover:bg-sky-500 transition-all border-b-4 border-sky-900">
+                🔄 اعتماد التجديد
+            </button>
+            ` : `
+            <button onclick="window.approveRequest('${escJs(r.id)}', '${escJs(r.name)}', '${escJs(r.phone)}')"
                 class="flex-1 py-3 bg-emerald-600 rounded-2xl font-black text-white text-sm hover:bg-emerald-500 transition-all border-b-4 border-emerald-900">
                 ✅ اعتماد وإرسال الكود
             </button>
-            <button onclick="window.rejectRequest('${r.id}')"
+            `}
+            <button onclick="window.rejectRequest('${escJs(r.id)}')"
                 class="flex-1 py-3 bg-rose-600/20 rounded-2xl font-black text-rose-400 text-sm hover:bg-rose-600 hover:text-white transition-all border border-rose-600/30">
                 ❌ رفض
             </button>
@@ -5703,6 +6028,39 @@ window.loadPendingRequests = async () => {
     } catch(e) {
         console.error('loadPendingRequests error:', e);
     }
+};
+
+window.approveRenewal = async (reqId, leaderKey) => {
+    if (!leaderKey) { window.showNotif("⚠️ هذا الطلب لا يحتوي مفتاح القائد — لا يمكن التجديد التلقائي", "error"); return; }
+    window.showConfirm(
+        "تجديد الاشتراك",
+        "سيتم تمديد اشتراك القائد سنة إضافية من تاريخ اليوم. متابعة؟",
+        async () => {
+            try {
+                const subRef = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderKey);
+                const subSnap = await getDoc(subRef);
+                if (!subSnap.exists()) { window.showNotif("⛔ حساب القائد غير موجود", "error"); return; }
+
+                const newExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                await updateDoc(subRef, {
+                    expiryDate: newExpiry,
+                    isPaid: true,
+                    status: 'active'
+                });
+
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId), {
+                    status: 'Approved',
+                    approvedAt: Date.now()
+                });
+
+                window.logActivity('renewal_approved', `تم تجديد اشتراك القائد: ${leaderKey}`);
+                window.showNotif("✅ تم تجديد الاشتراك بنجاح حتى " + newExpiry, "success");
+                window.loadPendingRequests();
+            } catch(e) {
+                window.showNotif("❌ فشل تجديد الاشتراك", "error");
+            }
+        }
+    );
 };
 
 window.approveRequest = async (reqId, name, phone) => {
@@ -5732,11 +6090,15 @@ window.approveRequest = async (reqId, name, phone) => {
                 const numLeaders = leadersData.length > 0 ? leadersData.length : totalLeaders;
                 const expiryDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+                // توليد معرّف شركة موحد يجمع كل القادة تحت هذا الطلب
+                const companyId = 'CMP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
                 // توليد كود لكل قائد وحفظه
                 const generatedKeys = [];
                 for (let i = 0; i < numLeaders; i++) {
                     const newKey = genKey();
                     const membersForThisLeader = leadersData[i]?.members || reqData.plan || 5;
+                    const isOwner = (i === 0); // أول قائد بالطلب = مالك الشركة
 
                     await setDoc(
                         doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey),
@@ -5750,10 +6112,13 @@ window.approveRequest = async (reqId, name, phone) => {
                             createdAt: Date.now(),
                             expiryDate: expiryDate,
                             parentRequest: reqId,
-                            features: reqData.packageFeatures || null
+                            features: reqData.packageFeatures || null,
+                            companyId: companyId,
+                            companyName: name,
+                            isCompanyOwner: isOwner
                         }
                     );
-                    generatedKeys.push({ leaderNum: i + 1, key: newKey, members: membersForThisLeader });
+                    generatedKeys.push({ leaderNum: i + 1, key: newKey, members: membersForThisLeader, isOwner });
                 }
 
                 // تحديث حالة الطلب مع جميع الأكواد
@@ -6171,7 +6536,7 @@ window.populateChatLeaders = () => {
     if (!sel) return;
     const leaders = window.subscribers || [];
     const options = `<option value="MASTER_BROADCAST">📢 جميع القادة (بث عام)</option>` +
-        leaders.map(l => `<option value="${l.subKey || l.id}">👤 ${l.ownerName}</option>`).join('');
+        leaders.map(l => `<option value="${esc(l.subKey || l.id)}">👤 ${esc(l.ownerName)}</option>`).join('');
     sel.innerHTML = options;
 };
 
@@ -6328,8 +6693,8 @@ window.loadChatMessages = (roomKey = null) => {
                 return `
                 <div class="flex ${isMe ? 'justify-start' : 'justify-end'} items-end gap-2">
                     <div class="${isMe ? 'chat-bubble-in' : 'chat-bubble-out'} ${isNew ? 'ring-1 ring-emerald-500/40' : ''}">
-                        <p class="text-[10px] font-black ${isMe ? 'text-blue-400' : 'text-emerald-400'} mb-1">${m.senderName||'مجهول'}</p>
-                        <p class="font-bold">${m.text}</p>
+                        <p class="text-[10px] font-black ${isMe ? 'text-blue-400' : 'text-emerald-400'} mb-1">${esc(m.senderName||'مجهول')}</p>
+                        <p class="font-bold">${esc(m.text)}</p>
                         <p class="chat-time text-left">${new Date(m.timestamp).toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'})}</p>
                     </div>
                 </div>`;
@@ -6413,7 +6778,7 @@ window.loadActivityLog = async () => {
                     ${icons[log.action] || '📋'}
                 </div>
                 <div class="flex-1 text-right">
-                    <p class="text-white font-black text-sm">${log.details || log.action}</p>
+                    <p class="text-white font-black text-sm">${esc(log.details || log.action)}</p>
                     <p class="text-slate-500 text-xs font-bold mt-0.5">${new Date(log.timestamp).toLocaleString('ar-SA')}</p>
                 </div>
                 <span class="text-[10px] font-black px-2 py-1 rounded-full ${log.role === 'master' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}">
@@ -6458,7 +6823,7 @@ window.loadSecurityLog = async () => {
                     ${icons[log.action] || '📋'}
                 </div>
                 <div class="flex-1 text-right">
-                    <p class="text-white font-black text-sm">${log.details || log.action}</p>
+                    <p class="text-white font-black text-sm">${esc(log.details || log.action)}</p>
                     <p class="text-slate-500 text-xs font-bold mt-0.5">${new Date(log.timestamp).toLocaleString('ar-SA')}</p>
                 </div>
                 <span class="text-[10px] font-black px-2 py-1 rounded-full ${log.role === 'master' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}">
@@ -6498,14 +6863,18 @@ window.rejectRequest = async (reqId) => {
 
 // ===== محرك لوحة الإحصاء =====
 window.refreshDashboard = async () => {
-    // جلب البيانات من Firebase إذا لم تكن محملة
+    // جلب البيانات من Firebase إذا لم تكن محملة (مفلترة حسب الصلاحية)
     if (!window.allReports?.length) {
         try {
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'reports'));
+            const reportsColl = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
+            const reportsQ = (window.userRole === 'leader')
+                ? query(reportsColl, where('parentKey', '==', window.activeKey))
+                : reportsColl;
+            const snap = await getDocs(reportsQ);
             window.allReports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         } catch(e) {}
     }
-    if (!window.subscribers?.length) {
+    if (!window.subscribers?.length && window.userRole === 'master') {
         try {
             const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'));
             window.subscribers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -6513,7 +6882,11 @@ window.refreshDashboard = async () => {
     }
     if (!window.teamMembers?.length) {
         try {
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'team_keys'));
+            const teamColl = collection(db, 'artifacts', appId, 'public', 'data', 'team_keys');
+            const teamQ = (window.userRole === 'leader')
+                ? query(teamColl, where('parentKey', '==', window.activeKey))
+                : teamColl;
+            const snap = await getDocs(teamQ);
             window.teamMembers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         } catch(e) {}
     }
@@ -6817,13 +7190,13 @@ window.idleUnlock = async () => {
     document.addEventListener(evt, window.resetIdleTimer, { passive: true });
 });
 
-window.goHome = async () => { // تمت إضافة async هنا
+window.goHome = async () => {
     const fullLogout = () => {
         localStorage.removeItem('app_activation_key');
         window.activeSubKey = null;
         window.activeKey = null;
         window.userRole = null;
-        
+
         const inputField = document.getElementById('activationInput');
         if(inputField) inputField.value = '';
 
@@ -6832,22 +7205,27 @@ window.goHome = async () => { // تمت إضافة async هنا
         setTimeout(() => { location.reload(); }, 1000);
     };
 
+    // 1. القائد (غير مالك شركة) والعضو: يتطلب كود خروج معتمد من الشركة
+    if (window.userRole === 'member' || (window.userRole === 'leader' && !window.isCompanyOwner)) {
+        const collName = window.userRole === 'member' ? 'team_keys' : 'subscribers';
+        const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, window.activeKey));
+        const codeHash = docSnap.exists() ? docSnap.data().logoutCodeHash : null;
 
-// 1. حالة العضو الميداني: التحقق المشفر
-    if (window.userRole === 'member') {
-        window.showConfirm(
-            "⚠️ تسجيل الخروج",
-            "هذا الجهاز مقيد. هل تريد إنهاء الجلسة الميدانية؟",
-            async () => {
-                const inputHash = await hashInput("EXIT_OVERRIDE", MASTER_SALT);
-                fullLogout();
-            }
-        );
+        if (!codeHash) {
+            window.showNotif("⛔ لم يُعيَّن كود تسجيل خروج بعد. تواصل مع الشركة أو الإدارة.", "error");
+            return;
+        }
+
+        window._logoutCheckHash = codeHash;
+        window._logoutCheckActive = true;
+        document.getElementById('otpModalTitle').textContent = '🔑 كود تسجيل الخروج';
+        document.getElementById('otpModalSubtitle').textContent = 'أدخل كود الخروج الذي زوّدتك به الشركة';
+        document.getElementById('otpInput').value = '';
+        document.getElementById('otpModal').classList.replace('hidden', 'flex');
         return;
     }
 
-
-    // 2. حالة المدير أو القائد
+    // 2. حالة المدير أو الشركة (القائد المالك)
     const activeApps = document.querySelectorAll('.app-window:not(.hidden)');
     let hasOpenApp = false;
     activeApps.forEach(app => {
@@ -6862,19 +7240,15 @@ window.goHome = async () => { // تمت إضافة async هنا
         });
         document.getElementById('os_desktop')?.classList.remove('hidden');
     } else {
-    
-window.showConfirm(
+
+        window.showConfirm(
             "تسجيل الخروج",
-            "هل تريد تسجيل الخروج تماماً للتبديل لكود آخر؟",
+            "هل تريد تسجيل الخروج تماماً؟",
             () => fullLogout()
         );
 
-
-
     }
 };
-
-
 
 
 
@@ -7079,8 +7453,8 @@ window.exportReportsPDF = () => {
     const rows = reports.map((r, i) => `
         <tr style="background:${i % 2 === 0 ? '#0a0f1d' : '#050810'}">
             <td style="padding:10px;border:1px solid #1e293b;color:#94a3b8;font-size:11px;text-align:center">${i + 1}</td>
-            <td style="padding:10px;border:1px solid #1e293b;color:#fff;font-weight:900">${r.materialName || '--'} / UN ${r.un || '--'}</td>
-            <td style="padding:10px;border:1px solid #1e293b;color:#94a3b8">${r.memberName || '--'}</td>
+            <td style="padding:10px;border:1px solid #1e293b;color:#fff;font-weight:900">${esc(r.materialName || '--')} / UN ${esc(r.un || '--')}</td>
+            <td style="padding:10px;border:1px solid #1e293b;color:#94a3b8">${esc(r.memberName || '--')}</td>
             <td style="padding:10px;border:1px solid #1e293b;text-align:center">
                 <span style="background:${r.priority === 'high' ? '#991b1b' : '#14532d'};color:${r.priority === 'high' ? '#fca5a5' : '#86efac'};padding:3px 10px;border-radius:999px;font-size:10px;font-weight:900">
                     ${r.priority === 'high' ? '⚠️ عاجل' : '✅ عادي'}
@@ -7358,19 +7732,19 @@ window.filterReports = () => {
                 <div class="flex-1">
                     <div class="flex items-center justify-end gap-2 mb-2">
                         <span class="text-[10px] font-black px-2 py-0.5 rounded-full" style="${r.priority === 'high' ? 'background:rgba(220,38,38,0.15); color:#f87171;' : 'background:rgba(16,185,129,0.15); color:#34d399;'}">${r.priority === 'high' ? '⚠️ عاجل' : '✅ عادي'}</span>
-                        <p class="text-white font-black text-sm">${r.materialName || '--'} <span class="text-slate-500 font-mono">UN ${r.un || '--'}</span></p>
+                        <p class="text-white font-black text-sm">${esc(r.materialName || '--')} <span class="text-slate-500 font-mono">UN ${esc(r.un || '--')}</span></p>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div class="rounded-xl p-2" style="background:rgba(0,0,0,0.3);">
                             <p class="text-[9px] text-slate-500 uppercase font-black">العضو</p>
-                            <p class="text-slate-300 text-xs font-bold">👤 ${r.memberName || 'غير معروف'}</p>
+                            <p class="text-slate-300 text-xs font-bold">👤 ${esc(r.memberName || 'غير معروف')}</p>
                         </div>
                         <div class="rounded-xl p-2" style="background:rgba(0,0,0,0.3);">
                             <p class="text-[9px] text-slate-500 uppercase font-black">الموقع</p>
                             <p class="text-cyan-400 text-xs font-mono">${r.coords ? r.coords.lat.toFixed(3) + '° / ' + r.coords.lng.toFixed(3) + '°' : '—'}</p>
                         </div>
                     </div>
-                    ${r.notes ? `<p class="text-slate-500 text-xs mt-2 italic">📝 ${r.notes}</p>` : ''}
+                    ${r.notes ? `<p class="text-slate-500 text-xs mt-2 italic">📝 ${esc(r.notes)}</p>` : ''}
                     <p class="text-slate-700 text-[10px] mt-2 text-left">${new Date(r.timestamp).toLocaleString('ar-SA')}</p>
                 </div>
             </div>
@@ -7397,14 +7771,14 @@ window.renderArchive = () => {
         <div class="p-5 bg-white/5 border-r-4 ${r.priority === 'high' ? 'border-rose-500' : 'border-indigo-500'} rounded-2xl mb-4 hover:bg-white/10 transition-all">
             <div class="flex justify-between items-center mb-2">
                 <span class="text-lg font-black ${r.priority === 'high' ? 'text-rose-400' : 'text-indigo-400'}">
-                    ${r.materialName} (UN ${r.un})
+                    ${esc(r.materialName)} (UN ${esc(r.un)})
                 </span>
                 <span class="text-xs text-slate-400 bg-black/50 px-3 py-1 rounded-full">
                     ${new Date(r.timestamp).toLocaleString('ar-SA')}
                 </span>
             </div>
             <div class="text-sm font-bold text-slate-300">
-                👤 أبلغ عنه: <span class="text-white">${r.memberName}</span> | 
+                👤 أبلغ عنه: <span class="text-white">${esc(r.memberName)}</span> | 
                 📡 الموقع: ${r.coords ? r.coords.lat.toFixed(4) + ' / ' + r.coords.lng.toFixed(4) : 'غير متوفر'}
             </div>
         </div>
@@ -8603,39 +8977,41 @@ input:focus, select:focus, textarea:focus {
 }
 .veepn-card {
     position: relative; flex: 0 0 320px; width: 320px; max-width: 320px; box-sizing: border-box;
-    border-radius: 28px; padding: 34px 26px 28px;
-    background: linear-gradient(160deg, rgba(0,0,0,0.3), rgba(0,0,0,0.15));
-    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 24px; padding: 34px 26px 28px;
+    background: rgba(28,28,30,0.72);
+    border: 1px solid rgba(255,255,255,0.1);
     text-align: center; transition: all .3s;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 .veepn-card.featured {
-    border-color: rgba(245,158,11,0.55);
-    background: linear-gradient(160deg, rgba(245,158,11,0.11), rgba(245,158,11,0.02));
-    box-shadow: 0 0 45px rgba(245,158,11,0.22);
+    border-color: rgba(10,132,255,0.55);
+    background: rgba(10,132,255,0.1);
+    box-shadow: 0 0 45px rgba(10,132,255,0.25);
     transform: translateY(-16px);
 }
 .veepn-ribbon {
     position:absolute; top:-15px; left:50%; transform:translateX(-50%);
-    background:linear-gradient(135deg,#d97706,#f59e0b); color:#000; font-size:10px; font-weight:900;
-    padding:6px 18px; border-radius:999px; white-space:nowrap; box-shadow:0 4px 15px rgba(245,158,11,0.45);
+    background:#0A84FF; color:#fff; font-size:10px; font-weight:700;
+    padding:6px 18px; border-radius:999px; white-space:nowrap; box-shadow:0 4px 15px rgba(10,132,255,0.45);
 }
 .veepn-badge-pill {
-    display:inline-block; font-size:9px; font-weight:900; color:#10b981; background:rgba(16,185,129,0.12);
-    border:1px solid rgba(16,185,129,0.3); border-radius:999px; padding:4px 12px; margin-bottom:12px;
+    display:inline-block; font-size:9px; font-weight:700; color:#30D158; background:rgba(48,209,88,0.12);
+    border:1px solid rgba(48,209,88,0.3); border-radius:999px; padding:4px 12px; margin-bottom:12px;
 }
-.veepn-title { color:#fff; font-weight:900; font-size:22px; margin-bottom:14px; }
-.veepn-price { color:#fff; font-weight:900; font-size:46px; line-height:1; }
-.veepn-price .cur { font-size:17px; color:#e2e8f0; font-weight:800; margin-right:5px; }
-.veepn-sub { color:#e2e8f0; font-size:13px; font-weight:700; margin:12px 0 22px; }
+.veepn-title { color:#fff; font-weight:700; font-size:22px; margin-bottom:14px; }
+.veepn-price { color:#fff; font-weight:700; font-size:46px; line-height:1; }
+.veepn-price .cur { font-size:17px; color:#e2e8f0; font-weight:600; margin-right:5px; }
+.veepn-sub { color:#e2e8f0; font-size:13px; font-weight:600; margin:12px 0 22px; }
 .veepn-cta {
-    width:100%; padding:16px 0; border-radius:16px; font-size:15px; font-weight:900; color:#fff;
-    background: rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); transition: all .2s; margin-bottom:24px; cursor:pointer;
+    width:100%; padding:16px 0; border-radius:14px; font-size:15px; font-weight:700; color:#fff;
+    background: #0A84FF; border:none; transition: all .2s; margin-bottom:24px; cursor:pointer;
 }
 .veepn-card.featured .veepn-cta {
-    background: linear-gradient(135deg,#d97706,#f59e0b); border:none; box-shadow:0 8px 22px rgba(245,158,11,0.5);
+    background: #0A84FF; border:none; box-shadow:0 8px 22px rgba(10,132,255,0.5);
 }
 .veepn-card:hover .veepn-cta { transform: scale(1.03); filter:brightness(1.1); }
+.veepn-card:active .veepn-cta { transform: scale(0.97); }
 .veepn-features { text-align:right; border-top:1px solid rgba(255,255,255,0.15); padding-top:18px; }
 .feat-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; font-size:14px; font-weight:700; color:#f1f5f9; border-bottom:1px dashed rgba(255,255,255,0.1); }
 .feat-row:last-child { border-bottom:none; }
@@ -9241,6 +9617,10 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 
 
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
 </style>
 
 
@@ -9827,6 +10207,12 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                            class="flex-1 p-6 text-center text-white text-2xl font-mono outline-none bg-transparent uppercase"
                            style="letter-spacing:0.2em; caret-color:#3b82f6;">
                 </div>
+                <input type="email" id="loginEmailInput"
+                       placeholder="name@example.com"
+                       onfocus="document.getElementById('activationInput').classList.remove('hidden'); document.getElementById('prefixedInputRow').classList.add('hidden');"
+                       onkeydown="if(event.key==='Enter') document.getElementById('activationInput').focus()"
+                       class="w-full p-6 rounded-[1.5rem] text-center text-white text-xl font-mono outline-none transition-all mb-3"
+                       style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); caret-color:#3b82f6;">
 
                 <input type="password" id="activationInput"
                        placeholder="• • • • • • • •"
@@ -9919,11 +10305,11 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     </button>
 </div>
 
-<div id="subFields" class="hidden fixed inset-0 z-[150000] flex items-center justify-center" style="background:linear-gradient(120deg, #050c1f, #12294d, #38bdf8, #e0f2fe, #12294d, #050c1f); background-size:400% 400%; animation:vibrantShift 16s ease infinite;">
-    <div class="w-full h-full relative text-right overflow-y-auto custom-scrollbar" style="background:linear-gradient(120deg, #050c1f, #12294d, #38bdf8, #e0f2fe, #12294d, #050c1f); background-size:400% 400%; animation:vibrantShift 16s ease infinite; border:none; border-radius:0; box-shadow:none;">
+<div id="subFields" class="hidden fixed inset-0 z-[150000] flex items-center justify-center" style="background:linear-gradient(135deg, #000000 0%, #050e1f 25%, #0a2f66 50%, #050e1f 75%, #000000 100%); background-size:300% 300%; animation:vibrantShift 28s ease infinite;">
+    <div class="w-full h-full relative text-right overflow-y-auto custom-scrollbar" style="background:linear-gradient(135deg, #000000 0%, #050e1f 25%, #0a2f66 50%, #050e1f 75%, #000000 100%); background-size:300% 300%; animation:vibrantShift 28s ease infinite; border:none; border-radius:0; box-shadow:none;">
 
         <!-- شريط علوي -->
-        <div class="flex items-center justify-between px-8 py-4" style="background:rgba(0,0,0,0.15);">
+        <div class="flex items-center justify-between px-8 py-4" style="background:rgba(28,28,30,0.7); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid rgba(255,255,255,0.08);">
             <button onclick="window.resetEntryUI()" class="w-9 h-9 rounded-xl bg-black/20 hover:bg-rose-500/30 flex items-center justify-center text-white/70 hover:text-white transition-all border border-white/20">✕</button>
             <div class="flex items-center gap-4">
                 <div>
@@ -9931,6 +10317,24 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     <p class="text-white/80 text-xs font-bold" style="text-shadow:0 1px 6px rgba(0,0,0,0.4);">رادار GPS • تقارير تكتيكية • إدارة الفرق</p>
                 </div>
                 <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.3);">🎖️</div>
+            </div>
+        </div>
+
+        <!-- مؤشر الخطوات -->
+        <div class="flex items-center justify-center gap-3 py-4" style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <div class="flex items-center gap-2">
+                <span id="stepDot1" class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all"></span>
+                <span class="text-slate-400 text-[11px] font-bold">اختر الباقة</span>
+            </div>
+            <span class="w-8 h-px" style="background:rgba(255,255,255,0.15);"></span>
+            <div class="flex items-center gap-2">
+                <span id="stepDot2" class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all"></span>
+                <span class="text-slate-400 text-[11px] font-bold">بياناتك</span>
+            </div>
+            <span class="w-8 h-px" style="background:rgba(255,255,255,0.15);"></span>
+            <div class="flex items-center gap-2">
+                <span id="stepDot3" class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all"></span>
+                <span class="text-slate-400 text-[11px] font-bold">الدفع</span>
             </div>
         </div>
 
@@ -9946,6 +10350,22 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <div class="px-8 pt-6">
             <button type="button" onclick="window.backToPackagesStep()" class="flex items-center gap-2 text-slate-500 hover:text-white text-xs font-black transition-all">→ رجوع لاختيار الباقة</button>
         </div>
+
+        <div id="selectedPackageSummary" class="hidden mx-8 mt-4 rounded-2xl p-5" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); box-shadow:0 0 30px rgba(16,185,129,0.1);">
+            <div class="flex items-center justify-between mb-3">
+                <button type="button" onclick="window.backToPackagesStep()" class="text-emerald-300 text-[11px] font-black underline underline-offset-4 hover:text-white transition-all">تغيير الباقة ←</button>
+                <div class="flex items-center gap-2">
+                    <span id="selectedPkgBadge" class="hidden text-[10px] font-black px-2 py-1 rounded-full text-black" style="background:#fbbf24;"></span>
+                    <p id="selectedPkgTitle" class="text-emerald-300 font-black text-lg"></p>
+                </div>
+            </div>
+            <div class="flex items-center justify-between mb-3">
+                <span id="selectedPkgSub" class="text-slate-400 text-xs font-bold"></span>
+                <span id="selectedPkgPrice" class="text-white font-black text-xl"></span>
+            </div>
+            <div id="selectedPkgFeatures" class="grid grid-cols-2 gap-x-4 gap-y-1 mt-2"></div>
+        </div>
+
         <!-- المحتوى الرئيسي — عمودان -->
         <div class="grid grid-cols-2 gap-0" style="min-height:420px;">
 
@@ -9975,22 +10395,22 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                 </div>
 
                 <!-- بطاقة السعر -->
-                <div class="rounded-2xl p-5 mt-2" style="background:linear-gradient(145deg,rgba(56,189,248,0.14),rgba(56,189,248,0.04)); border:1px solid rgba(56,189,248,0.3); box-shadow:0 0 30px rgba(56,189,248,0.1);">
+                <div class="rounded-2xl p-5 mt-2" style="background:rgba(10,132,255,0.1); border:1px solid rgba(10,132,255,0.3); box-shadow:0 0 30px rgba(10,132,255,0.12);">
                     <div class="flex items-center justify-between mb-3">
-                        <span class="text-sky-300 font-black text-sm uppercase">كل قائد</span>
+                        <span class="text-blue-400 font-bold text-sm uppercase">كل قائد</span>
                         <span id="basePriceLeaderDisplay" class="text-white font-black text-lg">300 $</span>
                     </div>
                     <div class="flex items-center justify-between mb-4">
-                        <span class="text-sky-300 font-black text-sm uppercase">كل عضو / سنة</span>
+                        <span class="text-blue-400 font-bold text-sm uppercase">كل عضو / سنة</span>
                         <span id="basePriceMemberDisplay" class="text-white font-black text-lg">30 $</span>
                     </div>
-                    <div class="h-px w-full mb-4" style="background:rgba(56,189,248,0.25);"></div>
-                    <p id="planPriceNote" class="text-sky-300 font-black text-base text-right">💰 أضف قائداً واحداً على الأقل</p>
+                    <div class="h-px w-full mb-4" style="background:rgba(10,132,255,0.25);"></div>
+                    <p id="planPriceNote" class="text-blue-400 font-bold text-base text-right">💰 أضف قائداً واحداً على الأقل</p>
                 </div>
 
                 <button onclick="window.startPublicPayment()"
-                    class="w-full py-5 rounded-2xl font-black text-white text-base uppercase italic transition-all active:scale-95 border-b-4 border-sky-900 hover:shadow-2xl"
-                    style="background:linear-gradient(135deg,#0284c7,#38bdf8); box-shadow:0 8px 30px rgba(56,189,248,0.4);">
+                    class="w-full py-5 rounded-2xl font-bold text-white text-base transition-all active:scale-95 hover:brightness-110"
+                    style="background:#0A84FF; box-shadow:0 8px 30px rgba(10,132,255,0.4);">
                     استمرار نحو الدفع الآمن 🔒
                 </button>
             </div>
@@ -9998,9 +10418,9 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
             <!-- العمود الأيسر: القادة -->
             <div class="p-8 flex flex-col">
                 <div class="flex items-center justify-between mb-4">
-                    <button type="button" onclick="window.addLeaderRow()"
-                        class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white transition-all hover:scale-105"
-                        style="background:rgba(16,185,129,0.22); border:1px solid rgba(16,185,129,0.45); box-shadow:0 4px 15px rgba(16,185,129,0.15);">
+                    <button type="button" id="addLeaderBtn" onclick="window.addLeaderRow()"
+                        class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:scale-105"
+                        style="background:rgba(48,209,88,0.22); border:1px solid rgba(48,209,88,0.45); box-shadow:0 4px 15px rgba(48,209,88,0.15);">
                         ➕ إضافة قائد
                     </button>
                     <div class="flex items-center gap-2">
@@ -10009,15 +10429,23 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     </div>
                 </div>
 
-                <!-- منطقة القادة قابلة للتمرير -->
-                <div id="leadersContainer" class="flex-1 space-y-2 overflow-y-auto pr-1 rounded-2xl p-3" style="max-height:280px; background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05);">
-                    <!-- تُضاف صفوف القادة هنا -->
+                <!-- ملخص ثابت عند اختيار باقة جاهزة -->
+                <div id="leadersStaticSummary" class="hidden flex-1 flex flex-col items-center justify-center rounded-2xl p-6 text-center" style="background:rgba(16,185,129,0.05); border:1px dashed rgba(16,185,129,0.3);">
+                    <p id="leadersStaticText" class="text-emerald-300 font-black text-xl mb-2"></p>
+                    <p class="text-slate-500 text-xs font-bold">هذا العدد محدد ضمن الباقة المختارة. لتغييره اختر باقة أخرى أو خصص باقتك يدويًا.</p>
                 </div>
 
-                <!-- تعليمات -->
-                <div class="mt-4 rounded-xl p-3 flex items-start gap-3" style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.15);">
-                    <span class="text-amber-400 text-sm mt-0.5">⚠️</span>
-                    <p class="text-amber-400/70 text-xs font-bold leading-relaxed">الحد الأدنى لكل قائد 5 أعضاء. يمكنك إضافة عدد غير محدود من القادة وتخصيص عدد الأعضاء لكل واحد منهم.</p>
+                <div id="leadersEditableArea" class="flex-1 flex flex-col">
+                    <!-- منطقة القادة قابلة للتمرير -->
+                    <div id="leadersContainer" class="flex-1 space-y-2 overflow-y-auto pr-1 rounded-2xl p-3" style="max-height:280px; background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05);">
+                        <!-- تُضاف صفوف القادة هنا -->
+                    </div>
+
+                    <!-- تعليمات -->
+                    <div class="mt-4 rounded-xl p-3 flex items-start gap-3" style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.15);">
+                        <span class="text-amber-400 text-sm mt-0.5">⚠️</span>
+                        <p class="text-amber-400/70 text-xs font-bold leading-relaxed">الحد الأدنى لكل قائد 5 أعضاء. يمكنك إضافة عدد غير محدود من القادة وتخصيص عدد الأعضاء لكل واحد منهم.</p>
+                    </div>
                 </div>
             </div>
 
@@ -10928,8 +11356,15 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
                     <p class="lux-form-section-title">👤 البيانات الأساسية</p>
                     <div class="flex flex-col gap-3">
                         <div>
+                        <div>
                             <p class="lux-field-label">اسم القائد</p>
                             <input type="text" id="new_ln" placeholder="الاسم الكامل" class="erg-input lux-field-input text-right">
+                        </div>
+                        <div>
+                            <p class="lux-field-label">ربط بشركة موجودة (اختياري)</p>
+                            <select id="new_l_linkCompany" class="erg-input lux-field-input text-right">
+                                <option value="">-- شركة جديدة مستقلة --</option>
+                            </select>
                         </div>
                         <div>
                             <p class="lux-field-label">كود الوصول</p>
@@ -11826,9 +12261,9 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         <div class="px-6 py-4" style="background:rgba(16,185,129,0.04); border-bottom:1px solid rgba(255,255,255,0.05);">
             <div class="flex items-center justify-between">
                 <div class="flex gap-2">
-                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);">1</div>
-                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:rgba(255,255,255,0.04); color:#4b5563; border:1px solid rgba(255,255,255,0.08);">2</div>
-                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:rgba(255,255,255,0.04); color:#4b5563; border:1px solid rgba(255,255,255,0.08);">3</div>
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);">✓</div>
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);">✓</div>
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black" style="background:#10b981; color:#000; border:1px solid #10b981;">3</div>
                 </div>
                 <div class="flex items-center gap-8">
                     <div class="text-right">
