@@ -196,7 +196,6 @@ let MASTER_SALT = "";
 window.AUTH_APP_ENABLED = true;
 window._adminOtpPhase = 0; 
 let MASTER_TOTP_SECRET = "MZXW6YTBHJSG65DS";
-window.getSecret = () => MASTER_TOTP_SECRET;
 
 let _totpTimeOffsetMs = 0;
 async function syncServerTime() {
@@ -216,7 +215,7 @@ async function syncServerTime() {
 window.getTotpNow = () => Date.now() + _totpTimeOffsetMs;
 // ===== إعدادات EmailJS =====
 const EMAILJS_SERVICE_ID = "service_994erg";
-const EMAILJS_PUBLIC_KEY = "ILBL6O_BexWvmQ1B3";
+const EMAILJS_PUBLIC_KEY = "wQ1UP5TJ8C4gv3Afp";
 emailjs.init(EMAILJS_PUBLIC_KEY);
 
 window.sendEmail = async function(templateId, toEmail, toName, extraParams = {}) {
@@ -513,6 +512,7 @@ window.confirmExternalPayment = async () => {
     const transferRef = document.getElementById('transfer_ref_input')?.value.trim();
     const payMethod = document.getElementById('pay_method_select')?.value || 'CliQ';
     const subEmail = document.getElementById('subscribe_email_input')?.value.trim() || '';
+    const subCompany = document.getElementById('subscribe_company_input')?.value.trim() || '';
     const subPlan = window._selectedMembers || 5;
     const subLeaders = window._selectedLeaders || 1;
     const subPrice = window._selectedPrice || calcPrice(subPlan, subLeaders);
@@ -527,6 +527,7 @@ window.confirmExternalPayment = async () => {
             name: name,
             phone: phone,
             email: subEmail,
+            companyName: subCompany || name,
             plan: subPlan,
             totalLeaders: subLeaders,
             leadersData: window._leadersData || [],
@@ -601,13 +602,34 @@ window.refreshOrderStatus = async (reqId) => {
 
         if (data.status === 'Approved') {
             if (statusEl) {
-                statusEl.innerHTML = '✅ تمت الموافقة — تحقق من بريدك الإلكتروني<br><span style="color:#f59e0b;font-size:11px;">⚠️ إذا لم تجد الرسالة تحقق من مجلد Spam وضع المرسل في القائمة البيضاء</span>';
+                statusEl.innerHTML = '✅ تمت الموافقة — أكوادك جاهزة أدناه';
                 statusEl.className = 'text-emerald-400 font-black text-sm text-center';
             }
-            if (step2El) step2El.classList.replace('border-amber-500/30','border-emerald-500/30');
+            if (step2El) {
+                step2El.style.background = 'rgba(16,185,129,0.08)';
+                step2El.style.border = '1px solid rgba(16,185,129,0.2)';
+                const icon2 = step2El.querySelector('div');
+                if (icon2) { icon2.textContent = '✓'; icon2.style.background = '#059669'; icon2.style.border = 'none'; icon2.style.color = '#fff'; icon2.classList.remove('animate-pulse'); }
+                const title2 = step2El.querySelector('p');
+                if (title2) title2.className = 'text-emerald-400 font-black text-sm';
+            }
             if (step3El) {
-                step3El.classList.remove('opacity-50');
-                step3El.classList.add('border-emerald-500/30','bg-emerald-900/20');
+                step3El.classList.remove('opacity-40');
+                step3El.style.background = 'rgba(16,185,129,0.08)';
+                step3El.style.border = '1px solid rgba(16,185,129,0.2)';
+                const icon3 = step3El.querySelector('div');
+                if (icon3) { icon3.textContent = '✓'; icon3.style.background = '#059669'; icon3.style.color = '#fff'; }
+                const title3 = step3El.querySelector('p');
+                if (title3) title3.className = 'text-emerald-400 font-black text-sm';
+                const codesBox = document.getElementById('track_codes_box');
+                const resendBtn = document.getElementById('track_resend_btn');
+                if (codesBox && Array.isArray(data.assignedKeys) && data.assignedKeys.length) {
+                    codesBox.innerHTML = data.assignedKeys.map((k, i) =>
+                        `<div class="flex items-center justify-between bg-black/30 rounded-lg px-2 py-1.5 mt-1"><span class="text-cyan-300 font-mono font-black text-xs tracking-widest">${k}</span><span class="text-slate-500 text-[10px]">قائد ${i+1}</span></div>`
+                    ).join('');
+                    codesBox.classList.remove('hidden');
+                }
+                if (resendBtn) resendBtn.classList.remove('hidden');
             }
             clearInterval(window._trackingInterval);
         } else if (data.status === 'Rejected') {
@@ -620,12 +642,36 @@ window.refreshOrderStatus = async (reqId) => {
     } catch(e) { console.warn('Tracking refresh failed'); }
 };
 
-
-
+window.resendActivationEmail = async (reqId) => {
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (!data.email || !Array.isArray(data.assignedKeys) || !data.assignedKeys.length) {
+            window.showNotif('⛔ لا يوجد بريد أو أكواد مسجلة لهذا الطلب', 'error');
+            return;
+        }
+        let expiryDate = '';
+        try {
+            const leaderSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', data.assignedKeys[0]));
+            if (leaderSnap.exists()) expiryDate = leaderSnap.data().expiryDate || '';
+        } catch(e) {}
+        const codesText = data.assignedKeys.map((k, i) => `قائد ${i+1}: ${k}`).join('\n');
+        const sent = await sendEmail('template_mf871pf', data.email, data.name || '', {
+            activation_code: `أكواد القادة (${data.assignedKeys.length} قائد):\n\n${codesText}\n\nتاريخ الانتهاء: ${expiryDate}`
+        });
+        window.showNotif(sent ? '📧 تم إعادة إرسال الأكواد لبريدك' : '⚠️ فشل الإرسال — الأكواد ظاهرة أعلاه، انسخها يدوياً', sent ? 'success' : 'error');
+    } catch(e) {
+        window.showNotif('⚠️ تعذّر إعادة الإرسال', 'error');
+    }
+};
 
 
 // ===== طلب تجديد الاشتراك =====
 window.requestRenewal = () => {
+    if (window.myCompanyId && window.myCompanyId !== window.activeKey && !window.isCompanyOwner) {
+        return window.showNotif('⛔ طلب التجديد متاح لمالك الشركة فقط', 'error');
+    }
     const name = window.myLeaderName || 'قائد';
     window.showConfirm(
         'طلب تجديد الاشتراك 🔄',
@@ -636,10 +682,13 @@ window.requestRenewal = () => {
                     name: name,
                     type: 'renewal',
                     leaderKey: window.activeKey,
+                    companyId: window.myCompanyId || '',
+                    companyName: window.myCompanyName || '',
                     status: 'Pending Payment Verification',
                     timestamp: Date.now()
                 });
                 window.showNotif('✅ تم إرسال طلب التجديد للإدارة', 'success');
+                document.getElementById('renewalBtn')?.classList.add('hidden');
                 window.logActivity('renewal_request', `طلب تجديد من: ${name}`);
             } catch(e) {
                 window.showNotif('❌ فشل إرسال الطلب', 'error');
@@ -1560,19 +1609,33 @@ window.renderSubTable = () => {
     const t = document.getElementById('subTableBody');
     if(!t) return;
 
-    t.innerHTML = window.subscribers.map(s => {
-        const docId = s.id;
-        const isExpired = s.expiryDate && new Date(s.expiryDate) < new Date();
-        const statusColor = s.paymentStatus === 'paid' ? 'emerald' : s.paymentStatus === 'comp' ? 'cyan' : s.paymentStatus === 'pending' ? 'amber' : 'slate';
+    // نبدأ من مجموعة الشركات الحقيقية (تظهر حتى لو بلا قادة)، ثم نُلحق القادة
+    const companies = {};
+    (window.companiesRaw || []).forEach(c => {
+        companies[c.id] = { id: c.id, name: c.name || c.id, phone: c.phone || '', whatsapp: c.whatsapp || '', email: c.email || '', leaders: [] };
+    });
+    (window.subscribers || []).forEach(s => {
+        const cId = s.companyId || s.id;
+        if (!companies[cId]) companies[cId] = { id: cId, name: s.companyName || s.ownerName || cId, leaders: [] };
+        companies[cId].leaders.push(s);
+    });
+    window._companiesIndex = companies;
+
+    t.innerHTML = Object.values(companies).map(c => {
+        const totalMembers = c.leaders.reduce((sum, l) => sum + (l.maxMembers || 5), 0);
+        const activeCount = c.leaders.filter(l => !(l.expiryDate && new Date(l.expiryDate) < new Date())).length;
+        const allExpired = activeCount === 0;
         return `
         <div class="leader-card cursor-pointer rounded-2xl p-5 text-center transition-all hover:scale-105 hover:-translate-y-1.5"
-             data-expired="${isExpired ? 'true' : 'false'}"
-             onclick="window.openSubDetail('${docId}')"
+             data-expired="${allExpired ? 'true' : 'false'}"
+             data-search="${esc(c.leaders.map(l => l.ownerName || '').join(' '))}"
+             onclick="window.openCompanyDetail('${c.id}')"
              style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015)); border:1.5px solid rgba(255,255,255,0.1); box-shadow:0 6px 22px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);">
-            <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center text-3xl transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.25),rgba(245,158,11,0.1)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 4px 14px rgba(220,38,38,0.15), inset 0 1px 0 rgba(255,255,255,0.1);">🎖️</div>
-            <p class="leader-name text-white font-black text-base truncate">${esc(s.ownerName)}</p>
-            <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-${statusColor}-500/20 text-${statusColor}-400 border border-${statusColor}-400/30">
-                ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+            <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center text-3xl transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.25),rgba(245,158,11,0.1)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 4px 14px rgba(220,38,38,0.15), inset 0 1px 0 rgba(255,255,255,0.1);">🏢</div>
+            <p class="leader-name text-white font-black text-base truncate">${esc(c.name)}</p>
+            <p class="text-[11px] text-slate-400 font-bold truncate mt-1">${c.leaders.length} قائد · ${totalMembers} عضو</p>
+            <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black ${allExpired ? 'bg-slate-500/20 text-slate-400 border border-slate-400/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-400/30'}">
+                ${allExpired ? '⛔ الكل منتهي' : `✅ ${activeCount} نشط`}
             </span>
         </div>`;
     }).join('');
@@ -1581,10 +1644,13 @@ window.renderSubTable = () => {
 };
 
 window.openSubDetail = (docId) => {
+    window.closeAllSubModals();
     const s = window.subscribers.find(x => x.id === docId);
     if (!s) return;
 
     document.getElementById('subDetail_name').textContent = s.ownerName || '—';
+    const subLineEl = document.getElementById('subDetail_sub');
+    if (subLineEl) subLineEl.textContent = `${s.isCompanyOwner === true ? '👑 مالك الشركة' : '🎖️ قائد'} · 🏢 ${s.companyName || s.ownerName || ''}`;
     const avatarInitialEl = document.getElementById('subDetail_avatarInitial');
     if (avatarInitialEl) avatarInitialEl.textContent = (s.ownerName || '؟').trim().charAt(0).toUpperCase();
     const keyEl = document.getElementById('subDetail_key');
@@ -1612,6 +1678,13 @@ window.openSubDetail = (docId) => {
     document.getElementById('subDetail_btnEdit').onclick = () => { window.closeSubDetailModal(); window.startEditSub(docId); };
     document.getElementById('subDetail_btnReset').onclick = () => window.resetDevice('sub', docId);
     document.getElementById('subDetail_btnDelete').onclick = () => { window.closeSubDetailModal(); window.deleteEntry('sub', docId); };
+    document.getElementById('subDetail_btnGrantLogout').onclick = () => {
+        const extra = prompt('كم عدد التغييرات الإضافية المسموحة لكود الخروج؟', '1');
+        if (extra === null) return;
+        const n = Number(extra);
+        if (!n || n <= 0) { window.showNotif('⛔ أدخل رقمًا صحيحًا أكبر من صفر', 'error'); return; }
+        window.grantLogoutChanges('leader', docId, n);
+    };
 
     const modal = document.getElementById('subDetailModal');
     modal.classList.remove('hidden');
@@ -1692,11 +1765,22 @@ window.loadFinanceStats = async () => {
     try {
         const subsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'));
         const subs = subsSnap.docs.map(d => d.data()).filter(s => s.isPaid);
-        const totalIncome = subs.reduce((acc, s) => {
-            return acc + calcPrice(s.maxMembers || 5, s.maxLeaders || 1);
-        }, 0);
-        const activeSubs = subs.filter(s => s.status === 'active').length;
-        const expiredSubs = subs.filter(s => s.status !== 'active').length;
+        const reqSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'pending_requests'));
+        const approvedIncome = reqSnap.docs.map(d => d.data())
+            .filter(r => r.status === 'Approved')
+            .reduce((a, r) => a + (Number(r.price) || 0), 0);
+        const manualIncome = subs
+            .filter(s => !s.parentRequest && s.paymentStatus === 'paid')
+            .reduce((a, s) => a + (Number(s.pricePaid) || 0), 0);
+        const totalIncome = approvedIncome + manualIncome;
+
+        const byCompany = {};
+        subs.forEach(s => { const k = s.companyId || s.subKey; (byCompany[k] = byCompany[k] || []).push(s); });
+        const nowTs = Date.now();
+        const isLive = s => s.status === 'active' && !(s.expiryDate && new Date(s.expiryDate).getTime() < nowTs);
+        const groups = Object.values(byCompany);
+        const activeSubs = groups.filter(g => g.some(isLive)).length;
+        const expiredSubs = groups.length - activeSubs;
 
         const trialsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'trials'));
         const pendingTrials = trialsSnap.docs.filter(d => d.data().status === 'pending').length;
@@ -1719,7 +1803,7 @@ window.loadFinanceStats = async () => {
                         <span class="text-[9px] font-black text-blue-400/60 uppercase">نشط</span>
                     </div>
                     <p class="text-3xl font-black text-blue-400">${activeSubs}</p>
-                    <p class="text-slate-500 text-[10px] font-black uppercase mt-1">مشتركون نشطون</p>
+                    <p class="text-slate-500 text-[10px] font-black uppercase mt-1">شركات نشطة</p>
                 </div>
                 <div class="rounded-2xl p-4" style="background:linear-gradient(135deg,rgba(220,38,38,0.15),rgba(220,38,38,0.05)); border:1px solid rgba(220,38,38,0.25);">
                     <div class="flex items-center justify-between mb-2">
@@ -1727,7 +1811,7 @@ window.loadFinanceStats = async () => {
                         <span class="text-[9px] font-black text-rose-400/60 uppercase">منتهي</span>
                     </div>
                     <p class="text-3xl font-black text-rose-400">${expiredSubs}</p>
-                    <p class="text-slate-500 text-[10px] font-black uppercase mt-1">اشتراكات منتهية</p>
+                    <p class="text-slate-500 text-[10px] font-black uppercase mt-1">شركات منتهية</p>
                 </div>
                 <div class="rounded-2xl p-4" style="background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05)); border:1px solid rgba(245,158,11,0.25);">
                     <div class="flex items-center justify-between mb-2">
@@ -1775,6 +1859,7 @@ window.loadFinancePending = async () => {
                         <div class="flex items-center justify-end gap-3 mb-2">
                             <span class="text-[10px] font-black px-2 py-0.5 rounded-full" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">⏳ بانتظار المراجعة</span>
                             <p class="text-white font-black text-sm">${esc(r.name)}</p>
+                            <p class="text-indigo-300 text-[10px] font-black">🏢 ${esc(r.companyName || r.name)}</p>
                         </div>
                         <div class="grid grid-cols-3 gap-2">
                             <div class="rounded-xl p-2 text-center" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.15);">
@@ -1850,7 +1935,7 @@ window.loadTrials = async () => {
 window.loadPayments = async () => {
     const list = document.getElementById('finPaymentsList');
     if (!list) return;
-    const subs = window.subscribers || [];
+    const subs = [...(window.subscribers || [])].sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ar'));
     if (subs.length === 0) { list.innerHTML = '<p class="text-center text-slate-600 text-xs py-10">لا يوجد مشتركون</p>'; return; }
     list.innerHTML = subs.map(s => {
         const feats = s.features || null; // null = بدون قيود (كل المزايا متاحة — اشتراك يدوي)
@@ -1865,6 +1950,7 @@ window.loadPayments = async () => {
             <div class="flex items-center justify-between px-4 py-3">
                 <div class="text-right">
                     <p class="text-white text-xs font-black">${esc(s.ownerName)}</p>
+<p class="text-indigo-300 text-[10px] font-black">🏢 ${esc(s.companyName || '')}${s.isCompanyOwner === true ? ' 👑' : ''}</p>
                     <p class="text-slate-500 text-[10px] font-mono">${esc(s.subKey)}</p>
                     <p class="text-slate-600 text-[10px]">ينتهي: ${esc(s.expiryDate || 'غير محدد')}</p>
                 </div>
@@ -1878,6 +1964,7 @@ window.loadPayments = async () => {
             <div id="subFeatPanel_${s.id}" class="hidden px-4 pb-3 pt-2 flex items-center flex-wrap gap-3" style="border-top:1px solid rgba(255,255,255,0.06);">
                 ${checksHtml}
                 <button onclick="window.saveSubscriberFeatures('${s.id}')" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-emerald-300 mr-auto" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">💾 حفظ</button>
+<button onclick="window.saveSubscriberFeatures('${s.id}', true)" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">🏢 حفظ لكل الشركة</button>
             </div>
         </div>`;
     }).join('');
@@ -1887,24 +1974,30 @@ window.toggleSubFeaturesPanel = (id) => {
     document.getElementById('subFeatPanel_' + id)?.classList.toggle('hidden');
 };
 
-window.saveSubscriberFeatures = async (id) => {
+window.saveSubscriberFeatures = async (id, applyAll = false) => {
     const panel = document.getElementById('subFeatPanel_' + id);
     if (!panel) return;
     const features = {};
     panel.querySelectorAll('.subFeatCheck').forEach(cb => { features[cb.dataset.feat] = cb.checked; });
     try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', id), { features });
-        window.showNotif('✅ تم تحديث مزايا هذا المشترك', 'success');
+        const base = (window.subscribers || []).find(s => s.id === id);
+        const targets = (applyAll && base)
+            ? (window.subscribers || []).filter(s => (s.companyId || s.id) === (base.companyId || base.id))
+            : [{ id }];
+        const batch = writeBatch(db);
+        targets.forEach(t => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', t.id), { features }));
+        await batch.commit();
+        window.showNotif(applyAll ? `✅ تم تحديث مزايا ${targets.length} قائد في الشركة` : '✅ تم تحديث مزايا هذا المشترك', 'success');
         panel.classList.add('hidden');
     } catch(e) {
         window.showNotif('فشل الحفظ', 'error');
     }
 };
 
-
 window.exportSubscribersPDF = () => {
-    const subs = window.subscribers || [];
+    const subs = [...(window.subscribers || [])].sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ar'));
     if (subs.length === 0) { window.showNotif('لا يوجد مشتركون للتصدير', 'error'); return; }
+    const companiesCount = new Set(subs.map(s => s.companyId || s.id)).size;
     
     let html = `
     <html><head><meta charset="UTF-8">
@@ -1919,17 +2012,18 @@ window.exportSubscribersPDF = () => {
         .expired { color: #dc2626; font-weight: bold; }
         .footer { margin-top: 20px; font-size: 10px; color: #6b7280; }
     </style></head><body>
-    <h1>🛡️ ERG SYSTEM — قائمة المشتركين</h1>
+    <h1>🛡️ ERG SYSTEM — الشركات وقادتها</h1>
     <p style="color:#6b7280;font-size:11px;">تاريخ التصدير: ${new Date().toLocaleString('ar-SA')}</p>
     <table>
         <thead><tr>
-            <th>#</th><th>اسم القائد</th><th>كود الوصول</th><th>السعة</th><th>تاريخ الانتهاء</th><th>الحالة</th>
+            <th>#</th><th>الشركة</th><th>اسم القائد</th><th>كود الوصول</th><th>السعة</th><th>تاريخ الانتهاء</th><th>الحالة</th>
         </tr></thead>
         <tbody>
         ${subs.map((s, i) => `
             <tr>
                 <td>${i+1}</td>
-                <td>${esc(s.ownerName || '—')}</td>
+                <td>${esc(s.companyName || '—')}</td>
+                <td>${s.isCompanyOwner === true ? '👑 ' : ''}${esc(s.ownerName || '—')}</td>
                 <td style="font-family:monospace;font-size:10px;">${s.subKey?.substring(0,8)}***</td>
                 <td>${esc(s.maxMembers || 5)} أعضاء</td>
                 <td>${s.expiryDate || '—'}</td>
@@ -1937,7 +2031,7 @@ window.exportSubscribersPDF = () => {
             </tr>`).join('')}
         </tbody>
     </table>
-    <div class="footer">ERG SYSTEM — منظومة الاستجابة الميداني الموحد | إجمالي: ${subs.length} مشترك</div>
+    <div class="footer">ERG SYSTEM — منظومة الاستجابة الميداني الموحد | إجمالي: ${subs.length} قائد في ${companiesCount} شركة</div>
     </body></html>`;
     
     const win = window.open('', '_blank');
@@ -2736,6 +2830,12 @@ window.setLogoutCode = async (role, docId, newCode) => {
     window.showNotif(isFirstTime ? '✅ تم تعيين كود الخروج' : `✅ تم تغيير كود الخروج (تبقّى ${allowed - 1} تغيير مجاني)`, 'success');
 };
 
+window.promptSetMyLogoutCode = () => {
+    const code = prompt('أدخل كود الخروج الجديد (لن تتمكن من تغييره إلا بعدد محدود من المرات):');
+    if (code === null || !code.trim()) return;
+    window.setLogoutCode('leader', window.activeKey, code.trim());
+};
+
 // ===== منح تغييرات إضافية لكود الخروج (الإدارة فقط) =====
 window.grantLogoutChanges = async (role, docId, extraChanges) => {
     const collName = role === 'member' ? 'team_keys' : 'subscribers';
@@ -2781,7 +2881,7 @@ window.radialSections = [
     { app:'app_erg', win:'winERG', label:'نظام الاستجابة', color:'#3b82f6', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>' },
     { app:'app_reps', win:'winReports', label:'سجل البلاغات', color:'#10b981', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/>', badge:'reportsBadge' },
     { app:'app_map', win:'winMap', label:'رادار المواقع', color:'#0891b2', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/>' },
-    { app:'app_subs', win:'winSubs', label:'إدارة القادة', color:'#e11d48', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"/>' },
+    { app:'app_subs', win:'winSubs', label:'إدارة الشركات', color:'#e11d48', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"/>' },
     { app:'app_team', win:'winTeam', label:'إدارة الفريق', color:'#4f46e5', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>' },
     { app:'app_finance', win:'winFinance', label:'المالية والاشتراكات', color:'#10b981', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"/>' },
     { app:'app_import', win:'winImport', label:'رفع بيانات ERG', color:'#22d3ee', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>' },
@@ -3373,7 +3473,21 @@ window.renderNewLeaderFeatCheckboxes = () => {
     `).join('');
 };
 
+
+
+window.closeAllSubModals = () => {
+    ['subFormModal', 'subDetailModal', 'companyDetailModal', 'companyAddModal'].forEach(id => {
+        const m = document.getElementById(id);
+        if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+    });
+};
+
+
+
+
 window.openAddSubModal = () => {
+    window.closeAllSubModals();
+    window._subFormReturnToCompany = null;
     window._editingSubId = null;
     window.populateLinkCompanyDropdown();
     ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
@@ -3397,19 +3511,334 @@ window.openAddSubModal = () => {
     window.updateSubPriceLive();
 
     const titleEl = document.getElementById('subFormModalTitle');
-    if (titleEl) titleEl.textContent = '➕ إضافة قائد جديد';
+    if (titleEl) titleEl.textContent = '➕ إضافة شركة جديدة';
     document.getElementById('addSubBtn')?.classList.remove('hidden');
     document.getElementById('updateSubBtn')?.classList.add('hidden');
+    document.getElementById('linkCompanyFieldWrap')?.classList.add('hidden');
 
     const modal = document.getElementById('subFormModal');
     if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.openAddLeaderForCompany = (companyId) => {
+    window.openAddSubModal();
+    window._subFormReturnToCompany = companyId;
+    const sel = document.getElementById('new_l_linkCompany');
+    if (sel) {
+        if (![...sel.options].some(o => o.value === companyId)) {
+            const opt = document.createElement('option');
+            opt.value = companyId;
+            opt.textContent = (window._companiesIndex || {})[companyId]?.name || companyId;
+            sel.appendChild(opt);
+        }
+        sel.value = companyId;
+    }
+    document.getElementById('linkCompanyFieldWrap')?.classList.add('hidden');
+    document.getElementById('newCompanyNameWrap')?.classList.add('hidden');
+    const c = (window._companiesIndex || {})[companyId];
+    const titleEl = document.getElementById('subFormModalTitle');
+    if (titleEl) titleEl.textContent = `➕ إضافة قائد إلى: ${c ? c.name : ''}`;
 };
 
 window.closeSubFormModal = () => {
     const modal = document.getElementById('subFormModal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     window._editingSubId = null;
+
+    const returnTo = window._subFormReturnToCompany;
+    window._subFormReturnToCompany = null;
+    if (returnTo) {
+        window.openCompanyDetail(returnTo);
+    }
 };
+
+
+
+window.openCompanyDetail = (companyId) => {
+    window.closeAllSubModals();
+    const c = (window._companiesIndex || {})[companyId];
+    if (!c) return;
+    window._activeCompanyId = companyId;
+    document.getElementById('companyRenameWrap')?.classList.add('hidden');
+    document.getElementById('companyBillingWrap')?.classList.add('hidden');
+    const raw = (window.companiesRaw || []).find(x => x.id === companyId) || {};
+    const latestExp = c.leaders.map(l => l.expiryDate).filter(Boolean).sort().pop() || 'غير محدد';
+    const infoEl = document.getElementById('companyDetail_info');
+    if (infoEl) infoEl.innerHTML = `
+        <div class="grid grid-cols-2 gap-2 text-right">
+            <div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">ينتهي</p><p class="text-amber-300 text-xs font-black">${esc(latestExp)}</p></div>
+            <div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">سعر الاشتراك</p><p class="text-emerald-300 text-xs font-black">${raw.planPrice ? esc(raw.planPrice) + ' $' : '—'}</p></div>
+            ${raw.phone ? `<div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">الهاتف</p><p class="text-white text-xs font-black">${esc(raw.phone)}</p></div>` : ''}
+            ${raw.email ? `<div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">البريد</p><p class="text-white text-xs font-black truncate">${esc(raw.email)}</p></div>` : ''}
+        </div>`;
+    window.loadCompanyPayments(companyId);
+document.getElementById('companyDetail_name').textContent = c.name;
+    document.getElementById('companyDetail_count').textContent = `${c.leaders.length} قائد`;
+    const list = document.getElementById('companyDetail_leadersList');
+    list.innerHTML = c.leaders.map(l => {
+        const isExpired = l.expiryDate && new Date(l.expiryDate) < new Date();
+        const isOwner = l.isCompanyOwner === true;
+        return `
+        <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3 cursor-pointer hover:bg-white/6"
+             onclick="window.closeCompanyDetailModal(); window.openSubDetail('${l.id}')">
+            <div class="text-right">
+                <p class="text-white text-xs font-black">${isOwner ? '👑' : '🎖️'} ${esc(l.ownerName)}${isOwner ? ' <span class="text-amber-400 text-[10px]">(المالك)</span>' : ''}</p>
+                <p class="text-slate-500 text-[10px]">${l.maxMembers || 5} أعضاء${l.expiryDate ? ' · ينتهي ' + esc(l.expiryDate) : ''}</p>
+            </div>
+            <div class="flex items-center gap-2">
+                ${isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')"
+                    class="text-[10px] px-2 py-1 rounded-lg font-black text-amber-300"
+                    style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">👑 تعيين كمالك</button>`}
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                    ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+                </span>
+            </div>
+        </div>`;
+    }).join('');
+    const modal = document.getElementById('companyDetailModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeCompanyDetailModal = () => {
+    const modal = document.getElementById('companyDetailModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+};
+
+
+
+
+
+window.renderMyCompanyPanel = () => {
+    const box = document.getElementById('myCompanyList');
+    if (!box) return;
+    const myId = window.myCompanyId || window.activeKey;
+    const leaders = (window.subscribers || []).filter(s => (s.companyId || s.id) === myId);
+    const totalMembers = leaders.reduce((sum, l) => sum + (window.teamMembers || []).filter(m => m.parentKey === l.id).length, 0);
+    const totalCapacity = leaders.reduce((sum, l) => sum + (l.maxMembers || 5), 0);
+
+    const nameEl = document.getElementById('myCompanyName');
+    const summaryEl = document.getElementById('myCompanySummary');
+    if (nameEl) nameEl.textContent = leaders[0]?.companyName || leaders[0]?.ownerName || 'شركتي';
+    if (summaryEl) summaryEl.textContent = `${leaders.length} قائد (وفق باقتك) · ${totalMembers} من ${totalCapacity} عضو`;
+
+    if (leaders.length === 0) {
+        box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">لا يوجد قادة ضمن شركتك بعد. عدد القادة يتحدد تلقائياً حسب باقة اشتراكك.</p>`;
+        return;
+    }
+    box.innerHTML = leaders.map(l => {
+        const memCount = (window.teamMembers || []).filter(m => m.parentKey === l.id).length;
+        const isExpired = l.expiryDate && new Date(l.expiryDate) < new Date();
+        return `
+        <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
+            <div class="text-right">
+                <p class="text-white text-xs font-black">${l.isCompanyOwner === true ? '👑' : '🎖️'} ${esc(l.ownerName)}</p>
+                <p class="text-slate-500 text-[10px]">${memCount} / ${l.maxMembers || 5} أعضاء</p>
+            </div>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+            </span>
+        </div>`;
+    }).join('');
+};
+
+
+window.toggleCompanyRename = () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const wrap = document.getElementById('companyRenameWrap');
+    const inp = document.getElementById('companyRename_input');
+    if (!c || !wrap || !inp) return;
+    wrap.classList.toggle('hidden');
+    inp.value = c.name;
+    if (!wrap.classList.contains('hidden')) inp.focus();
+};
+
+window.saveCompanyName = async () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const newName = document.getElementById('companyRename_input')?.value.trim() || '';
+    if (!c) return;
+    if (!newName) return window.showNotif("اسم الشركة مطلوب", "error");
+    try {
+        const batch = writeBatch(db);
+        c.leaders.forEach(l => {
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id),
+                { companyName: newName, updatedAt: Date.now() });
+        });
+        if ((window.companiesRaw || []).some(co => co.id === c.id)) {
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id), { name: newName });
+        }
+        await batch.commit();
+        window.showNotif("تم تحديث اسم الشركة", "success");
+        window.closeCompanyDetailModal();
+    } catch (e) {
+        window.showNotif("فشل تحديث اسم الشركة، تحقق من الصلاحيات", "error");
+    }
+};
+
+window.deleteCompany = () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    if (!c) return;
+    const leaderIds = c.leaders.map(l => l.id);
+    const orphanMembers = (window.teamMembers || []).filter(m => leaderIds.includes(m.parentKey));
+    window.showConfirm(
+        "حذف الشركة نهائياً ⚠️",
+        `سيتم حذف شركة "${c.name}" وجميع قادتها (${c.leaders.length}) وأعضاء فرقهم (${orphanMembers.length}). لا يمكن التراجع عن هذه العملية.`,
+        async () => {
+            try {
+                const batch = writeBatch(db);
+                c.leaders.forEach(l => {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id));
+                });
+                orphanMembers.forEach(m => {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', m.id));
+                });
+                if ((window.companiesRaw || []).some(co => co.id === c.id)) {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id));
+                }
+                await batch.commit();
+                window.showNotif("تم حذف الشركة وقادتها وأعضاء فرقهم", "success");
+                window.closeCompanyDetailModal();
+            } catch (e) {
+                window.showNotif("فشل الحذف، تحقق من الصلاحيات", "error");
+            }
+        }
+    );
+};
+
+
+
+window.loadCompanyPayments = async (companyId) => {
+    const box = document.getElementById('companyDetail_payments');
+    if (!box) return;
+    box.innerHTML = '<p class="text-slate-600 text-[10px] text-center py-2">جاري التحميل...</p>';
+    try {
+        const c = (window._companiesIndex || {})[companyId];
+        const parents = new Set((c?.leaders || []).map(l => l.parentRequest).filter(Boolean));
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'pending_requests'));
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+            .filter(r => r.status === 'Approved' && (r.companyId === companyId || parents.has(r.id)))
+            .sort((a, b) => (b.approvedAt || b.timestamp || 0) - (a.approvedAt || a.timestamp || 0));
+        if (window._activeCompanyId !== companyId) return;
+        box.innerHTML = rows.length ? rows.map(r => `
+            <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-lg px-3 py-2">
+                <span class="text-emerald-300 text-[11px] font-black">${Number(r.price) || 0} $</span>
+                <span class="text-slate-400 text-[10px] font-bold">${r.type === 'renewal' ? '🔄 تجديد' : '🆕 اشتراك جديد'} · ${new Date(r.approvedAt || r.timestamp || Date.now()).toLocaleDateString('ar-SA')}</span>
+            </div>`).join('') : '<p class="text-slate-600 text-[10px] text-center py-2">لا توجد مدفوعات مسجلة</p>';
+    } catch (e) {
+        box.innerHTML = '<p class="text-rose-400 text-[10px] text-center py-2">تعذر تحميل السجل</p>';
+    }
+};
+
+window.toggleCompanyBilling = () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const wrap = document.getElementById('companyBillingWrap');
+    if (!c || !wrap) return;
+    wrap.classList.toggle('hidden');
+    const raw = (window.companiesRaw || []).find(x => x.id === c.id) || {};
+    document.getElementById('companyBilling_price').value = raw.planPrice || '';
+    document.getElementById('companyBilling_expiry').value = c.leaders.map(l => l.expiryDate).filter(Boolean).sort().pop() || '';
+};
+
+window.saveCompanyBilling = async () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    if (!c) return;
+    const price = Number(document.getElementById('companyBilling_price')?.value) || 0;
+    const exp = document.getElementById('companyBilling_expiry')?.value || '';
+    try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id), { name: c.name, planPrice: price }, { merge: true });
+        if (exp) {
+            const active = new Date(exp) > new Date();
+            c.leaders.forEach(l => {
+                batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id),
+                    { expiryDate: exp, status: active ? 'active' : 'expired', updatedAt: Date.now() });
+            });
+        }
+        await batch.commit();
+        window.logActivity('company_billing', `تحديث اشتراك شركة ${c.name}: ${price}$ — حتى ${exp || 'دون تغيير'}`);
+        window.showNotif('✅ تم تحديث بيانات اشتراك الشركة', 'success');
+        window.closeCompanyDetailModal();
+    } catch (e) {
+        window.showNotif('فشل الحفظ، تحقق من الصلاحيات', 'error');
+    }
+};
+
+
+
+
+
+window.openCompanyAddModal = () => {
+    window.closeAllSubModals();
+    ['newCompany_name', 'newCompany_phone', 'newCompany_whatsapp', 'newCompany_email'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const modal = document.getElementById('companyAddModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeCompanyAddModal = () => {
+    const modal = document.getElementById('companyAddModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+};
+
+window.saveNewCompany = async () => {
+    const name = document.getElementById('newCompany_name')?.value.trim() || '';
+    const phone = document.getElementById('newCompany_phone')?.value.trim() || '';
+    const whatsapp = document.getElementById('newCompany_whatsapp')?.value.trim() || '';
+    const email = document.getElementById('newCompany_email')?.value.trim() || '';
+    if (!name) return window.showNotif("اسم الشركة مطلوب", "error");
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'companies'), {
+            name, phone, whatsapp, email, createdAt: Date.now()
+        });
+        window.showNotif("✅ تم إنشاء الشركة", "success");
+        window.closeCompanyAddModal();
+    } catch (e) {
+        window.showNotif("فشل إنشاء الشركة، تحقق من الصلاحيات", "error");
+    }
+};
+
+window.migrateLegacyLeaderToCompany = async (leaderId, companyName) => {
+    try {
+        const companyRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'companies'), {
+            name: companyName, phone: '', whatsapp: '', email: '', createdAt: Date.now()
+        });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId), {
+            companyId: companyRef.id, companyName: companyName, isCompanyOwner: true, updatedAt: Date.now()
+        });
+        console.log('✅ تم الترحيل. معرف الشركة:', companyRef.id);
+        return companyRef.id;
+    } catch (e) {
+        console.error('فشل الترحيل', e);
+    }
+};
+
+
+
+window.setCompanyOwner = (leaderId) => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const target = c?.leaders.find(l => l.id === leaderId);
+    if (!c || !target) return;
+    window.showConfirm(
+        "تغيير مالك الشركة 👑",
+        `سيصبح "${target.ownerName}" مالك شركة "${c.name}"، وتُسحب الملكية من المالك الحالي.`,
+        async () => {
+            try {
+                const batch = writeBatch(db);
+                c.leaders.forEach(l => {
+                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id),
+                        { isCompanyOwner: l.id === leaderId, updatedAt: Date.now() });
+                });
+                await batch.commit();
+                window.showNotif("تم تغيير مالك الشركة", "success");
+                window.closeCompanyDetailModal();
+            } catch (e) {
+                window.showNotif("فشل تغيير المالك، تحقق من الصلاحيات", "error");
+            }
+        }
+    );
+};
+
 
 window.applyPackageToNewLeaderForm = () => {
     const sel = document.getElementById('new_lpackageSelect');
@@ -3423,17 +3852,20 @@ window.applyPackageToNewLeaderForm = () => {
 window.populateLinkCompanyDropdown = () => {
     const sel = document.getElementById('new_l_linkCompany');
     if (!sel) return;
-    const subs = window.subscribers || [];
-    const seen = new Set();
-    let options = '<option value="">-- شركة جديدة مستقلة --</option>';
-    subs.forEach(s => {
-        const cId = s.companyId || s.id;
-        if (seen.has(cId)) return;
-        seen.add(cId);
-        const label = s.companyName || s.ownerName || cId;
-        options += `<option value="${esc(cId)}">${esc(label)}</option>`;
+    let options = '<option value="">-- اختر شركة --</option>';
+    (window.companiesRaw || []).forEach(c => {
+        options += `<option value="${esc(c.id)}">${esc(c.name)}</option>`;
     });
     sel.innerHTML = options;
+    const cn = document.getElementById('new_l_companyName');
+    if (cn) cn.value = '';
+    window.toggleCompanyNameField();
+};
+
+
+window.toggleCompanyNameField = () => {
+    const linked = document.getElementById('new_l_linkCompany')?.value || '';
+    document.getElementById('newCompanyNameWrap')?.classList.toggle('hidden', !!linked);
 };
 
 window.addNewSub = async () => {
@@ -3460,8 +3892,13 @@ window.addNewSub = async () => {
         window.FEATURE_CATALOG.forEach(f => { features[f] = document.getElementById('new_lfeat_' + f)?.checked || false; });
 
         const linkedCompanyId = document.getElementById('new_l_linkCompany')?.value || '';
-        const linkedCompany = linkedCompanyId ? (window.subscribers || []).find(s => (s.companyId || s.id) === linkedCompanyId) : null;
+        const linkedCompany = linkedCompanyId ? ((window.companiesRaw || []).find(c => c.id === linkedCompanyId) || (window._companiesIndex || {})[linkedCompanyId] || null) : null;
+        const isFirstLeaderInCompany = linkedCompanyId ? !(window.subscribers || []).some(s => s.companyId === linkedCompanyId) : true;
 
+        const companyNameInput = document.getElementById('new_l_companyName')?.value.trim() || '';
+        const companyExpiry = linkedCompanyId
+            ? ((window._companiesIndex || {})[linkedCompanyId]?.leaders || []).map(l => l.expiryDate).filter(Boolean).sort().pop() || ''
+            : '';
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hashedKey);
         await setDoc(ref, { 
             ownerName: n, 
@@ -3473,12 +3910,12 @@ window.addNewSub = async () => {
             paymentMethod: payMethod,
             pricePaid: price,
             status: 'active',
-            expiryDate: ex, 
+             expiryDate: (companyExpiry && new Date(companyExpiry) > new Date()) ? companyExpiry : ex, 
             maxMembers: members, 
             features: features,
             companyId: linkedCompanyId || hashedKey,
-            companyName: linkedCompany ? (linkedCompany.companyName || linkedCompany.ownerName) : n,
-            isCompanyOwner: !linkedCompanyId,
+            companyName: linkedCompany ? linkedCompany.name : (companyNameInput || n),
+            isCompanyOwner: isFirstLeaderInCompany,
             updatedAt: Date.now() 
         }, { merge: true });
 
@@ -3545,13 +3982,28 @@ window.resetDevice = (type, key) => {
 
 
 window.deleteEntry = (type, key) => {
+    if (type === 'sub') {
+        const s = (window.subscribers || []).find(x => x.id === key);
+        const others = s ? (window.subscribers || []).filter(x => (x.companyId || x.id) === (s.companyId || s.id) && x.id !== key) : [];
+        if (s && s.isCompanyOwner === true && others.length > 0) {
+            return window.showNotif("👑 هذا مالك الشركة: عيّن مالكاً آخر أولاً أو احذف الشركة كاملة", "error");
+        }
+    }
     window.showConfirm(
         "حذف نهائي ⚠️",
         "هذه العملية لا يمكن التراجع عنها. هل أنت متأكد من الحذف النهائي؟",
         async () => {
             const path = type === 'sub' ? 'subscribers' : 'team_keys';
             try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', path, key));
+                if (type === 'sub') {
+                    const orphanMembers = (window.teamMembers || []).filter(m => m.parentKey === key);
+                    const batch = writeBatch(db);
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', path, key));
+                    orphanMembers.forEach(m => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', m.id)));
+                    await batch.commit();
+                } else {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', path, key));
+                }
                 window.showNotif("تم الحذف من السحابة بنجاح", "success");
             } catch(e) { window.showNotif("فشل الحذف، تحقق من الصلاحيات", "error"); }
         }
@@ -3725,7 +4177,7 @@ window.launchOS = (role, key, msg) => {
             const sub = window.subscribers?.find(s => s.id === key);
             if (sub?.expiryDate) {
                 const daysLeft = Math.ceil((new Date(sub.expiryDate) - new Date()) / (1000*60*60*24));
-                if (daysLeft <= 30) {
+                if (daysLeft <= 30 && (window.isCompanyOwner || window.myCompanyId === key)) {
                     document.getElementById('renewalBtn')?.classList.remove('hidden');
                 }
             }
@@ -3891,6 +4343,7 @@ window.renderLauncher = () => {
     D('app_import',    M);              // مدير فقط
     D('app_dashboard', M);              // مدير فقط
     D('app_emergency', MB);             // العضو فقط — بلاغ طارئ
+    D('app_myCompany', L && window.isCompanyOwner === true); // مالك الشركة فقط
         // تحديث لوحة الترحيب
     const nameEl = document.getElementById('welcomeName');
     const roleEl = document.getElementById('welcomeRole');
@@ -4503,8 +4956,11 @@ const filteredReports = window.userRole === 'master'
             window.subscribers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             if (window.renderSubTable) window.renderSubTable();
         });
+        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'companies'), (snapshot) => {
+            window.companiesRaw = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (window.renderSubTable) window.renderSubTable();
+        });
     }
-
 
 
 // 6. مزامنة الطلبات المعلقة مع إشعار فوري للمدير
@@ -5183,6 +5639,8 @@ window.startEditSub = (k) => {
     const s = window.subscribers.find(x => x.id === k); 
     if(s) {
         window._editingSubId = k;
+        document.getElementById('linkCompanyFieldWrap')?.classList.add('hidden');
+        document.getElementById('newCompanyNameWrap')?.classList.add('hidden');
         document.getElementById('new_ln').value = s.ownerName; 
         document.getElementById('new_lk').value = s.subKey;
         document.getElementById('new_lexp').value = s.expiryDate; 
@@ -5504,11 +5962,12 @@ window.runCommandSearch = (q) => {
     }
 
     const members = (window.teamMembers || []).filter(m => (m.name || m.Name || '').toLowerCase().includes(query)).slice(0, 5);
-    const leaders = (window.subscribers || []).filter(s => (s.ownerName || '').toLowerCase().includes(query)).slice(0, 5);
+    const leaders = (window.subscribers || []).filter(s => (s.ownerName || '').toLowerCase().includes(query) || (s.companyName || '').toLowerCase().includes(query)).slice(0, 5);
+    const companies = Object.values(window._companiesIndex || {}).filter(c => (c.name || '').toLowerCase().includes(query)).slice(0, 5);
     const materials = (window.appData || []).filter(m => (m.name || m.Name || '').toLowerCase().includes(query) || String(m.un || '').includes(query)).slice(0, 5);
     const reports = (window.allReports || []).filter(r => (r.materialName || '').toLowerCase().includes(query) || (r.memberName || '').toLowerCase().includes(query)).slice(0, 5);
 
-    if (!members.length && !leaders.length && !materials.length && !reports.length) {
+    if (!members.length && !leaders.length && !companies.length && !materials.length && !reports.length) {
         results.innerHTML = `<div class="empty-state-box"><span class="es-icon">🔍</span><p class="es-text">لا نتائج مطابقة</p></div>`;
         return;
     }
@@ -5518,9 +5977,13 @@ window.runCommandSearch = (q) => {
         html += `<div class="cmd-result-cat">👤 الأعضاء</div>`;
         html += members.map(m => `<div class="cmd-result-item" onclick="window.cmdGoMember('${escJs(m.id)}')"><span>👤</span><span class="flex-1 text-white text-sm font-bold">${esc(m.name || m.Name)}</span></div>`).join('');
     }
+    if (companies.length) {
+        html += `<div class="cmd-result-cat">🏢 الشركات</div>`;
+        html += companies.map(c => `<div class="cmd-result-item" onclick="window.cmdGoCompany('${escJs(c.id)}')"><span>🏢</span><span class="flex-1 text-white text-sm font-bold">${esc(c.name)} <span class="text-slate-500 text-xs">— ${c.leaders.length} قائد</span></span></div>`).join('');
+    }
     if (leaders.length) {
         html += `<div class="cmd-result-cat">🎖️ القادة</div>`;
-        html += leaders.map(s => `<div class="cmd-result-item" onclick="window.cmdGoLeader('${escJs(s.id)}')"><span>🎖️</span><span class="flex-1 text-white text-sm font-bold">${esc(s.ownerName)}</span></div>`).join('');
+html += leaders.map(s => `<div class="cmd-result-item" onclick="window.cmdGoLeader('${escJs(s.id)}')"><span>${s.isCompanyOwner === true ? '👑' : '🎖️'}</span><span class="flex-1 text-white text-sm font-bold">${esc(s.ownerName)} <span class="text-slate-500 text-xs">— ${esc(s.companyName || '')}</span></span></div>`).join('');
     }
     if (materials.length) {
         html += `<div class="cmd-result-cat">⚠️ المواد الخطرة</div>`;
@@ -5535,6 +5998,7 @@ window.runCommandSearch = (q) => {
 
 window.cmdGoMember = (id) => { window.closeCommandPalette(); window.openWin('winTeam'); setTimeout(() => window.openMemberDetail?.(id), 300); };
 window.cmdGoLeader = (id) => { window.closeCommandPalette(); window.openWin('winSubs'); setTimeout(() => window.openSubDetail?.(id), 300); };
+window.cmdGoCompany = (id) => { window.closeCommandPalette(); window.openWin('winSubs'); setTimeout(() => window.openCompanyDetail?.(id), 300); };
 window.cmdGoMaterial = (name) => { window.closeCommandPalette(); window.openWin('winERG'); setTimeout(() => { const inp = document.getElementById('sInput'); if (inp) { inp.value = name; window.handleSearch?.(); } }, 300); };
 window.cmdGoReport = () => { window.closeCommandPalette(); window.openWin('winReports'); };
 
@@ -5988,6 +6452,7 @@ window.loadPendingRequests = async () => {
             <div>
                 <p class="font-black text-white text-lg">👤 ${esc(r.name || '--')}</p>
                 <p class="text-slate-400 text-sm font-bold mt-1">📞 ${esc(r.phone || '--')}</p>
+<p class="text-indigo-300 text-xs font-black mt-1">🏢 ${esc(r.companyName || r.name || '--')}</p>
             </div>
             <span class="text-xs bg-amber-600/20 text-amber-400 px-3 py-1.5 rounded-full font-black border border-amber-600/30 flex-shrink-0">
                 ⏳ بانتظار التحقق
@@ -6052,29 +6517,35 @@ window.loadPendingRequests = async () => {
 
 window.approveRenewal = async (reqId, leaderKey) => {
     if (!leaderKey) { window.showNotif("⚠️ هذا الطلب لا يحتوي مفتاح القائد — لا يمكن التجديد التلقائي", "error"); return; }
+    const base = (window.subscribers || []).find(s => s.id === leaderKey);
+    const cId = base ? (base.companyId || base.id) : '';
+    const group = base ? (window.subscribers || []).filter(s => (s.companyId || s.id) === cId) : [];
     window.showConfirm(
-        "تجديد الاشتراك",
-        "سيتم تمديد اشتراك القائد سنة إضافية من تاريخ اليوم. متابعة؟",
+        "تجديد اشتراك الشركة",
+        `سيتم تمديد اشتراك ${group.length || 1} قائد سنة إضافية من تاريخ اليوم. متابعة؟`,
         async () => {
             try {
-                const subRef = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderKey);
-                const subSnap = await getDoc(subRef);
+                const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderKey));
                 if (!subSnap.exists()) { window.showNotif("⛔ حساب القائد غير موجود", "error"); return; }
+                const rq = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId));
+                if (rq.exists() && rq.data().status === 'Approved') { window.showNotif("هذا الطلب معتمد مسبقاً", "error"); return; }
 
                 const newExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                await updateDoc(subRef, {
-                    expiryDate: newExpiry,
-                    isPaid: true,
-                    status: 'active'
+                const batch = writeBatch(db);
+                (group.length ? group : [{ id: leaderKey }]).forEach(l => {
+                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id),
+                        { expiryDate: newExpiry, isPaid: true, status: 'active' });
                 });
-
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId), {
-                    status: 'Approved',
-                    approvedAt: Date.now()
+                const co = (window.companiesRaw || []).find(x => x.id === cId);
+                batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId), {
+                    status: 'Approved', approvedAt: Date.now(),
+                    companyId: cId, price: Number(co?.planPrice) || 0,
+                    renewedUntil: newExpiry, renewedLeaders: group.length || 1
                 });
+                await batch.commit();
 
-                window.logActivity('renewal_approved', `تم تجديد اشتراك القائد: ${leaderKey}`);
-                window.showNotif("✅ تم تجديد الاشتراك بنجاح حتى " + newExpiry, "success");
+                window.logActivity('renewal_approved', `تم تجديد اشتراك الشركة (${group.length || 1} قائد) حتى ${newExpiry}`);
+                window.showNotif("✅ تم تجديد اشتراك الشركة حتى " + newExpiry, "success");
                 window.loadPendingRequests();
             } catch(e) {
                 window.showNotif("❌ فشل تجديد الاشتراك", "error");
@@ -6101,7 +6572,7 @@ window.approveRequest = async (reqId, name, phone) => {
                 const reqSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId));
                 if (!reqSnap.exists()) { window.showNotif("الطلب غير موجود", "error"); return; }
                 const reqData = reqSnap.data();
-
+                if (reqData.status === 'Approved') { window.showNotif("هذا الطلب معتمد مسبقاً", "error"); return; }
                 const reqEmail = reqData.email || '';
                 const leadersData = reqData.leadersData || [];
                 const totalLeaders = reqData.totalLeaders || 1;
@@ -6112,6 +6583,12 @@ window.approveRequest = async (reqId, name, phone) => {
 
                 // توليد معرّف شركة موحد يجمع كل القادة تحت هذا الطلب
                 const companyId = 'CMP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+                const companyName = (reqData.companyName || name || '').trim();
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', companyId), {
+                    name: companyName, phone: phone || '', whatsapp: '', email: reqEmail,
+                    createdAt: Date.now(), planPrice: Number(reqData.price) || 0, packageId: reqData.packageId || null
+                });
 
                 // توليد كود لكل قائد وحفظه
                 const generatedKeys = [];
@@ -6134,8 +6611,12 @@ window.approveRequest = async (reqId, name, phone) => {
                             parentRequest: reqId,
                             features: reqData.packageFeatures || null,
                             companyId: companyId,
-                            companyName: name,
-                            isCompanyOwner: isOwner
+                            companyName: companyName,
+                            isCompanyOwner: isOwner,
+                            paymentStatus: 'paid',
+                            paymentMethod: reqData.payMethod || '',
+                            pricePaid: isOwner ? (Number(reqData.price) || 0) : 0,
+                            packageId: reqData.packageId || null
                         }
                     );
                     generatedKeys.push({ leaderNum: i + 1, key: newKey, members: membersForThisLeader, isOwner });
@@ -6147,7 +6628,9 @@ window.approveRequest = async (reqId, name, phone) => {
                     {
                         status: 'Approved',
                         approvedAt: Date.now(),
-                        assignedKeys: generatedKeys.map(g => g.key)
+                                                assignedKeys: generatedKeys.map(g => g.key),
+                        companyId: companyId,
+                        companyName: companyName
                     }
                 );
 
@@ -6188,27 +6671,24 @@ window.checkExpiringSubscriptions = () => {
     if (window.userRole !== 'master') return;
     const now = new Date();
     const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const expiring = (window.subscribers || []).filter(s => {
-        if (!s.expiryDate || !s.isPaid) return false;
+    const groups = {};
+    (window.subscribers || []).forEach(s => {
+        if (!s.expiryDate || !s.isPaid) return;
+        const k = s.companyId || s.id;
         const exp = new Date(s.expiryDate);
-        return exp > now && exp <= soon;
+        const g = groups[k] || (groups[k] = { name: s.companyName || s.ownerName || k, exp, count: 0 });
+        if (exp > g.exp) g.exp = exp;
+        g.count++;
     });
-    const expired = (window.subscribers || []).filter(s => {
-        if (!s.expiryDate) return false;
-        return new Date(s.expiryDate) < now && s.isPaid;
+    Object.values(groups).forEach(g => {
+        if (g.exp > now && g.exp <= soon) {
+            const days = Math.ceil((g.exp - now) / (1000 * 60 * 60 * 24));
+            window.showNotif(`⚠️ اشتراك شركة ${g.name} (${g.count} قائد) ينتهي خلال ${days} أيام`, 'error');
+            window.sendPushNotif('انتهاء اشتراك قريب', `${g.name} — ${days} أيام متبقية`);
+        } else if (g.exp < now) {
+            window.showNotif(`⛔ انتهى اشتراك شركة ${g.name}`, 'error');
+        }
     });
-    if (expiring.length > 0) {
-        expiring.forEach(s => {
-            const days = Math.ceil((new Date(s.expiryDate) - now) / (1000*60*60*24));
-            window.showNotif(`⚠️ اشتراك ${s.ownerName} ينتهي خلال ${days} أيام`, 'error');
-            window.sendPushNotif('انتهاء اشتراك قريب', `${s.ownerName} — ${days} أيام متبقية`);
-        });
-    }
-    if (expired.length > 0) {
-        expired.forEach(s => {
-            window.showNotif(`⛔ انتهى اشتراك القائد: ${s.ownerName}`, 'error');
-        });
-    }
 };
 
 
@@ -6277,7 +6757,7 @@ window.filterSubs = () => {
     const cards = document.querySelectorAll('#subTableBody .leader-card');
     let visible = 0, active = 0, expired = 0;
     cards.forEach(card => {
-        const name = card.querySelector('.leader-name')?.textContent?.toLowerCase() || '';
+        const name = ((card.querySelector('.leader-name')?.textContent || '') + ' ' + (card.dataset.search || '')).toLowerCase();
         const isExpired = card.dataset.expired === 'true';
         const matchName = !query || name.includes(query);
         const matchStatus = status === 'all' ||
@@ -6298,7 +6778,7 @@ window.filterSubs = () => {
     if (se) se.textContent = expired;
     if (st) st.textContent = total;
     const sc = document.getElementById('subsCount');
-    if (sc) sc.textContent = total + ' قائد';
+    if (sc) sc.textContent = total + ' شركة';
 };
 
 
@@ -8928,17 +9408,18 @@ input:focus, select:focus, textarea:focus {
 .member-detail-info-label { font-size: 10px; color: rgba(148,163,184,0.75); font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
 .member-detail-info-value { font-size: 14px; font-weight: 900; }
 .member-detail-actions {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    display: flex; flex-wrap: wrap; gap: 10px;
     padding: 20px 24px 4px; margin-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
 }
 .member-detail-action-btn {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    flex: 1 1 88px; min-width: 88px;
     padding: 14px 8px; border-radius: 16px; font-size: 11px; font-weight: 900;
     transition: all .2s cubic-bezier(.4,0,.2,1); border: 1px solid; cursor: pointer;
 }
 .member-detail-action-btn:hover { transform: translateY(-3px); filter: brightness(1.15); }
 .member-detail-action-icon { font-size: 20px; }
-.member-detail-action-danger { flex-direction: row; }
+.member-detail-action-danger { flex-basis: 100%; flex-direction: row; }
 
 /* فورم إضافة/تعديل القائد */
 .lux-form-card { background: linear-gradient(160deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
@@ -10007,6 +10488,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
      bg-rose-600 text-white text-center py-2 font-black text-sm italic animate-pulse">
     ⚠️ وضع Offline — البيانات محلية — لا يوجد اتصال بالسحابة
 </div>
+<button id="renewalBtn" onclick="window.requestRenewal()" class="hidden fixed bottom-4 left-4 z-[590000] px-5 py-3 rounded-2xl font-black text-sm text-black"
+    style="background:linear-gradient(135deg,#f59e0b,#fbbf24); box-shadow:0 8px 24px rgba(245,158,11,0.35);">
+    🔄 تجديد اشتراك الشركة
+</button>
 <div id="trialBar" class="hidden fixed top-0 left-0 right-0 z-[590000]
      bg-amber-500 text-black text-center py-2 font-black text-sm">
     🎯 حساب تجريبي — متبقي
@@ -10020,7 +10505,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- شاشة Splash -->
-<div id="splashScreen" class="fixed inset-0 z-[999999] flex flex-col items-center justify-center transition-all duration-700" style="background:linear-gradient(120deg, #1a0510, #4c0519, #7c2d12, #1e1b4b, #4c0519, #1a0510); background-size:400% 400%; animation:vibrantShift 15s ease infinite;">
+<div id="splashScreen" class="fixed inset-0 z-[999999] flex flex-col items-center justify-center transition-all duration-700" style="background:linear-gradient(135deg, #000000 0%, #1a0510 30%, #4c0519 60%, #1a0510 85%, #000000 100%); background-size:300% 300%; animation:vibrantShift 26s ease infinite;">
     <div class="flex flex-col items-center gap-7 px-10 py-12 rounded-[2.5rem]" style="background:rgba(0,0,0,0.35); backdrop-filter:blur(18px); border:1px solid rgba(255,255,255,0.15); box-shadow:0 30px 70px rgba(0,0,0,0.5);">
 
         <div class="w-32 h-32 bg-rose-600 rounded-[2.5rem] flex items-center justify-center shadow-[0_0_80px_rgba(220,38,38,0.7)] border-4 border-rose-900 animate-pulse">
@@ -10102,17 +10587,18 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </button>
         </div>
 
-        <div id="entryOptions" class="grid grid-cols-1 sm:grid-cols-3 gap-6 items-end" style="max-width:1200px; width:100%;">
+                <div id="entryOptions" class="grid grid-cols-1 sm:grid-cols-3 gap-6 items-end" style="max-width:1200px; width:100%;">
 
             <!-- بطاقة الاشتراك الكامل — يمين -->
             <button onclick="window.showSubscriptionDetails()"
-                    class="entry-card glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="border:1px solid rgba(16,185,129,0.25);
-                           border-bottom:5px solid #059669;
-                           background:linear-gradient(160deg,rgba(16,185,129,0.14) 0%,rgba(6,78,59,0.05) 100%);
+                    class="entry-card glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
+                           border:1px solid rgba(255,255,255,0.08);
+                           border-bottom:3px solid #059669;
+                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(16,185,129,0.18) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(16,185,129,0.16) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.35); box-shadow:0 10px 30px rgba(16,185,129,0.25);">
                     <span class="text-5xl">💳</span>
@@ -10125,13 +10611,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
             <!-- بطاقة تسجيل الدخول — الوسط (مرتفعة افتراضيًا) -->
             <button onclick="window.showLoginFields()"
-                    class="entry-card card-login glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="border:1px solid rgba(59,130,246,0.25);
-                           border-bottom:5px solid #2563eb;
-                           background:linear-gradient(160deg,rgba(37,99,235,0.14) 0%,rgba(30,58,138,0.05) 100%);
+                    class="entry-card card-login glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
+                           border:1px solid rgba(255,255,255,0.08);
+                           border-bottom:3px solid #2563eb;
+                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(59,130,246,0.18) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(59,130,246,0.16) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.35); box-shadow:0 10px 30px rgba(59,130,246,0.25);">
                     <span class="text-5xl">🔑</span>
@@ -10144,13 +10631,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
             <!-- بطاقة التجربة المجانية — يسار -->
             <button onclick="window.startTrialMode()"
-                    class="entry-card glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="border:1px solid rgba(245,158,11,0.25);
-                           border-bottom:5px solid #d97706;
-                           background:linear-gradient(160deg,rgba(245,158,11,0.14) 0%,rgba(120,53,15,0.05) 100%);
+                    class="entry-card glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
+                           border:1px solid rgba(255,255,255,0.08);
+                           border-bottom:3px solid #d97706;
+                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(245,158,11,0.18) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(245,158,11,0.16) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.35); box-shadow:0 10px 30px rgba(245,158,11,0.25);">
                     <span class="text-5xl">🎯</span>
@@ -10162,6 +10650,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </button>
 
         </div>
+
+
 
 
         <div id="loginFields" class="hidden space-y-5"
@@ -10192,6 +10682,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                         style="background:linear-gradient(160deg,rgba(99,102,241,0.12),rgba(99,102,241,0.03)); border-color:rgba(99,102,241,0.28);">
                     <span class="flex items-center justify-center w-14 h-14 rounded-2xl text-2xl" style="background:rgba(99,102,241,0.18); border:1px solid rgba(99,102,241,0.35);">🎖️</span>
                     <span class="text-sm font-black text-indigo-300">قائد</span>
+                    <span class="text-[9px] font-bold text-indigo-300/50 -mt-1">أو قائد شركة</span>
                 </button>
                 <button onclick="window.selectLoginType('member')" id="loginTypeBtn_member"
                         class="account-type-btn py-6 px-2 rounded-3xl text-center transition-all border flex flex-col items-center gap-2"
@@ -10395,7 +10886,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black text-emerald-400" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35);">١</span>
                     <p class="text-slate-300 text-base font-black uppercase tracking-widest">بيانات المشترك</p>
                 </div>
-
+<div class="relative">
+    <input type="text" id="subscribe_company_input" placeholder="اسم الشركة / الجهة (اختياري)"
+        class="w-full bg-black/40 border border-white/10 p-5 rounded-2xl text-right text-white focus:border-emerald-500 outline-none text-lg italic shadow-inner transition-all">
+    <span class="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 text-lg">🏢</span>
+</div>
                 <div class="relative">
                     <input type="text" id="subscribe_name_input" placeholder="الاسم الرباعي للمشترك"
                         class="w-full bg-black/40 border border-white/10 p-5 rounded-2xl text-right text-white focus:border-emerald-500 outline-none text-lg italic shadow-inner transition-all">
@@ -10694,7 +11189,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(225,29,72,0.2);">
                 <svg class="w-6 h-6 text-rose-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"/></svg>
             </div>
-            <span class="text-white text-xs font-black text-center">إدارة القادة</span>
+            <span class="text-white text-xs font-black text-center">إدارة الشركات</span>
         </button>
 
         <!-- إدارة الفريق -->
@@ -10705,6 +11200,16 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                 <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">إدارة الفريق</span>
+        </button>
+
+        <!-- إدارة شركتي — لمالك الشركة فقط -->
+        <button id="app_myCompany" onclick="window.renderMyCompanyPanel(); window.openWin('winMyCompany')"
+            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="display:none; background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);height:140px;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(245,158,11,0.2);">
+                <span style="font-size:1.5rem;">👑</span>
+            </div>
+            <span class="text-white text-xs font-black text-center">إدارة شركتي</span>
         </button>
 
 <!-- بلاغ طارئ — للعضو فقط -->
@@ -11122,6 +11627,19 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     </div>
 </div>
 
+<div id="winMyCompany" class="app-window hidden flex-col bg-[#080b12] text-right" style="padding:0;">
+    <div class="flex items-center justify-between p-5 border-b border-white/10">
+        <button onclick="window.closeWin('winMyCompany')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+        <div>
+            <p id="myCompanyName" class="text-white font-black text-lg uppercase tracking-wider">شركتي</p>
+            <p id="myCompanySummary" class="text-slate-500 text-[11px] mt-1">—</p>
+        </div>
+    </div>
+    <div class="p-5 overflow-y-auto" style="max-height:calc(100vh - 100px);">
+        <div id="myCompanyList" class="space-y-2"></div>
+        <p class="text-slate-600 text-[10px] text-center mt-4">لزيادة عدد القادة، يلزم تجديد أو ترقية باقة الاشتراك.</p>
+    </div>
+</div>
 
 <div id="winFinance" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
@@ -11290,7 +11808,6 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
         </div>
     </div>
-</div>
 
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
@@ -11302,10 +11819,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl transition-all hover:scale-105" style="background:linear-gradient(135deg,rgba(220,38,38,0.3),rgba(245,158,11,0.1) 70%,rgba(220,38,38,0.06)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 6px 24px rgba(220,38,38,0.25), 0 0 30px rgba(245,158,11,0.15), inset 0 1px 0 rgba(255,255,255,0.12);">🎖️</div>
                 <div>
                     <div class="flex items-center gap-2.5 justify-end">
-                        <p class="text-white font-black text-lg uppercase tracking-wider">إدارة القادة السياديين</p>
-                        <span id="subsCount" class="text-xs bg-rose-500/25 text-rose-300 px-3 py-1 rounded-full font-black border border-rose-400/30">0 قائد</span>
+                        <p class="text-white font-black text-lg uppercase tracking-wider">إدارة الشركات</p>                        <span id="subsCount" class="text-xs bg-rose-500/25 text-rose-300 px-3 py-1 rounded-full font-black border border-rose-400/30">0 قائد</span>
                     </div>
-                    <p class="text-rose-400/60 text-[11px] font-mono uppercase tracking-widest mt-0.5">Sovereign Leaders Management</p>
+                    <p class="text-rose-400/60 text-[11px] font-mono uppercase tracking-widest mt-0.5">Companies Management</p>
                 </div>
             </div>
             <button onclick="window.closeWin('winSubs')" class="w-10 h-10 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-base flex items-center justify-center border border-white/10">✕</button>
@@ -11316,13 +11832,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
             <!-- الشريط الجانبي: أدوات التحكم -->
             <div class="w-72 shrink-0 flex flex-col gap-4 p-5 overflow-y-auto custom-scrollbar" style="background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01)); border-left:1px solid rgba(245,158,11,0.15); box-shadow:inset -1px 0 0 rgba(255,255,255,0.03);">
-                <button onclick="window.openAddSubModal()"
+                <button onclick="window.openCompanyAddModal()"
                     class="flex items-center justify-center gap-2.5 rounded-2xl px-4 py-4 text-sky-200 text-sm font-black transition-all hover:bg-sky-500/20 hover:scale-[1.02] active:scale-95 border border-sky-400/40"
                     style="background:linear-gradient(135deg,rgba(56,189,248,0.2),rgba(56,189,248,0.06)); box-shadow:0 6px 20px rgba(56,189,248,0.18), inset 0 1px 0 rgba(255,255,255,0.12);">
-                    <span class="text-lg">➕</span> إضافة قائد جديد
+                    <span class="text-lg">➕</span> إضافة شركة جديدة
                 </button>
 
-                <input type="text" id="subSearchInput" oninput="window.filterSubs()" placeholder="🔍 بحث بالاسم أو الكود..."
+                <input type="text" id="subSearchInput" oninput="window.filterSubs()" placeholder="🔍 بحث باسم الشركة أو القائد..."
                     class="erg-input w-full border border-white/10 rounded-2xl px-4 py-3 text-white text-sm outline-none transition-all text-right"
                     style="background:rgba(0,0,0,0.4);">
 
@@ -11339,15 +11855,15 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                 <p class="text-[11px] text-amber-400/70 font-black uppercase px-1 tracking-widest">📊 نظرة سريعة</p>
 
                 <div class="team-stat-card rounded-2xl p-4 flex items-center justify-between transition-all hover:scale-[1.02]" style="background:linear-gradient(160deg,rgba(16,185,129,0.14),rgba(16,185,129,0.04)); border:1px solid rgba(16,185,129,0.3); box-shadow:0 6px 20px rgba(16,185,129,0.12);">
-                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">✅</span> نشطون</span>
+                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">✅</span> شركات نشطة</span>
                     <p id="subs_stat_active" class="text-2xl font-black text-emerald-400 leading-none">0</p>
                 </div>
                 <div class="team-stat-card rounded-2xl p-4 flex items-center justify-between transition-all hover:scale-[1.02]" style="background:linear-gradient(160deg,rgba(220,38,38,0.14),rgba(220,38,38,0.04)); border:1px solid rgba(220,38,38,0.3); box-shadow:0 6px 20px rgba(220,38,38,0.12);">
-                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">⛔</span> منتهون</span>
+                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">⛔</span> شركات منتهية</span>
                     <p id="subs_stat_expired" class="text-2xl font-black text-rose-400 leading-none">0</p>
                 </div>
                 <div class="team-stat-card rounded-2xl p-4 flex items-center justify-between transition-all hover:scale-[1.02]" style="background:linear-gradient(160deg,rgba(245,158,11,0.14),rgba(245,158,11,0.04)); border:1px solid rgba(245,158,11,0.3); box-shadow:0 6px 20px rgba(245,158,11,0.12);">
-                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">👥</span> الإجمالي</span>
+                    <span class="text-xs text-slate-300 font-black uppercase flex items-center gap-1.5"><span class="text-base">👥</span> إجمالي الشركات</span>
                     <p id="subs_stat_total" class="text-2xl font-black text-amber-400 leading-none">0</p>
                 </div>
             </div>
@@ -11359,7 +11875,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
 
             <!-- لوحة جانبية منزلقة: إضافة/تعديل قائد -->
-            <div id="subFormModal" class="hidden fixed inset-0 z-[5000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubFormModal()">
+            <div id="subFormModal" class="hidden fixed inset-0 z-[11000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubFormModal()">
             <div class="w-full max-w-5xl max-h-[92vh] overflow-y-auto custom-scrollbar rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                 <button onclick="window.closeSubFormModal()" class="member-detail-close">✕</button>
 
@@ -11367,7 +11883,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0" style="background:linear-gradient(135deg,rgba(245,158,11,0.28),rgba(99,102,241,0.12)); border:1px solid rgba(245,158,11,0.4); box-shadow:0 0 16px rgba(245,158,11,0.2);">🎖️</div>
                     <div class="member-detail-hero-text">
                         <p id="subFormModalTitle" class="member-detail-name" style="font-size:18px;">➕ إضافة قائد جديد</p>
-                        <p class="member-detail-sub">بيانات القائد والاشتراك</p>
+                        <p class="member-detail-sub">بيانات الشركة وقائدها الأول والاشتراك</p>
                     </div>
                 </div>
 
@@ -11376,16 +11892,18 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                     <p class="lux-form-section-title">👤 البيانات الأساسية</p>
                     <div class="flex flex-col gap-3">
                         <div>
-                        <div>
                             <p class="lux-field-label">اسم القائد</p>
                             <input type="text" id="new_ln" placeholder="الاسم الكامل" class="erg-input lux-field-input text-right">
                         </div>
-                        <div>
+                        <div id="linkCompanyFieldWrap">
                             <p class="lux-field-label">ربط بشركة موجودة (اختياري)</p>
-                            <select id="new_l_linkCompany" class="erg-input lux-field-input text-right">
-                                <option value="">-- شركة جديدة مستقلة --</option>
-                            </select>
-                        </div>
+                            <select id="new_l_linkCompany" onchange="window.toggleCompanyNameField()" class="erg-input lux-field-input text-right">
+    <option value="">-- شركة جديدة مستقلة --</option>
+</select>
+</div><div id="newCompanyNameWrap">
+    <p class="lux-field-label">اسم الشركة</p>
+    <input type="text" id="new_l_companyName" placeholder="مثال: شركة الأمان للاستجابة" class="erg-input lux-field-input text-right">
+</div>
                         <div>
                             <p class="lux-field-label">كود الوصول</p>
                             <div class="relative">
@@ -11475,7 +11993,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
 
             <!-- نافذة تفاصيل القائد -->
-            <div id="subDetailModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubDetailModal()">
+            <div id="subDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubDetailModal()">
                 <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                     <button onclick="window.closeSubDetailModal()" class="member-detail-close">✕</button>
 
@@ -11485,7 +12003,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                         </div>
                         <div class="member-detail-hero-text">
                             <p id="subDetail_name" class="member-detail-name">—</p>
-                            <p class="member-detail-sub">🎖️ قائد فريق</p>
+<p id="subDetail_sub" class="member-detail-sub">🎖️ قائد فريق</p>
                         </div>
                     </div>
 
@@ -11543,7 +12061,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                         <button id="subDetail_btnReset" class="member-detail-action-btn" style="background:rgba(59,130,246,0.1); border-color:rgba(59,130,246,0.3); color:#60a5fa;">
                             <span class="member-detail-action-icon">🔄</span>تصفير الجهاز
                         </button>
-                        <button id="subDetail_btnDelete" class="member-detail-action-btn" style="background:rgba(244,63,94,0.1); border-color:rgba(244,63,94,0.3); color:#fb7185;">
+                        <button id="subDetail_btnGrantLogout" class="member-detail-action-btn" style="background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.3); color:#34d399;">
+                            <span class="member-detail-action-icon">🔓</span>منح تغييرات كود الخروج
+                        </button>
+                        <button id="subDetail_btnDelete" class="member-detail-action-btn member-detail-action-danger" style="background:rgba(244,63,94,0.1); border-color:rgba(244,63,94,0.3); color:#fb7185;">
                             <span class="member-detail-action-icon">🗑️</span>حذف نهائي
                         </button>
                     </div>
@@ -11556,6 +12077,97 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 
+<div id="companyDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeCompanyDetailModal()">
+    <div class="w-full max-w-lg rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
+        <button onclick="window.closeCompanyDetailModal()" class="member-detail-close">✕</button>
+        <div class="text-right mb-4">
+            <p id="companyDetail_name" class="member-detail-name">—</p>
+            <p id="companyDetail_count" class="member-detail-sub">—</p>
+        </div>
+        <div id="companyDetail_info" class="mb-3"></div>
+        <div id="companyDetail_leadersList" class="space-y-2 max-h-[28vh] overflow-y-auto"></div>
+        <p class="text-slate-500 text-[10px] font-black uppercase mt-4 mb-2 text-right">🧾 سجل المدفوعات</p>
+        <div id="companyDetail_payments" class="space-y-1 max-h-[16vh] overflow-y-auto"></div>
+        <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)"
+            class="w-full mt-4 py-3 rounded-xl font-black text-xs text-emerald-300"
+            style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+            ➕ إضافة قائد لهذه الشركة
+        </button>
+        <div class="flex gap-2 mt-2">
+            <button onclick="window.toggleCompanyRename()"
+                class="flex-1 py-3 rounded-xl font-black text-xs text-amber-300"
+                style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">
+                ✏️ تعديل اسم الشركة
+            </button>
+            <button onclick="window.deleteCompany()"
+                class="flex-1 py-3 rounded-xl font-black text-xs text-rose-300"
+                style="background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3);">
+                🗑️ حذف الشركة
+            </button>
+        </div>
+        <button onclick="window.toggleCompanyBilling()"
+            class="w-full mt-2 py-3 rounded-xl font-black text-xs text-cyan-300"
+            style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
+            💵 سعر الاشتراك وتمديد الشركة
+        </button>
+        <div id="companyBillingWrap" class="hidden mt-3 space-y-2">
+            <div class="flex gap-2">
+                <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)"
+                    class="erg-input lux-field-input text-right flex-1">
+                <input type="date" id="companyBilling_expiry"
+                    class="erg-input lux-field-input text-right flex-1">
+            </div>
+            <button onclick="window.saveCompanyBilling()"
+                class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
+                style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+                حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)
+            </button>
+        </div>
+        <div id="companyRenameWrap" class="hidden mt-3 flex gap-2">
+            <input type="text" id="companyRename_input" placeholder="اسم الشركة الجديد"
+                class="erg-input lux-field-input text-right flex-1">
+            <button onclick="window.saveCompanyName()"
+                class="px-5 rounded-xl font-black text-xs text-emerald-300"
+                style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+                حفظ
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="companyAddModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeCompanyAddModal()">
+    <div class="w-full max-w-md rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
+        <button onclick="window.closeCompanyAddModal()" class="member-detail-close">✕</button>
+        <div class="member-detail-hero" style="padding:24px 28px;">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0" style="background:linear-gradient(135deg,rgba(16,185,129,0.28),rgba(99,102,241,0.12)); border:1px solid rgba(16,185,129,0.4);">🏢</div>
+            <div class="member-detail-hero-text">
+                <p class="member-detail-name" style="font-size:18px;">➕ إضافة شركة جديدة</p>
+                <p class="member-detail-sub">بيانات التواصل الخاصة بالشركة</p>
+            </div>
+        </div>
+        <div class="p-6 flex flex-col gap-3">
+            <div>
+                <p class="lux-field-label">اسم الشركة</p>
+                <input type="text" id="newCompany_name" placeholder="مثال: شركة الأمان للاستجابة" class="erg-input lux-field-input text-right">
+            </div>
+            <div>
+                <p class="lux-field-label">رقم الهاتف</p>
+                <input type="text" id="newCompany_phone" placeholder="07XXXXXXXX" class="erg-input lux-field-input text-right" dir="ltr">
+            </div>
+            <div>
+                <p class="lux-field-label">رقم واتساب</p>
+                <input type="text" id="newCompany_whatsapp" placeholder="07XXXXXXXX" class="erg-input lux-field-input text-right" dir="ltr">
+            </div>
+            <div>
+                <p class="lux-field-label">البريد الإلكتروني</p>
+                <input type="email" id="newCompany_email" placeholder="info@company.com" class="erg-input lux-field-input text-right" dir="ltr">
+            </div>
+            <button onclick="window.saveNewCompany()" class="w-full mt-2 py-3 rounded-2xl text-white text-xs font-black transition-all active:scale-95 hover:brightness-110" style="background:linear-gradient(135deg,rgba(16,185,129,0.95),rgba(5,150,105,0.85) 60%,rgba(16,185,129,0.95)); box-shadow:0 4px 16px rgba(16,185,129,0.3);">
+                ✅ إنشاء الشركة
+            </button>
+        </div>
+    </div>
+</div>
 
 <div id="winTeam" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
@@ -11574,6 +12186,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                     <p class="text-indigo-400/50 text-[10px] font-mono uppercase tracking-widest mt-0.5">Team Management</p>
                 </div>
             </div>
+            <button onclick="window.promptSetMyLogoutCode()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-emerald-500/20 text-white/40 hover:text-emerald-400 transition-all text-sm flex items-center justify-center border border-white/10" title="تعيين/تغيير كود الخروج">🔐</button>
             <button onclick="window.closeTeamWin()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
         </div>
         
@@ -12438,13 +13051,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
                 <!-- خطوة 3 -->
                 <div id="track_step3" class="flex items-center gap-3 p-3 rounded-2xl opacity-40" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);">
                     <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-black text-slate-500 text-sm" style="background:rgba(255,255,255,0.06);">3</div>
-                    <div>
+                    <div class="flex-1">
                         <p class="text-slate-400 font-black text-sm">إرسال أكواد التفعيل</p>
                         <p class="text-slate-600 text-xs">ستصلك الأكواد على بريدك الإلكتروني</p>
                         <p class="text-amber-500/60 text-[10px] mt-0.5">⚠️ تحقق من مجلد Spam</p>
+                        <div id="track_codes_box" class="hidden mt-2 space-y-1"></div>
+                        <button id="track_resend_btn" onclick="window.resendActivationEmail(document.getElementById('track_req_id').textContent)"
+                            class="hidden mt-2 text-[10px] font-black text-cyan-400 underline underline-offset-4">
+                            ✉️ إعادة إرسال الأكواد بالبريد
+                        </button>
                     </div>
                 </div>
-
                 <!-- زر تحديث -->
                 <button onclick="window.refreshOrderStatus(document.getElementById('track_req_id').textContent)"
                     class="w-full py-3 rounded-2xl font-black text-cyan-400 text-xs uppercase tracking-wider transition-all hover:text-white"
