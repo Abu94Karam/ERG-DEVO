@@ -4,7 +4,9 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<meta name="color-scheme" content="dark light">
 <meta name="description" content="ERG — منصة الاستجابة الطارئة: دليل المواد الخطرة وإدارة الفرق الميدانية والبلاغات العاجلة.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="ERG - منصة الاستجابة الطارئة">
@@ -15,7 +17,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ERG SYSTEM">
-<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiRVJHIFNZU1RFTSIsInNob3J0X25hbWUiOiJFUkciLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwMDAwMDAiLCJ0aGVtZV9jb2xvciI6IiMxMGI5ODEiLCJpY29ucyI6W3sic3JjIjoiaHR0cHM6Ly9jZG4taWNvbnMtcG5nLmZsYXRpY29uLmNvbS81MTIvMTY4MC8xNjgwNzg0LnBuZyIsInNpemVzIjoiNTEyeDUxMiIsInR5cGUiOiJpbWFnZS9wbmcifV19">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiRVJHIFNZU1RFTSIsInNob3J0X25hbWUiOiJFUkciLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwib3JpZW50YXRpb24iOiJhbnkiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzAwMDAwMCIsInRoZW1lX2NvbG9yIjoiIzEwYjk4MSIsInNjb3BlIjoiLi8iLCJpY29ucyI6W3sic3JjIjoiaHR0cHM6Ly9jZG4taWNvbnMtcG5nLmZsYXRpY29uLmNvbS8xOTIvMTY4MC8xNjgwNzg0LnBuZyIsInNpemVzIjoiMTkyeDE5MiIsInR5cGUiOiJpbWFnZS9wbmciLCJwdXJwb3NlIjoiYW55In0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8xNjgwLzE2ODA3ODQucG5nIiwic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyIsInB1cnBvc2UiOiJhbnkgbWFza2FibGUifV19">
 <script>
 // ===== دوال أمان مساعدة (تنظيف HTML + حماية محاولات الدخول) =====
 window.esc = function(s){
@@ -2334,7 +2336,7 @@ window.renderLeaderSidebar = () => {
     const list = document.getElementById('leaderSidebarList');
     if (!list) return;
 
-    const allLeaders = window.subscribers || [];
+    const allLeaders = window._teamScopeLeaders || window.subscribers || [];
     const allMembers = window.teamMembers || [];
 
     const searchTerm = (document.getElementById('leaderSidebarSearch')?.value || '').trim().toLowerCase();
@@ -2373,7 +2375,7 @@ window.renderLeaderSidebar = () => {
 // اختيار قائد من الشريط الجانبي
 window.selectLeaderInSidebar = (leaderId) => {
     window.currentViewingLeader = leaderId;
-    const leader = (window.subscribers || []).find(s => s.id === leaderId);
+    const leader = (window._teamScopeLeaders || window.subscribers || []).find(s => s.id === leaderId);
     const headerTitle = document.getElementById('teamWinTitle');
     if (headerTitle && leader) {
         headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${esc(leader.ownerName)}</span>`;
@@ -2388,7 +2390,7 @@ window.selectLeaderInSidebar = (leaderId) => {
 
 // حساب مؤشرات القياس التنفيذية الإجمالية (كل القادة)
 window.renderTeamExecStats = () => {
-    const leaders = window.subscribers || [];
+    const leaders = window._teamScopeLeaders || window.subscribers || [];
     const members = window.teamMembers || [];
     const leaderIds = new Set(leaders.map(l => l.id));
     const totalLeaders = leaders.length;
@@ -2895,11 +2897,16 @@ window.radialSections = [
 window.APP_FEATURE_KEY = { app_map: 'radar', app_cloud: 'cloud', app_dashboard: 'dashboard' }; // مفاتيح قديمة محفوظة للتوافق مع بيانات محفوظة سابقًا
 window.FEATURE_ICONS = { radar:'📍', pdfExport:'📄', cloud:'☁️', dashboard:'📊', erg:'🧯', reps:'📋', subs:'👥', team:'🤝', finance:'💰', import:'⬆️', config:'🔐' };
 
-window.FEATURE_APPS = window.radialSections.map(s => ({
-    app: s.app,
-    key: window.APP_FEATURE_KEY[s.app] || s.app.replace(/^app_/, ''),
-    label: s.label
-}));
+// هذه الأيقونات حصراً لمدير النظام، ولا يجوز أن تظهر ضمن مزايا أي قائد مهما كان نوع اشتراكه (يدوي أو باقة)
+window.MASTER_ONLY_APPS = ['app_subs', 'app_finance', 'app_cloud', 'app_config', 'app_import'];
+
+window.FEATURE_APPS = window.radialSections
+    .filter(s => !window.MASTER_ONLY_APPS.includes(s.app))
+    .map(s => ({
+        app: s.app,
+        key: window.APP_FEATURE_KEY[s.app] || s.app.replace(/^app_/, ''),
+        label: s.label
+    }));
 
 window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(['pdfExport']);
 
@@ -3058,9 +3065,23 @@ window.toggleRadialMenu = () => {
 window.currentViewingLeader = null;
 
 // فتح شاشة إدارة الفريق مباشرة (من الأيقونة الرئيسية، بدون تحديد قائد مسبق)
-window.openTeamWinDirect = () => {
-    if (window.userRole === 'master') {
-        // المدير: يشوف شريط القياس + شبكة القادة، ويختار قائداً
+window.openTeamWinDirect = async () => {
+    const isOwnerView = window.userRole === 'leader' && window.isCompanyOwner === true;
+
+    if (window.userRole === 'master' || isOwnerView) {
+        if (isOwnerView) {
+            let leaders = [];
+            try {
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId));
+                const snap = await getDocs(q);
+                leaders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            } catch(e) { console.warn('فشل تحميل قادة الشركة لعرض الفريق', e); }
+            window._teamScopeLeaders = leaders;
+        } else {
+            window._teamScopeLeaders = window.subscribers || [];
+        }
+
+        // المدير أو مالك الشركة: يشوف شريط القياس + شبكة القادة، ويختار قائداً
         window.currentViewingLeader = '';
         const headerTitle = document.getElementById('teamWinTitle');
         if (headerTitle) headerTitle.innerHTML = 'إدارة الفريق';
@@ -3077,7 +3098,8 @@ window.openTeamWinDirect = () => {
         document.getElementById('teamDetailEmptyState')?.classList.remove('hidden');
         document.getElementById('teamDetailEmptyState')?.classList.add('flex');
     } else {
-        // القائد: يرى فريقه هو فقط مباشرة، بدون شريط قياس ولا شبكة قادة
+        window._teamScopeLeaders = null;
+        // القائد التابع: يرى فريقه هو فقط مباشرة، بدون شريط قياس ولا شبكة قادة
         window.currentViewingLeader = window.activeKey;
         document.getElementById('leaderSidebarCol')?.classList.add('hidden');
         document.getElementById('teamExecLeadersBadge')?.classList.add('hidden');
@@ -3090,9 +3112,13 @@ window.openTeamWinDirect = () => {
     window.renderTeamTable();
 };
 
+
+
+
 // دالة فتح فريق قائد محدد
 window.openLeaderQuickRoster = (leaderId, leaderName) => {
-    if (window.userRole === 'leader' && leaderId !== window.activeKey) {
+    const isOwnerOwnCompany = window.isCompanyOwner === true && (window._teamScopeLeaders || []).some(l => l.id === leaderId);
+    if (window.userRole === 'leader' && leaderId !== window.activeKey && !isOwnerOwnCompany) {
         window.showNotif("⛔ غير مصرح لك برؤية بيانات قائد آخر", "error");
         return;
     }
@@ -3565,11 +3591,23 @@ window.openCompanyDetail = (companyId) => {
     const latestExp = c.leaders.map(l => l.expiryDate).filter(Boolean).sort().pop() || 'غير محدد';
     const infoEl = document.getElementById('companyDetail_info');
     if (infoEl) infoEl.innerHTML = `
-        <div class="grid grid-cols-2 gap-2 text-right">
-            <div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">ينتهي</p><p class="text-amber-300 text-xs font-black">${esc(latestExp)}</p></div>
-            <div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">سعر الاشتراك</p><p class="text-emerald-300 text-xs font-black">${raw.planPrice ? esc(raw.planPrice) + ' $' : '—'}</p></div>
-            ${raw.phone ? `<div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">الهاتف</p><p class="text-white text-xs font-black">${esc(raw.phone)}</p></div>` : ''}
-            ${raw.email ? `<div class="bg-white/5 rounded-xl p-3"><p class="text-[10px] text-slate-500 font-black">البريد</p><p class="text-white text-xs font-black truncate">${esc(raw.email)}</p></div>` : ''}
+        <div class="grid grid-cols-2 gap-2.5 text-right">
+            <div class="company-info-chip">
+                <span class="company-info-icon" style="background:rgba(245,158,11,0.15); color:#fbbf24;">📅</span>
+                <div><p class="company-info-label">ينتهي</p><p class="company-info-value" style="color:#fbbf24;">${esc(latestExp)}</p></div>
+            </div>
+            <div class="company-info-chip">
+                <span class="company-info-icon" style="background:rgba(16,185,129,0.15); color:#34d399;">💳</span>
+                <div><p class="company-info-label">سعر الاشتراك</p><p class="company-info-value" style="color:#34d399;">${raw.planPrice ? esc(raw.planPrice) + ' $' : '—'}</p></div>
+            </div>
+            ${raw.phone ? `<div class="company-info-chip">
+                <span class="company-info-icon" style="background:rgba(59,130,246,0.15); color:#60a5fa;">📞</span>
+                <div><p class="company-info-label">الهاتف</p><p class="company-info-value" style="color:#fff;">${esc(raw.phone)}</p></div>
+            </div>` : ''}
+            ${raw.email ? `<div class="company-info-chip">
+                <span class="company-info-icon" style="background:rgba(139,92,246,0.15); color:#a78bfa;">✉️</span>
+                <div class="min-w-0"><p class="company-info-label">البريد</p><p class="company-info-value truncate" style="color:#fff;">${esc(raw.email)}</p></div>
+            </div>` : ''}
         </div>`;
     window.loadCompanyPayments(companyId);
 document.getElementById('companyDetail_name').textContent = c.name;
@@ -3604,21 +3642,25 @@ window.closeCompanyDetailModal = () => {
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
 };
 
-
-
-
-
-window.renderMyCompanyPanel = () => {
+window.renderMyCompanyPanel = async () => {
     const box = document.getElementById('myCompanyList');
     if (!box) return;
+    box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">جارٍ تحميل بيانات الشركة...</p>`;
+
     const myId = window.myCompanyId || window.activeKey;
-    const leaders = (window.subscribers || []).filter(s => (s.companyId || s.id) === myId);
+    let leaders = [];
+    try {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', myId));
+        const snap = await getDocs(q);
+        leaders = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.id !== window.activeKey); // استثناء المالك نفسه — إداري وليس قائداً ميدانياً
+    } catch (e) { console.warn('فشل تحميل قادة الشركة', e); }
+
     const totalMembers = leaders.reduce((sum, l) => sum + (window.teamMembers || []).filter(m => m.parentKey === l.id).length, 0);
     const totalCapacity = leaders.reduce((sum, l) => sum + (l.maxMembers || 5), 0);
 
     const nameEl = document.getElementById('myCompanyName');
     const summaryEl = document.getElementById('myCompanySummary');
-    if (nameEl) nameEl.textContent = leaders[0]?.companyName || leaders[0]?.ownerName || 'شركتي';
+    if (nameEl) nameEl.textContent = window.myCompanyName || leaders[0]?.companyName || leaders[0]?.ownerName || 'شركتي';
     if (summaryEl) summaryEl.textContent = `${leaders.length} قائد (وفق باقتك) · ${totalMembers} من ${totalCapacity} عضو`;
 
     if (leaders.length === 0) {
@@ -3640,6 +3682,185 @@ window.renderMyCompanyPanel = () => {
         </div>`;
     }).join('');
 };
+
+window.renderMyProfilePanel = async () => {
+    const box = document.getElementById('myProfileBody');
+    if (!box) return;
+    box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">جارٍ تحميل البيانات...</p>`;
+
+    let s = {};
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', window.activeKey));
+        if (snap.exists()) s = snap.data();
+    } catch (e) { console.warn('فشل تحميل البيانات', e); }
+
+    const isExpired = s.expiryDate && new Date(s.expiryDate) < new Date();
+
+    if (window.isCompanyOwner === true) {
+        // ملف الشركة (للمالك)
+        let leadersCount = 0;
+        try {
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId));
+            const snap2 = await getDocs(q);
+            leadersCount = snap2.size;
+        } catch (e) {}
+
+        box.innerHTML = `
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">اسم الشركة</span>
+                <span class="text-white text-xs font-black">${esc(s.companyName || window.myCompanyName || '—')}</span>
+            </div>
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">كود دخول الشركة</span>
+                <span class="text-white text-xs font-black" style="direction:ltr;">${esc(window.activeKey || '—')}</span>
+            </div>
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">حالة الاشتراك</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                    ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+                </span>
+            </div>
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">ينتهي في</span>
+                <span class="text-white text-xs font-black">${esc(s.expiryDate || 'غير محدد')}</span>
+            </div>
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">عدد القادة</span>
+                <span class="text-white text-xs font-black">${leadersCount}</span>
+            </div>
+        `;
+        return;
+    }
+
+    // ملف القائد التابع (بدون تغيير عن السابق)
+    const memCount = (window.teamMembers || []).filter(m => m.parentKey === window.activeKey).length;
+    box.innerHTML = `
+        <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span class="text-slate-500 text-[11px] font-bold">الاسم</span>
+            <span class="text-white text-xs font-black">${esc(s.ownerName || window.myLeaderName || '—')}</span>
+        </div>
+        <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span class="text-slate-500 text-[11px] font-bold">كود الدخول</span>
+            <span class="text-white text-xs font-black" style="direction:ltr;">${esc(window.activeKey || '—')}</span>
+        </div>
+        <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span class="text-slate-500 text-[11px] font-bold">حالة الاشتراك</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+            </span>
+        </div>
+        <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span class="text-slate-500 text-[11px] font-bold">ينتهي في</span>
+            <span class="text-white text-xs font-black">${esc(s.expiryDate || 'غير محدد')}</span>
+        </div>
+        <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span class="text-slate-500 text-[11px] font-bold">أعضاء الفريق</span>
+            <span class="text-white text-xs font-black">${memCount} / ${s.maxMembers || 5}</span>
+        </div>
+    `;
+};
+
+
+
+
+
+
+window._editingLeaderId = null;
+window._editingLeaderData = null;
+window._companyMemberPool = 0;
+
+window.openLeaderEditModal = async (leaderId) => {
+    let s = {};
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId));
+        if (snap.exists()) s = snap.data();
+    } catch(e) { return window.showNotif('تعذر تحميل بيانات القائد', 'error'); }
+
+    window._editingLeaderId = leaderId;
+    window._editingLeaderData = s;
+
+    let leaders = [];
+    try {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId));
+        const snap2 = await getDocs(q);
+        leaders = snap2.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.id !== window.activeKey);
+    } catch(e) {}
+    const totalPool = leaders.reduce((sum, l) => sum + (l.maxMembers || 0), 0);
+    const usedByOthers = leaders.filter(l => l.id !== leaderId).reduce((sum, l) => sum + (l.maxMembers || 0), 0);
+    window._companyMemberPool = totalPool;
+
+    document.getElementById('leaderEdit_remaining').textContent = `السقف الكلي للشركة: ${totalPool} — المتاح لهذا القائد الآن: ${Math.max(0, totalPool - usedByOthers)}`;
+    document.getElementById('leaderEdit_usedByOthers').value = usedByOthers;
+    document.getElementById('leaderEdit_name').value = s.ownerName || '';
+    document.getElementById('leaderEdit_members').value = s.maxMembers || 0;
+    document.getElementById('leaderEdit_code').value = leaderId;
+    document.getElementById('leaderEdit_newCode').value = '';
+    document.getElementById('leaderEdit_newCode').classList.add('hidden');
+    document.getElementById('leaderEdit_codeResetBtn').classList.toggle('hidden', s.codeResetUsed === true);
+    document.getElementById('leaderEdit_codeUsedNote').classList.toggle('hidden', s.codeResetUsed !== true);
+
+    const modal = document.getElementById('leaderEditModal');
+    if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+};
+
+window.closeLeaderEditModal = () => {
+    const modal = document.getElementById('leaderEditModal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+};
+
+window.enableLeaderCodeChange = () => {
+    document.getElementById('leaderEdit_newCode').classList.remove('hidden');
+};
+
+window.saveLeaderEdit = async () => {
+    const leaderId = window._editingLeaderId;
+    if (!leaderId) return;
+    const newName = document.getElementById('leaderEdit_name').value.trim();
+    const newMembers = parseInt(document.getElementById('leaderEdit_members').value) || 0;
+    const usedByOthers = parseInt(document.getElementById('leaderEdit_usedByOthers').value) || 0;
+    const newCodeRaw = document.getElementById('leaderEdit_newCode').value.trim();
+
+    if (!newName) return window.showNotif('يرجى كتابة اسم القائد', 'error');
+    if (usedByOthers + newMembers > window._companyMemberPool) {
+        return window.showNotif(`العدد يتجاوز سقف الشركة (المتاح الآن: ${window._companyMemberPool - usedByOthers})`, 'error');
+    }
+
+    const s = window._editingLeaderData || {};
+    const wantsCodeChange = !!newCodeRaw && s.codeResetUsed !== true;
+
+    try {
+        if (wantsCodeChange) {
+            const newId = 'LDR-' + newCodeRaw.replace(/^LDR-/i, '').toUpperCase();
+            const existing = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newId));
+            if (existing.exists()) return window.showNotif('هذا الكود مستخدم مسبقاً، اختر كوداً آخر', 'error');
+
+            const batch = writeBatch(db);
+            batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newId), {
+                ...s, ownerName: newName, maxMembers: newMembers, codeResetUsed: true, deviceIds: []
+            });
+            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId));
+
+            const teamSnap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'team_keys'), where('parentKey', '==', leaderId)));
+            teamSnap.docs.forEach(d => batch.update(d.ref, { parentKey: newId }));
+
+            await batch.commit();
+            window.showNotif('✅ تم تحديث القائد وتغيير كوده بنجاح', 'success');
+        } else {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId), {
+                ownerName: newName, maxMembers: newMembers
+            });
+            window.showNotif('✅ تم تحديث بيانات القائد', 'success');
+        }
+        window.closeLeaderEditModal();
+        window.renderMyCompanyPanel();
+    } catch (e) {
+        console.warn(e);
+        window.showNotif('⛔ فشل الحفظ، حاول مجدداً', 'error');
+    }
+};
+
+
+
 
 
 window.toggleCompanyRename = () => {
@@ -4142,7 +4363,7 @@ window.launchOS = (role, key, msg) => {
     const _roleEl = document.getElementById('welcomeRole');
     if (_nameEl) {
         if (role === 'master') _nameEl.textContent = 'الدعم والصيانة - الإدارة';
-        else if (role === 'leader') _nameEl.textContent = window.myLeaderName || 'القائد الميداني';
+        else if (role === 'leader') _nameEl.textContent = (window.isCompanyOwner === true ? window.myCompanyName : window.myLeaderName) || 'القائد الميداني';
         else _nameEl.textContent = window.myMemberName || 'العضو الميداني';
     }
     if (_roleEl) {
@@ -4152,9 +4373,9 @@ window.launchOS = (role, key, msg) => {
     }
 
     // التوجيه: العضو يذهب فوراً للنظام، المدير والقائد لسطح المكتب الرئيسي
-        if(role === 'member') {
+                window.renderLauncher?.();   // إظهار الأيقونات الصحيحة حسب الصلاحية — لكل الأدوار (قائد، مالك، مدير، عضو)
+    if(role === 'member') {
         window.openWin('winERG');
-        window.renderLauncher?.();   // لتفعيل ظهور زر البلاغ الطارئ العائم للعضو
     } else {
         window.openWin('os_desktop');
     }
@@ -4265,11 +4486,17 @@ setTimeout(() => {
             linear-gradient(160deg, #071a10 0%, #0a1f14 40%, #071a10 100%)`;
 
 // إظهار أيقونات القائد بالكامل حسب مزايا باقته — كل تطبيق (حالي أو مستقبلي) مرتبط تلقائيًا بميزة
-        const feats = window.myFeatures; // null = اشتراك يدوي = كل المزايا متاحة
+        const feats = window.myFeatures; // null = اشتراك يدوي = كل مزايا القائد العادية متاحة (لا تشمل أيقونات المدير أبداً)
         const hasFeature = (key) => !feats || feats[key] === true;
         window.FEATURE_APPS.forEach(f => {
             const el = document.getElementById(f.app);
             if (el) el.style.display = hasFeature(f.key) ? 'flex' : 'none';
+        });
+
+        // إجراء أمني قطعي: إخفاء أيقونات المدير حتماً عن أي قائد، بغض النظر عن أي خطأ محتمل بالبيانات
+        (window.MASTER_ONLY_APPS || ['app_subs','app_finance','app_cloud','app_config','app_import']).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
         });
 
         if(b) {
@@ -4344,12 +4571,13 @@ window.renderLauncher = () => {
     D('app_dashboard', M);              // مدير فقط
     D('app_emergency', MB);             // العضو فقط — بلاغ طارئ
     D('app_myCompany', L && window.isCompanyOwner === true); // مالك الشركة فقط
+    D('app_myProfile', L); // يظهر لكل قائد — مالك أو تابع (المحتوى يختلف حسب الحالة)
         // تحديث لوحة الترحيب
     const nameEl = document.getElementById('welcomeName');
     const roleEl = document.getElementById('welcomeRole');
     if (nameEl) {
         if (M) nameEl.textContent = 'الدعم والصيانة - الإدارة';
-        else if (L) nameEl.textContent = window.myLeaderName || 'القائد الميداني';
+        else if (L) nameEl.textContent = (window.isCompanyOwner === true ? window.myCompanyName : window.myLeaderName) || 'القائد الميداني';
         else nameEl.textContent = window.myMemberName || 'العضو الميداني';
     }
     if (roleEl) {
@@ -6592,10 +6820,18 @@ window.approveRequest = async (reqId, name, phone) => {
 
                 // توليد كود لكل قائد وحفظه
                 const generatedKeys = [];
+                // حصة "المالك" الأصلية (كانت هتروح له) تُضاف لأول قائد ميداني حقيقي بدل ما تضيع، والمالك يصير بدون أعضاء (كيان إداري بحت)
+                const ownerReservedMembers = leadersData[0]?.members || reqData.plan || 5;
                 for (let i = 0; i < numLeaders; i++) {
                     const newKey = genKey();
-                    const membersForThisLeader = leadersData[i]?.members || reqData.plan || 5;
                     const isOwner = (i === 0); // أول قائد بالطلب = مالك الشركة
+                    let membersForThisLeader;
+                    if (isOwner) {
+                        membersForThisLeader = numLeaders > 1 ? 0 : ownerReservedMembers; // إذا ما في قادة حقيقيين غيره، يحتفظ بأعضائه استثنائياً
+                    } else {
+                        membersForThisLeader = leadersData[i]?.members || reqData.plan || 5;
+                        if (i === 1) membersForThisLeader += ownerReservedMembers; // إضافة حصة المالك لأول قائد ميداني فعلي
+                    }
 
                     await setDoc(
                         doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey),
@@ -8006,12 +8242,18 @@ window.exportReportsPDF = () => {
 
 /* الشريط العلوي */
 #mainNav {
+    top: var(--safe-top);
+    height: calc(4rem + var(--safe-top));
+    padding-top: var(--safe-top);
     background:
         linear-gradient(90deg, rgba(220,38,38,0.08) 0%, transparent 30%),
         linear-gradient(270deg, rgba(37,99,235,0.06) 0%, transparent 30%),
         rgba(10, 15, 30, 0.85);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
     border-bottom: 1px solid rgba(255,255,255,0.07);
 }
+
 
 /* شريط علوي ذهبي للمدير */
 body[data-role="master"] #mainNav {
@@ -8697,7 +8939,8 @@ window.loadDesktopStats = async () => {
     try {
         const matCount = window.appData?.length || 0;
         document.getElementById('statMaterials').textContent = matCount;
-        document.getElementById('statDate').textContent = new Date().toLocaleDateString('ar-SA');
+        const statDateEl = document.getElementById('statDate');
+        if (statDateEl) statDateEl.textContent = new Date().toLocaleDateString('ar-SA');
         if (window.userRole === 'master' || window.userRole === 'leader') {
             const membersSnap = await getDocs(
                 collection(db, 'artifacts', appId, 'public', 'data', 'team_keys')
@@ -8766,7 +9009,24 @@ body.light-mode #lockScreen {
 }
 body.light-mode ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 body.light-mode .stat-value { color: #0f172a !important; }   
-body { font-family: 'Tajawal', sans-serif; background: #0d1526; color: #f8fafc; overflow-x: hidden; }
+:root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --surface-0: #0b0c11;
+    --surface-1: #15171f;
+    --surface-2: #1d1f28;
+
+    /* نظام التصميم الموحّد iOS + Android */
+    --radius-sm: 14px;
+    --radius-md: 20px;
+    --radius-lg: 28px;
+    --radius-xl: 36px;
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --accent-blue: #2563eb;
+}
+body { font-family: 'Tajawal', sans-serif; background:var(--surface-0); color: #f8fafc; overflow-x: hidden; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); padding-left: var(--safe-left); padding-right: var(--safe-right); }
 html, body {
     width: 100%;
     height: 100%;
@@ -8835,11 +9095,11 @@ html, body {
 .account-type-btn:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
 
 #os_desktop .grid > button {
-    display: flex !important; flex-direction: column; align-items: center; justify-content: center;
-    gap: 12px; padding: 28px 12px; border-radius: 28px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: clamp(8px, 1.5vw, 12px); padding: clamp(16px, 3vw, 28px) clamp(10px, 2vw, 16px); border-radius: clamp(18px, 3vw, 28px); cursor: pointer;
     background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.09);
     transition: transform .25s cubic-bezier(0.34,1.56,0.64,1), box-shadow .25s ease, border-color .25s;
-    min-height: 160px;
+    min-height: clamp(120px, 18vw, 160px);
 }
 #os_desktop .grid > button:hover {
     transform: translateY(-6px) scale(1.03);
@@ -8907,7 +9167,7 @@ html, body {
 
 
 
-        .glass { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(50px); border: 1px solid rgba(255,255,255,0.06); }
+        .glass { background: rgba(15, 23, 42, 0.75); -webkit-backdrop-filter: blur(50px); backdrop-filter: blur(50px); border: 1px solid rgba(255,255,255,0.06); }
         .app-window { position: fixed; inset: 0; z-index: 10000; background: #080b12; flex-direction: column; overflow-y: auto; display: none; }
         .app-icon { width: 140px; height: 140px; border-radius: 4rem; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: 0.4s; border: 2px solid rgba(255,255,255,0.05); cursor: pointer; }
         .app-icon:hover { transform: translateY(-10px) scale(1.06); filter: brightness(1.2); }
@@ -8924,7 +9184,10 @@ html, body {
         input:checked + .slider:before { transform: translateX(26px); }
    
 .app-window {
-    padding-top: 5rem !important; /* لضمان عدم اختفاء المحتوى تحت الشريط العلوي */
+    padding-top: calc(5rem + var(--safe-top)) !important; /* لضمان عدم اختفاء المحتوى تحت الشريط العلوي + حماية Notch */
+    padding-bottom: var(--safe-bottom) !important;
+    padding-left: var(--safe-left) !important;
+    padding-right: var(--safe-right) !important;
 }
 
 
@@ -9060,6 +9323,7 @@ html, body {
 /* تأثير الزجاج المتطور للعضو */
 .member-glass {
     background: rgba(15, 23, 42, 0.8);
+    -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(0, 191, 255, 0.2);
     box-shadow: 0 0 20px rgba(0, 191, 255, 0.1);
@@ -9091,6 +9355,7 @@ html, body {
         linear-gradient(160deg, rgba(10,4,6,0.94) 0%, rgba(14,6,9,0.96) 100%);
     background-size: 220% 220%, 220% 220%, 220% 220%, 100% 100%;
     animation: crystalShift 20s ease-in-out infinite;
+    -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     display: none;
     align-items: center;
@@ -9126,22 +9391,19 @@ html {
    تصغير تدريجي لكل عناصر الواجهة على الشاشات الأكبر من الموبايل
    (لأن جميع قياسات Tailwind تعتمد على rem المرتبطة بـ html)
    =========================================================== */
-@media (min-width: 768px) {
-    html { font-size: 15px; }
+html {
+    font-size: clamp(13px, 1.4vw + 8px, 16px);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
-@media (min-width: 1024px) {
-    html { font-size: 14px; }
-}
-@media (min-width: 1440px) {
-    html { font-size: 13.5px; }
-}
-@media (min-width: 1920px) {
-    html { font-size: 14.5px; }
-}
+@media (max-width: 380px) { html { font-size: 13px; } }
+@media (min-width: 428px) and (max-width: 767px) { html { font-size: 15px; } }
+@media (min-width: 768px) and (max-width: 1023px) { html { font-size: 15.5px; } }
 
 body {
     background: transparent !important;
     min-height: 100vh;
+    min-height: 100dvh;
 }
 body.desktop-active {
     background:
@@ -9173,6 +9435,7 @@ body.desktop-active {
         radial-gradient(ellipse at 75% 65%, rgba(99, 38, 220, 0.18) 0%, transparent 45%),
         radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.10) 0%, transparent 55%),
         rgba(6, 10, 20, 0.97) !important;
+    -webkit-backdrop-filter: blur(24px);
     backdrop-filter: blur(24px);
 }
 
@@ -9353,20 +9616,38 @@ input:focus, select:focus, textarea:focus {
 
 /* نافذة تفاصيل العضو - التصميم الفخم */
 .member-detail-card {
-    background: linear-gradient(160deg, #12163a, #0a0c22);
+    background: linear-gradient(160deg, var(--surface-2), var(--surface-1));
     border: 1px solid rgba(245,158,11,0.25);
     box-shadow: 0 30px 90px rgba(0,0,0,0.6), 0 0 60px rgba(99,102,241,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
-    max-height: 92vh; overflow-y: auto; overflow-x: hidden;
+    max-height: 92vh; max-height: 92dvh; overflow-y: auto; overflow-x: hidden;
     padding-bottom: 22px;
 }
 .member-detail-close {
-    position: absolute; top: 18px; left: 18px; z-index: 5;
-    width: 34px; height: 34px; border-radius: 12px;
+    position: absolute; top: 14px; left: 14px; z-index: 5;
+    width: 44px; height: 44px; border-radius: var(--radius-sm);
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
     color: rgba(255,255,255,0.6); display: flex; align-items: center; justify-content: center;
-    font-size: 14px; transition: all .2s ease; cursor: pointer;
+    font-size: 15px; transition: all .2s var(--ease-spring); cursor: pointer;
 }
 .member-detail-close:hover { background: rgba(244,63,94,0.2); color: #fb7185; border-color: rgba(244,63,94,0.4); transform: rotate(90deg); }
+.member-detail-close:active { transform: scale(0.88) rotate(90deg); background: rgba(244,63,94,0.25); }
+
+.company-info-chip {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+}
+.company-info-icon {
+    width: 34px; height: 34px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; flex-shrink: 0;
+}
+.company-info-label { font-size: 9px; color: #64748b; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+.company-info-value { font-size: 12.5px; font-weight: 900; margin-top: 1px; }
+
+
 .member-detail-hero {
     position: relative; padding: 26px 28px; display: flex; align-items: center; gap: 20px;
     background: radial-gradient(120% 100% at 0% 0%, rgba(99,102,241,0.2), transparent 70%);
@@ -9637,6 +9918,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 #radialOverlay {
     position: fixed; inset: 0; z-index: 99997;
     background: rgba(5,5,15,0.22);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
     backdrop-filter: blur(8px) saturate(140%);
 }
 #radialCenterLogo {
@@ -9695,7 +9977,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 /* ===== شريط القيادة السفلي ===== */
 #notifBellFab {
-    position: fixed; bottom: 30px; right: 24px; z-index: 99998;
+    position: fixed; bottom: calc(30px + var(--safe-bottom)); right: calc(24px + var(--safe-right)); z-index: 99998;
     width: 52px; height: 52px; border-radius: 50%;
     background: rgba(10,12,20,0.55); backdrop-filter: blur(16px);
     border: 1px solid rgba(255,255,255,0.12);
@@ -9711,7 +9993,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     border: 2px solid rgba(10,12,20,0.9);
 }
 #notifCenterPanel {
-    position: fixed; bottom: 92px; right: 24px; z-index: 99997;
+    position: fixed; bottom: calc(92px + var(--safe-bottom)); right: calc(24px + var(--safe-right)); z-index: 99997;
     width: 300px; max-width: 85vw; max-height: 60vh; overflow-y: auto;
     background: linear-gradient(180deg, rgba(15,17,28,0.97), rgba(9,11,20,0.98));
     border: 1px solid rgba(255,255,255,0.12); border-radius: 1.75rem;
@@ -9724,7 +10006,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
 .notif-item .notif-time { font-size: 9px; color: #64748b; font-weight: 700; margin-top: 3px; }
 
 #commandDeckBar {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: calc(20px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
     z-index: 99998; display: flex; align-items: center; justify-content: center;
     width: 220px; height: 74px; border-radius: 37px;
     background: rgba(10,12,20,0.55); backdrop-filter: blur(16px);
@@ -9767,6 +10049,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         radial-gradient(circle at 85% 15%, rgba(56,189,248,0.13), transparent 50%),
         radial-gradient(circle at 50% 0%, rgba(245,158,11,0.06), transparent 40%),
         linear-gradient(180deg, rgba(10,11,20,0.9), rgba(4,5,10,0.98));
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
     backdrop-filter: blur(22px) saturate(140%);
     border-top: 1px solid rgba(245,158,11,0.22);
     border-radius: 36px 36px 0 0;
@@ -9850,7 +10133,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         radial-gradient(ellipse at 85% 100%, rgba(99, 102, 241, 0.18) 0%, transparent 50%),
         radial-gradient(ellipse at 100% 10%, rgba(6, 182, 212, 0.14) 0%, transparent 42%),
         radial-gradient(ellipse at 0% 90%,   rgba(168, 85, 247, 0.10) 0%, transparent 45%),
-        linear-gradient(160deg, #0a1120 0%, #0d1b2e 30%, #101a2b 60%, #0c0f1e 100%) !important;
+        linear-gradient(160deg, var(--surface-1) 0%, #191c26 50%, var(--surface-1) 100%) !important;
     background-size: 220% 220%, 220% 220%, 220% 220%, 220% 220%, 100% 100%;
     animation: crystalShift 22s ease-in-out infinite;
 }
@@ -10054,9 +10337,10 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         radial-gradient(ellipse at 20% 10%, rgba(245, 158, 11, 0.16) 0%, transparent 45%),
         radial-gradient(ellipse at 80% 90%, rgba(99, 102, 241, 0.20) 0%, transparent 50%),
         radial-gradient(ellipse at 90% 15%, rgba(168, 85, 247, 0.12) 0%, transparent 42%),
-        linear-gradient(160deg, rgba(6,9,20,0.94) 0%, rgba(9,11,26,0.96) 100%) !important;
+        linear-gradient(160deg, rgba(11,12,17,0.9) 0%, rgba(11,12,17,0.94) 100%) !important;
     background-size: 220% 220%, 220% 220%, 220% 220%, 100% 100% !important;
     animation: crystalShift 20s ease-in-out infinite !important;
+    -webkit-backdrop-filter: blur(10px) !important;
     backdrop-filter: blur(10px) !important;
 }
 
@@ -10068,6 +10352,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         linear-gradient(160deg, rgba(10,4,6,0.94) 0%, rgba(14,6,9,0.96) 100%) !important;
     background-size: 220% 220%, 220% 220%, 220% 220%, 100% 100% !important;
     animation: crystalShift 20s ease-in-out infinite !important;
+    -webkit-backdrop-filter: blur(10px) !important;
     backdrop-filter: blur(10px) !important;
 }
 
@@ -10079,6 +10364,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         linear-gradient(160deg, rgba(12,9,3,0.94) 0%, rgba(15,11,4,0.96) 100%) !important;
     background-size: 220% 220%, 220% 220%, 220% 220%, 100% 100% !important;
     animation: crystalShift 20s ease-in-out infinite !important;
+    -webkit-backdrop-filter: blur(10px) !important;
     backdrop-filter: blur(10px) !important;
 }
 
@@ -10113,6 +10399,7 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
         linear-gradient(160deg, rgba(3,10,14,0.94) 0%, rgba(4,12,16,0.96) 100%) !important;
     background-size: 220% 220%, 220% 220%, 220% 220%, 100% 100% !important;
     animation: crystalShift 20s ease-in-out infinite !important;
+    -webkit-backdrop-filter: blur(10px) !important;
     backdrop-filter: blur(10px) !important;
 }
 
@@ -10122,6 +10409,52 @@ body:not(.desktop-active) #radialOverlay { display: none !important; }
     *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
 a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
+
+/* ===== TOUCH TARGETS ===== */
+button, [role="button"], a, input[type="checkbox"], input[type="radio"] {
+    min-height: 44px; min-width: 44px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+button:active, .app-icon:active, .team-card:active, .entry-card:active { transform: scale(0.96); transition: transform 0.15s var(--ease-spring); }
+input, select, textarea { font-size: max(16px, 1rem) !important; }
+
+/* ===== DATE INPUT - iOS FIX ===== */
+input[type="date"], input[type="time"], input[type="datetime-local"] {
+    -webkit-appearance: none; appearance: none;
+    min-height: 48px; padding: 12px 16px;
+    background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; color: #fff; font-family: inherit; width: 100%;
+}
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; cursor: pointer; }
+input[type="date"]::-webkit-date-and-time-value { text-align: right; }
+
+
+
+
+
+.modal-safe-area {
+    padding-top: max(1rem, var(--safe-top)) !important;
+    padding-bottom: max(1rem, var(--safe-bottom)) !important;
+    padding-left: max(1rem, var(--safe-left)) !important;
+    padding-right: max(1rem, var(--safe-right)) !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+
+
+
+
+/* تركيز واضح وأنيق على حقول شاشة الدخول */
+#lockScreen input:focus, #trialFields input:focus {
+    border-color: rgba(59,130,246,0.55) !important;
+    box-shadow: 0 0 0 4px rgba(59,130,246,0.15), inset 0 2px 8px rgba(0,0,0,0.35) !important;
+    transition: box-shadow .2s ease, border-color .2s ease;
+}
+
+
+
 </style>
 
 
@@ -10222,10 +10555,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             class="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition-all hover:scale-105"
             style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25);">📷</button>
         <div class="flex-1 relative">
-            <input type="text" id="sInput" oninput="window.handleSearch()"
+            <input type="search" id="sInput" oninput="window.handleSearch()"
                 placeholder="ابحث برقم UN أو اسم المادة..."
+                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                enterkeyhint="search" inputmode="search"
                 class="w-full border border-white/10 rounded-2xl py-3.5 pr-5 pl-14 text-white text-sm font-bold outline-none transition-all text-right"
-                style="background:rgba(0,0,0,0.5);">
+                style="background:rgba(0,0,0,0.5); font-size:16px;">
             <button onclick="window.startVoiceRec()"
                 class="absolute left-4 top-1/2 -translate-y-1/2 text-xl hover:scale-125 transition-all">🎤</button>
         </div>
@@ -10239,7 +10574,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button onclick="window.setSearchMode('class')" class="shrink-0 px-4 py-2 rounded-xl text-xs font-black transition-all" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); color:#fbbf24;">⚠️ التصنيف</button>
         <button onclick="window.setSearchMode('cas')" class="shrink-0 px-4 py-2 rounded-xl text-xs font-black transition-all" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); color:#a78bfa;">🧪 رقم CAS</button>
     </div>
-    <div id="drop" class="hidden absolute left-0 right-0 mt-2 rounded-2xl border border-white/10 shadow-2xl max-h-80 overflow-y-auto z-[1000] custom-scrollbar p-3" style="background:rgba(8,11,18,0.98); backdrop-filter:blur(20px);"></div>
+<div id="drop" class="hidden absolute left-0 right-0 mt-2 rounded-2xl border border-white/10 shadow-2xl max-h-80 overflow-y-auto z-[1000] custom-scrollbar p-3" style="background:rgba(8,11,18,0.98); -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px);"></div>
 </div>
 
 
@@ -10505,8 +10840,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- شاشة Splash -->
-<div id="splashScreen" class="fixed inset-0 z-[999999] flex flex-col items-center justify-center transition-all duration-700" style="background:linear-gradient(135deg, #000000 0%, #1a0510 30%, #4c0519 60%, #1a0510 85%, #000000 100%); background-size:300% 300%; animation:vibrantShift 26s ease infinite;">
-    <div class="flex flex-col items-center gap-7 px-10 py-12 rounded-[2.5rem]" style="background:rgba(0,0,0,0.35); backdrop-filter:blur(18px); border:1px solid rgba(255,255,255,0.15); box-shadow:0 30px 70px rgba(0,0,0,0.5);">
+<div id="splashScreen" class="fixed inset-0 z-[999999] flex flex-col items-center justify-center transition-all duration-700" style="background:linear-gradient(120deg, #1a0510, #4c0519, #7c2d12, #1e1b4b, #4c0519, #1a0510); background-size:400% 400%; animation:vibrantShift 15s ease infinite; padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);">
+<div class="flex flex-col items-center gap-7 px-10 py-12 rounded-[2.5rem]" style="background:rgba(0,0,0,0.35); -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px); border:1px solid rgba(255,255,255,0.15); box-shadow:0 30px 70px rgba(0,0,0,0.5);">
 
         <div class="w-32 h-32 bg-rose-600 rounded-[2.5rem] flex items-center justify-center shadow-[0_0_80px_rgba(220,38,38,0.7)] border-4 border-rose-900 animate-pulse">
             <span class="text-6xl" style="filter:drop-shadow(0 2px 10px rgba(0,0,0,0.5))">⚡</span>
@@ -10530,7 +10865,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 
-<div id="lockScreen" class="fixed inset-0 z-[150000] flex items-center justify-center text-center overflow-y-auto p-4 md:p-8">
+<div id="lockScreen" class="fixed inset-0 z-[150000] flex items-center justify-center text-center overflow-y-auto p-4 md:p-8" style="padding-top:calc(1rem + var(--safe-top)); padding-bottom:calc(1rem + var(--safe-bottom)); padding-left:calc(1rem + var(--safe-left)); padding-right:calc(1rem + var(--safe-right));">
     <div class="w-full space-y-6 animate-in zoom-in duration-700">
 
 
@@ -10587,18 +10922,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </button>
         </div>
 
-                <div id="entryOptions" class="grid grid-cols-1 sm:grid-cols-3 gap-6 items-end" style="max-width:1200px; width:100%;">
+        <div id="entryOptions" class="grid grid-cols-1 sm:grid-cols-3 gap-6 items-end" style="max-width:1200px; width:100%;">
 
             <!-- بطاقة الاشتراك الكامل — يمين -->
             <button onclick="window.showSubscriptionDetails()"
-                    class="entry-card glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
-                           border:1px solid rgba(255,255,255,0.08);
-                           border-bottom:3px solid #059669;
-                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
+                    class="entry-card glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="border:1px solid rgba(16,185,129,0.25);
+                           border-bottom:5px solid #059669;
+                           background:linear-gradient(160deg,rgba(16,185,129,0.14) 0%,rgba(6,78,59,0.05) 100%);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(16,185,129,0.16) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(16,185,129,0.18) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.35); box-shadow:0 10px 30px rgba(16,185,129,0.25);">
                     <span class="text-5xl">💳</span>
@@ -10611,14 +10945,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
             <!-- بطاقة تسجيل الدخول — الوسط (مرتفعة افتراضيًا) -->
             <button onclick="window.showLoginFields()"
-                    class="entry-card card-login glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
-                           border:1px solid rgba(255,255,255,0.08);
-                           border-bottom:3px solid #2563eb;
-                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
+                    class="entry-card card-login glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="border:1px solid rgba(59,130,246,0.25);
+                           border-bottom:5px solid #2563eb;
+                           background:linear-gradient(160deg,rgba(37,99,235,0.14) 0%,rgba(30,58,138,0.05) 100%);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(59,130,246,0.16) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(59,130,246,0.18) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.35); box-shadow:0 10px 30px rgba(59,130,246,0.25);">
                     <span class="text-5xl">🔑</span>
@@ -10631,14 +10964,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
             <!-- بطاقة التجربة المجانية — يسار -->
             <button onclick="window.startTrialMode()"
-                    class="entry-card glass p-10 rounded-[2.5rem] transition-all duration-200 active:scale-[0.97] group relative overflow-hidden flex flex-col items-center text-center gap-5"
-                    style="background:rgba(255,255,255,0.035); backdrop-filter:blur(20px) saturate(180%);
-                           border:1px solid rgba(255,255,255,0.08);
-                           border-bottom:3px solid #d97706;
-                           box-shadow:0 20px 50px rgba(0,0,0,0.35);
+                    class="entry-card glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
+                    style="border:1px solid rgba(245,158,11,0.25);
+                           border-bottom:5px solid #d97706;
+                           background:linear-gradient(160deg,rgba(245,158,11,0.14) 0%,rgba(120,53,15,0.05) 100%);
                            min-height:280px; justify-content:center;">
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                     style="background:radial-gradient(circle at 50% 30%,rgba(245,158,11,0.16) 0%,transparent 70%)"></div>
+                     style="background:radial-gradient(circle at 50% 30%,rgba(245,158,11,0.18) 0%,transparent 70%)"></div>
                 <div class="w-24 h-24 rounded-3xl flex items-center justify-center relative"
                      style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.35); box-shadow:0 10px 30px rgba(245,158,11,0.25);">
                     <span class="text-5xl">🎯</span>
@@ -10650,8 +10982,6 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </button>
 
         </div>
-
-
 
 
         <div id="loginFields" class="hidden space-y-5"
@@ -10741,7 +11071,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             <!-- أزرار الإجراء -->
             <div id="loginActionBtns" class="hidden flex gap-3">
                 <button onclick="window.activateApp()"
-                        class="flex-1 py-5 rounded-[1.5rem] font-black text-white uppercase italic transition-all active:scale-95"
+                        class="flex-1 py-5 rounded-[var(--radius-lg)] font-black text-white uppercase italic transition-all active:scale-95"
                         style="background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
                                box-shadow:0 8px 25px rgba(37,99,235,0.35);
                                border-bottom:3px solid #1e3a8a;">
@@ -10804,7 +11134,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
     <!-- أزرار -->
     <button onclick="window.requestTrial()"
-            class="w-full py-5 rounded-2xl font-black text-white italic uppercase tracking-wide transition-all active:scale-95"
+            class="w-full py-5 rounded-[var(--radius-lg)] font-black text-white italic uppercase tracking-wide transition-all active:scale-95"
             style="background:linear-gradient(135deg,#d97706 0%,#b45309 100%);
                    box-shadow:0 8px 25px rgba(217,119,6,0.35);
                    border-bottom:3px solid #92400e;">
@@ -10849,11 +11179,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
         </div>
 
-        <div id="packagesStepView" class="flex flex-col items-center justify-center" style="min-height:calc(100vh - 80px);">
+        <div id="packagesStepView" class="flex flex-col items-center justify-center" style="min-height:calc(100dvh - 80px);">
         <div id="publicPackagesRow"></div>
         <p id="pkgDivider" class="hidden"></p>
         <p id="manualToggleLink" class="hidden text-center py-5">
-            <button type="button" onclick="window.showManualCustomize()" class="text-white text-[11px] font-black underline underline-offset-4 transition-all px-4 py-2 rounded-full hover:scale-105" style="background:rgba(0,0,0,0.35); backdrop-filter:blur(6px);">أو خصص باقتك يدويًا بدون اختيار باقة ←</button>
+<button type="button" onclick="window.showManualCustomize()" class="text-white text-[11px] font-black underline underline-offset-4 transition-all px-4 py-2 rounded-full hover:scale-105" style="background:rgba(0,0,0,0.35); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);">أو خصص باقتك يدويًا بدون اختيار باقة ←</button>
         </p>
         </div>
 
@@ -11026,11 +11356,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
         <!-- حقل الإدخال -->
         <div class="relative">
-            <input type="text" id="otpInput"
+                  <input type="text" id="otpInput"
                    placeholder="• • • • • •"
                    maxlength="6"
                    inputmode="numeric"
                    pattern="[0-9]*"
+                   autocomplete="one-time-code"
+                   enterkeyhint="done"
                    onkeydown="if(event.key==='Enter') window.verifyOTP()"
                    oninput="this.value=this.value.replace(/[^0-9]/g,'')"
                    class="w-full p-6 rounded-[1.5rem] text-center text-white font-mono outline-none transition-all"
@@ -11057,7 +11389,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <!-- أزرار -->
         <div class="space-y-3">
             <button onclick="window.verifyOTP()"
-                    class="w-full py-5 rounded-[1.5rem] font-black text-white uppercase italic transition-all active:scale-95"
+                    class="w-full py-5 rounded-[var(--radius-lg)] font-black text-white uppercase italic transition-all active:scale-95"
                     style="background: linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
                            box-shadow: 0 8px 25px rgba(37,99,235,0.4);
                            border-bottom: 3px solid #1e3a8a;">
@@ -11157,7 +11489,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     </div>
 
     <!-- سطح المكتب الرئيسي — بطاقات دائمة الظهور -->
-    <div class="relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5" style="max-width:980px; width:100%;">
+    <div class="relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4 lg:gap-5" style="max-width:1200px; width:100%; padding:0 1rem;">
 
 
 
@@ -11165,7 +11497,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_dashboard" onclick="window.openWin('winDashboard')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(139,92,246,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(139,92,246,0.2);">
                 <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">لوحة الإحصاء</span>
@@ -11176,7 +11508,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_erg" onclick="window.openWin('winERG')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(37,99,235,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(37,99,235,0.2);">
                 <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">نظام الاستجابة</span>
@@ -11186,7 +11518,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_subs" onclick="window.openWin('winSubs')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(225,29,72,0.1);border:1px solid rgba(225,29,72,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(225,29,72,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(225,29,72,0.2);">
                 <svg class="w-6 h-6 text-rose-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">إدارة الشركات</span>
@@ -11196,7 +11528,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_team" onclick="window.openTeamWinDirect()"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(79,70,229,0.1);border:1px solid rgba(79,70,229,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(79,70,229,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(79,70,229,0.2);">
                 <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">إدارة الفريق</span>
@@ -11209,14 +11541,24 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(245,158,11,0.2);">
                 <span style="font-size:1.5rem;">👑</span>
             </div>
-            <span class="text-white text-xs font-black text-center">إدارة شركتي</span>
+            <span class="text-white text-xs font-black text-center">إدارة القادة</span>
+        </button>
+
+        <!-- إدارة ملفي الشخصي — للقائد التابع (غير المالك) -->
+        <button id="app_myProfile" onclick="window.renderMyProfilePanel(); window.openWin('winMyProfile')"
+            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="display:none; background:rgba(79,70,229,0.1);border:1px solid rgba(79,70,229,0.25);height:140px;">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(79,70,229,0.2);">
+                <span style="font-size:1.5rem;">🪪</span>
+            </div>
+            <span class="text-white text-xs font-black text-center">إدارة ملفي الشخصي</span>
         </button>
 
 <!-- بلاغ طارئ — للعضو فقط -->
         <button id="app_emergency" onclick="window.openEmergencyReport()"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="display:none; background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.4);height:140px; animation:pulse 2s infinite;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(220,38,38,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(220,38,38,0.2);">
                 <span style="font-size:1.5rem;">🚨</span>
             </div>
             <span class="text-rose-400 text-xs font-black text-center">بلاغ طارئ</span>
@@ -11227,7 +11569,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             class="group relative col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);height:140px;">
             <span id="reportsBadge" class="hidden absolute -top-2 -right-2 w-6 h-6 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg border-2 border-black animate-pulse z-10">0</span>
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(16,185,129,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(16,185,129,0.2);">
                 <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">سجل البلاغات</span>
@@ -11237,7 +11579,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_map" onclick="window.openWin('winMap')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(8,145,178,0.1);border:1px solid rgba(8,145,178,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(8,145,178,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(8,145,178,0.2);">
                 <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">رادار المواقع</span>
@@ -11247,7 +11589,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_cloud" onclick="window.openWin('winCloud')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(71,85,105,0.1);border:1px solid rgba(71,85,105,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(71,85,105,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(71,85,105,0.2);">
                 <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">الأرشيف الرقمي</span>
@@ -11258,7 +11600,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_finance" onclick="window.openWin('winFinance')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(16,185,129,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(16,185,129,0.2);">
                 <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">المالية والاشتراكات</span>
@@ -11270,7 +11612,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_import" onclick="window.openWin('winImport')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(34,211,238,0.15);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(34,211,238,0.15);">
                 <svg class="w-6 h-6 text-cyan-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">رفع بيانات ERG</span>
@@ -11282,7 +11624,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <button id="app_config" onclick="window.openWin('winConfig')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
             style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.25);height:140px;">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(234,88,12,0.2);">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(234,88,12,0.2);">
                 <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
             </div>
             <span class="text-white text-xs font-black text-center">أمان النظام</span>
@@ -11343,7 +11685,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 <!-- ============================================ -->
 <div id="winImport" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(6,182,212,0.55),transparent);"></div>
             <button onclick="window.closeWin('winImport')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
@@ -11555,7 +11897,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     <!-- أمان النظام ومزامنة السحابة (مجمد) -->
 <div id="winConfig" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(245,158,11,0.14),rgba(245,158,11,0.03) 65%,transparent); border-bottom:1px solid rgba(245,158,11,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(245,158,11,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(245,158,11,0.14),rgba(245,158,11,0.03) 65%,transparent); border-bottom:1px solid rgba(245,158,11,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(245,158,11,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(255,255,255,0.5),rgba(245,158,11,0.6),transparent);"></div>
             <button onclick="window.closeWin('winConfig')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
@@ -11627,6 +11969,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     </div>
 </div>
 
+
+
 <div id="winMyCompany" class="app-window hidden flex-col bg-[#080b12] text-right" style="padding:0;">
     <div class="flex items-center justify-between p-5 border-b border-white/10">
         <button onclick="window.closeWin('winMyCompany')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
@@ -11641,11 +11985,53 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     </div>
 </div>
 
+<div id="winMyProfile" class="app-window hidden flex-col bg-[#080b12] text-right" style="padding:0;">
+    <div class="flex items-center justify-between p-5 border-b border-white/10">
+        <button onclick="window.closeWin('winMyProfile')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
+        <p class="text-white font-black text-lg uppercase tracking-wider">إدارة ملفي الشخصي</p>
+    </div>
+    <div class="p-5 overflow-y-auto" style="max-height:calc(100vh - 100px);">
+        <div id="myProfileBody" class="space-y-3"></div>
+    </div>
+</div>
+
+
+
+
+<div id="leaderEditModal" class="hidden fixed inset-0 z-[6100] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeLeaderEditModal()">
+    <div class="w-full max-w-md rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
+        <button onclick="window.closeLeaderEditModal()" class="member-detail-close">✕</button>
+        <p class="member-detail-name mb-4">تعديل بيانات القائد</p>
+        <div class="space-y-3">
+            <div>
+                <p class="lux-field-label">اسم القائد</p>
+                <input id="leaderEdit_name" type="text" class="erg-input lux-field-input text-right">
+            </div>
+            <div>
+                <p class="lux-field-label">الكود الحالي</p>
+                <input id="leaderEdit_code" type="text" disabled class="erg-input lux-field-input text-right" style="direction:ltr; opacity:0.6;">
+                <button id="leaderEdit_codeResetBtn" onclick="window.enableLeaderCodeChange()" class="text-[11px] text-amber-400 font-black mt-1">✏️ تغيير الكود (متاح مرة واحدة فقط)</button>
+                <p id="leaderEdit_codeUsedNote" class="hidden text-[11px] text-rose-400 font-black mt-1">⛔ تم استخدام فرصة تغيير الكود مسبقاً — راجع مدير النظام لأي تغيير إضافي</p>
+                <input id="leaderEdit_newCode" type="text" placeholder="اكتب الكود الجديد (بدون LDR-)" class="hidden erg-input lux-field-input text-right mt-2" style="direction:ltr;">
+            </div>
+            <div>
+                <p class="lux-field-label">عدد الأعضاء المخصص لهذا القائد</p>
+                <input id="leaderEdit_members" type="number" min="0" class="erg-input lux-field-input text-right">
+                <input id="leaderEdit_usedByOthers" type="hidden">
+                <p id="leaderEdit_remaining" class="text-[11px] text-emerald-400 font-black mt-1">—</p>
+            </div>
+        </div>
+        <button onclick="window.saveLeaderEdit()" class="w-full mt-4 py-3 rounded-xl font-black text-xs text-emerald-300" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+            💾 حفظ التعديلات
+        </button>
+    </div>
+</div>
+
 <div id="winFinance" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان -->
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(16,185,129,0.14),rgba(16,185,129,0.03) 65%,transparent); border-bottom:1px solid rgba(16,185,129,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(16,185,129,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(16,185,129,0.14),rgba(16,185,129,0.03) 65%,transparent); border-bottom:1px solid rgba(16,185,129,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(16,185,129,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(16,185,129,0.55),transparent);"></div>
             <div class="flex items-center gap-3">
                 <button onclick="window.closeWin('winFinance')" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
@@ -11808,12 +12194,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
         </div>
     </div>
+</div>
 
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان (مبسّط) -->
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(220,38,38,0.14),rgba(220,38,38,0.03) 65%,transparent); border-bottom:1px solid rgba(220,38,38,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(220,38,38,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(220,38,38,0.14),rgba(220,38,38,0.03) 65%,transparent); border-bottom:1px solid rgba(220,38,38,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(220,38,38,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(220,38,38,0.55),transparent);"></div>
             <div class="flex items-center gap-4">
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl transition-all hover:scale-105" style="background:linear-gradient(135deg,rgba(220,38,38,0.3),rgba(245,158,11,0.1) 70%,rgba(220,38,38,0.06)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 6px 24px rgba(220,38,38,0.25), 0 0 30px rgba(245,158,11,0.15), inset 0 1px 0 rgba(255,255,255,0.12);">🎖️</div>
@@ -11875,7 +12262,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
 
             <!-- لوحة جانبية منزلقة: إضافة/تعديل قائد -->
-            <div id="subFormModal" class="hidden fixed inset-0 z-[11000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubFormModal()">
+            <div id="subFormModal" class="hidden fixed inset-0 z-[11000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeSubFormModal()">
             <div class="w-full max-w-5xl max-h-[92vh] overflow-y-auto custom-scrollbar rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                 <button onclick="window.closeSubFormModal()" class="member-detail-close">✕</button>
 
@@ -11993,7 +12380,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
 
             <!-- نافذة تفاصيل القائد -->
-            <div id="subDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeSubDetailModal()">
+            <div id="subDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeSubDetailModal()">
                 <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                     <button onclick="window.closeSubDetailModal()" class="member-detail-close">✕</button>
 
@@ -12077,7 +12464,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 
-<div id="companyDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeCompanyDetailModal()">
+<div id="companyDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeCompanyDetailModal()">
     <div class="w-full max-w-lg rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
         <button onclick="window.closeCompanyDetailModal()" class="member-detail-close">✕</button>
         <div class="text-right mb-4">
@@ -12089,26 +12476,26 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         <p class="text-slate-500 text-[10px] font-black uppercase mt-4 mb-2 text-right">🧾 سجل المدفوعات</p>
         <div id="companyDetail_payments" class="space-y-1 max-h-[16vh] overflow-y-auto"></div>
         <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)"
-            class="w-full mt-4 py-3 rounded-xl font-black text-xs text-emerald-300"
-            style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+            class="w-full mt-4 py-3.5 rounded-[var(--radius-sm)] font-black text-xs text-white transition-all active:scale-95"
+            style="background:linear-gradient(135deg,#059669,#047857); box-shadow:0 8px 20px rgba(5,150,105,0.35); border-bottom:2px solid #065f46;">
             ➕ إضافة قائد لهذه الشركة
         </button>
         <div class="flex gap-2 mt-2">
             <button onclick="window.toggleCompanyRename()"
-                class="flex-1 py-3 rounded-xl font-black text-xs text-amber-300"
-                style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">
-                ✏️ تعديل اسم الشركة
+                class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-amber-300 transition-all active:scale-95"
+                style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4);">
+                ✏️ تعديل الاسم
             </button>
-            <button onclick="window.deleteCompany()"
-                class="flex-1 py-3 rounded-xl font-black text-xs text-rose-300"
-                style="background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3);">
-                🗑️ حذف الشركة
+            <button onclick="window.toggleCompanyBilling()"
+                class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-cyan-300 transition-all active:scale-95"
+                style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
+                💵 الاشتراك والتمديد
             </button>
         </div>
-        <button onclick="window.toggleCompanyBilling()"
-            class="w-full mt-2 py-3 rounded-xl font-black text-xs text-cyan-300"
-            style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
-            💵 سعر الاشتراك وتمديد الشركة
+        <button onclick="window.deleteCompany()"
+            class="w-full mt-3 py-3 rounded-[var(--radius-sm)] font-black text-xs text-rose-400 transition-all active:scale-95"
+            style="background:transparent; border:1.5px dashed rgba(244,63,94,0.4);">
+            🗑️ حذف الشركة نهائياً
         </button>
         <div id="companyBillingWrap" class="hidden mt-3 space-y-2">
             <div class="flex gap-2">
@@ -12135,7 +12522,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     </div>
 </div>
 
-<div id="companyAddModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeCompanyAddModal()">
+<div id="companyAddModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeCompanyAddModal()">
     <div class="w-full max-w-md rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
         <button onclick="window.closeCompanyAddModal()" class="member-detail-close">✕</button>
         <div class="member-detail-hero" style="padding:24px 28px;">
@@ -12171,7 +12558,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 <div id="winTeam" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <div class="flex items-center gap-4">
                 <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.26),rgba(245,158,11,0.08) 70%,rgba(99,102,241,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(99,102,241,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">👥</div>
@@ -12191,7 +12578,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
         </div>
         
         <!-- نافذة تنظيف الأعضاء المعلّقين -->
-        <div id="orphanCleanupModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeOrphanCleanupModal()">
+        <div id="orphanCleanupModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeOrphanCleanupModal()">
         <div class="w-full max-w-2xl rounded-2xl border border-rose-400/25 p-4 relative" style="background:linear-gradient(160deg,#2a1414,#1a0e0e); box-shadow:0 20px 60px rgba(0,0,0,0.5); max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
             <div class="flex items-center justify-between mb-3">
                 <button onclick="window.closeOrphanCleanupModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
@@ -12293,7 +12680,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- نافذة منبثقة لإضافة/تعديل عضو -->
-            <div id="memberFormModal" class="hidden fixed inset-0 z-[257000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeMemberFormModal()">
+            <div id="memberFormModal" class="hidden fixed inset-0 z-[257000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberFormModal()">
             <div class="w-full max-w-2xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                 <button onclick="window.closeMemberFormModal()" class="member-detail-close">✕</button>
 
@@ -12330,7 +12717,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
             </div>
 
             <!-- نافذة تفاصيل العضو -->
-            <div id="memberDetailModal" class="hidden fixed inset-0 z-[256500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeMemberDetailModal()">
+            <div id="memberDetailModal" class="hidden fixed inset-0 z-[256500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberDetailModal()">
                 <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
                     <button onclick="window.closeMemberDetailModal()" class="member-detail-close">✕</button>
 
@@ -12390,7 +12777,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- نافذة أعضاء القائد السريعة (مستقلة - تفتح فوق أي نافذة) -->
-<div id="leaderQuickRosterModal" class="hidden fixed inset-0 z-[256200] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeLeaderQuickRosterModal()">
+<div id="leaderQuickRosterModal" class="hidden fixed inset-0 z-[256200] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeLeaderQuickRosterModal()">
     <div class="w-full max-w-4xl max-h-[88vh] overflow-y-auto custom-scrollbar rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
         <button onclick="window.closeLeaderQuickRosterModal()" class="member-detail-close">✕</button>
 
@@ -12417,7 +12804,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
     <div class="w-full h-full flex flex-col">
 
         <!-- شريط العنوان -->
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
@@ -12476,7 +12863,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 <div id="winMap" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(6,182,212,0.14),rgba(6,182,212,0.03) 65%,transparent); border-bottom:1px solid rgba(6,182,212,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(6,182,212,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(6,182,212,0.55),transparent);"></div>
             <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
@@ -12504,7 +12891,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 <div id="winCloud" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
             <div class="flex items-center gap-4">
@@ -12622,7 +13009,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- نافذة البحث الموحّد -->
-<div id="commandPaletteModal" class="hidden fixed inset-0 z-[999997] items-start justify-center p-4 lux-modal-backdrop" style="padding-top:10vh;" onclick="if(event.target===this) window.closeCommandPalette()">
+<div id="commandPaletteModal" class="hidden fixed inset-0 z-[999997] items-start justify-center p-4 lux-modal-backdrop modal-safe-area" style="padding-top:10vh;" onclick="if(event.target===this) window.closeCommandPalette()">
     <div class="w-full max-w-lg rounded-[2rem] overflow-hidden" style="background:linear-gradient(160deg,rgba(15,17,28,0.98),rgba(9,11,20,0.99)); border:1px solid rgba(255,255,255,0.12); box-shadow:0 30px 70px rgba(0,0,0,0.6);">
         <div class="flex items-center gap-3 px-5 py-4" style="border-bottom:1px solid rgba(255,255,255,0.08);">
             <span class="text-lg">🔎</span>
@@ -12634,7 +13021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 </div>
 
 <!-- نافذة الجولة التعريفية -->
-<div id="onboardingTourModal" class="hidden fixed inset-0 z-[999998] items-center justify-center p-4 lux-modal-backdrop">
+<div id="onboardingTourModal" class="hidden fixed inset-0 z-[999998] items-center justify-center p-4 lux-modal-backdrop modal-safe-area">
     <div class="w-full max-w-sm rounded-[2.5rem] p-8 text-center space-y-5" style="background:linear-gradient(160deg,rgba(15,17,28,0.97),rgba(10,12,22,0.98)); border:1px solid rgba(255,255,255,0.12); box-shadow:0 30px 70px rgba(0,0,0,0.6);">
         <div id="onboardStepLabel" class="text-[10px] font-black text-white/40 uppercase tracking-widest"></div>
         <div id="onboardIcon" class="text-6xl"></div>
@@ -12669,7 +13056,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 <!-- ===== لوحة الإحصاء ===== -->
 <div id="winDashboard" class="app-window bg-[#080b12] italic text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(139,92,246,0.14),rgba(139,92,246,0.03) 65%,transparent); border-bottom:1px solid rgba(139,92,246,0.18); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(139,92,246,0.1);">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(139,92,246,0.14),rgba(139,92,246,0.03) 65%,transparent); border-bottom:1px solid rgba(139,92,246,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(139,92,246,0.1);">
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(139,92,246,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
@@ -13168,7 +13555,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- نافذة المحادثة الداخلية -->
-<div id="winChat" class="hidden fixed inset-0 z-[500000] flex-col" style="background:rgba(5,7,14,0.97); backdrop-filter:blur(24px);">
+<div id="winChat" class="hidden fixed inset-0 z-[500000] flex-col" style="background:rgba(5,7,14,0.97); -webkit-backdrop-filter:blur(24px); backdrop-filter:blur(24px); padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);">
     <div class="flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(37,99,235,0.1),transparent); border-bottom:1px solid rgba(37,99,235,0.1);">
         <button onclick="window.closeChat()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
         <div class="text-center">
@@ -13212,7 +13599,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible, [tabindex]
 
 
 <!-- نافذة Barcode Scanner -->
-<div id="barcodeScannerModal" class="hidden fixed inset-0 z-[600000] lux-modal-cyan flex-col items-center justify-center p-6" style="backdrop-filter:blur(20px)">
+<div id="barcodeScannerModal" class="hidden fixed inset-0 z-[600000] lux-modal-cyan flex-col items-center justify-center p-6" style="-webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px); padding:calc(1.5rem + var(--safe-top)) calc(1.5rem + var(--safe-right)) calc(1.5rem + var(--safe-bottom)) calc(1.5rem + var(--safe-left));">
     <div class="w-full max-w-md space-y-6">
         <div class="flex justify-between items-center">
             <button onclick="window.closeBarcodeScanner()"
