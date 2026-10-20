@@ -627,7 +627,7 @@ window.refreshOrderStatus = async (reqId) => {
                 const resendBtn = document.getElementById('track_resend_btn');
                 if (codesBox && Array.isArray(data.assignedKeys) && data.assignedKeys.length) {
                     codesBox.innerHTML = data.assignedKeys.map((k, i) =>
-                        `<div class="flex items-center justify-between bg-black/30 rounded-lg px-2 py-1.5 mt-1"><span class="text-cyan-300 font-mono font-black text-xs tracking-widest">${k}</span><span class="text-slate-500 text-[10px]">قائد ${i+1}</span></div>`
+                        `<div class="flex items-center justify-between bg-black/30 rounded-lg px-2 py-1.5 mt-1"><span class="text-cyan-300 font-mono font-black text-xs tracking-widest">${k}</span><span class="text-slate-500 text-[10px]">${i === 0 ? 'حساب الشركة' : 'قائد ' + i}</span></div>`
                     ).join('');
                     codesBox.classList.remove('hidden');
                 }
@@ -658,9 +658,9 @@ window.resendActivationEmail = async (reqId) => {
             const leaderSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', data.assignedKeys[0]));
             if (leaderSnap.exists()) expiryDate = leaderSnap.data().expiryDate || '';
         } catch(e) {}
-        const codesText = data.assignedKeys.map((k, i) => `قائد ${i+1}: ${k}`).join('\n');
+        const codesText = data.assignedKeys.map((k, i) => (i === 0 ? `حساب الشركة: ${k}` : `قائد ${i}: ${k}`)).join('\n');
         const sent = await sendEmail('template_mf871pf', data.email, data.name || '', {
-            activation_code: `أكواد القادة (${data.assignedKeys.length} قائد):\n\n${codesText}\n\nتاريخ الانتهاء: ${expiryDate}`
+            activation_code: `${data.assignedKeys.length > 1 ? `أكواد الشركة (حساب الشركة + ${data.assignedKeys.length - 1} قائد)` : 'كود حساب الشركة'}:\n\n${codesText}\n\nتاريخ الانتهاء: ${expiryDate}`
         });
         window.showNotif(sent ? '📧 تم إعادة إرسال الأكواد لبريدك' : '⚠️ فشل الإرسال — الأكواد ظاهرة أعلاه، انسخها يدوياً', sent ? 'success' : 'error');
     } catch(e) {
@@ -711,17 +711,12 @@ window.closeOrderTracking = () => {
 
 
 
-
-
-      
-
 // --- محرك الإدارة والاستجابة المدمج (محدث لدعم التشفير) ---
 window.changeUserKey = (type, oldDocId) => {
-    // القائد يغير شفرة عضوه — مرة واحدة فقط بدون OTP
+    // القائد يغير شفرة عضوه — مرة واحدة فقط بدون OTP (العلامة محفوظة في Firebase)
     if (window.userRole === 'leader' && type === 'member') {
-        const countKey = `key_change_count_${oldDocId}`;
-        const used = parseInt(localStorage.getItem(countKey) || '0');
-        if (used >= 1) {
+        const m = (window.teamMembers || []).find(x => x.id === oldDocId);
+        if (m && m.leaderKeyChanged === true && window.isCompanyOwner !== true) {
             window.showNotif("⛔ لقد نفّذت حقك بتغيير الشفرة — يرجى التواصل مع الدعم والصيانة", "error");
             return;
         }
@@ -731,7 +726,7 @@ window.changeUserKey = (type, oldDocId) => {
     const modal = document.getElementById('changeKeyModal');
     if (!modal) return;
     modal.style.display = 'flex';
-    window._changeKeyContext = { type, oldDocId, isLeaderChange: window.userRole === 'leader' && type === 'member' };
+    window._changeKeyContext = { type, oldDocId, isLeaderChange: window.userRole === 'leader' && window.isCompanyOwner !== true && type === 'member' };
 
     // تحديد البادئة حسب النوع
     const prefix = type === 'sub' ? 'LDR-' : 'MEM-';
@@ -780,6 +775,13 @@ window.confirmChangeKey = async () => {
         if (!snap.exists()) return window.showNotif("الملف غير موجود", "error");
         let data = snap.data();
 
+        // الفحص الحاسم من Firebase: القائد له تغيير واحد فقط
+        if (ctx.isLeaderChange && data.leaderKeyChanged === true) {
+            return window.showNotif("⛔ لقد نفّذت حقك بتغيير الشفرة — يرجى التواصل مع الدعم والصيانة", "error");
+        }
+        if (ctx.isLeaderChange) data.leaderKeyChanged = true;   // يُنسخ مع المستند الجديد
+        else delete data.leaderKeyChanged;                       // تغيير المدير يعيد الحق للقائد
+
         const hashedKey = await hashInput(newPlainKey, MASTER_SALT);
         const maskedKey = newPlainKey.substring(0, 4) + "***" + newPlainKey.slice(-2);
 
@@ -793,6 +795,13 @@ window.confirmChangeKey = async () => {
         data.updatedAt = Date.now();
 
         const newRef = doc(db, 'artifacts', appId, 'public', 'data', path, hashedKey);
+        if (hashedKey !== ctx.oldDocId) {
+            const _dup = await getDoc(newRef);
+            const _dupLegacy = newPlainKey !== ctx.oldDocId ? await getDoc(doc(db, 'artifacts', appId, 'public', 'data', path, newPlainKey)) : null;
+            if (_dup.exists() || (_dupLegacy && _dupLegacy.exists())) {
+                return window.showNotif("⛔ هذه الشفرة غير متاحة، اختر شفرة أخرى", "error");
+            }
+        }
         await setDoc(newRef, data);
 
         if (hashedKey !== ctx.oldDocId) {
@@ -800,11 +809,16 @@ window.confirmChangeKey = async () => {
         }
 
         window.showNotif("تم تغيير وتشفير الشفرة بنجاح 🔒", "success");
-        // تسجيل استخدام القائد لحق التغيير
-        if (ctx.isLeaderChange) {
-            localStorage.setItem(`key_change_count_${ctx.oldDocId}`, '1');
-        }
-
+        window.closeMemberDetailModal?.(); window.closeSubDetailModal?.();
+        let _tries = 0;
+        const _t = setInterval(() => {
+            _tries++;
+            const list = ctx.type === 'sub' ? (window.subscribers || []) : (window.teamMembers || []);
+            if (list.some(x => x.id === hashedKey)) {
+                clearInterval(_t);
+                if (ctx.type === 'sub') window.openSubDetail(hashedKey); else window.openMemberDetail(hashedKey);
+            } else if (_tries > 20) clearInterval(_t);
+        }, 300);
     } catch (e) {
         window.showNotif("فشل في تغيير الشفرة", "error");
         console.error(e);
@@ -1127,6 +1141,26 @@ window.rejectTrialByAdmin = async (phoneHash, name) => {
     });
 };
 
+// رمز المصادقة الثنائية لحساب الشركة (Google Authenticator)
+window.requestCompanyOtp = (secret) => new Promise((resolve) => {
+    window._companyOtp = { secret, resolve };
+    const t = document.getElementById('otpModalTitle');
+    const s = document.getElementById('otpModalSubtitle');
+    if (t) t.textContent = '🛡️ تأكيد دخول الشركة';
+    if (s) s.textContent = 'أدخل الرمز من تطبيق Google Authenticator';
+    const inp = document.getElementById('otpInput');
+    if (inp) inp.value = '';
+    document.getElementById('otpModal')?.classList.replace('hidden', 'flex');
+    const watch = setInterval(() => {
+        if (!window._companyOtp) { clearInterval(watch); return; }
+        const m = document.getElementById('otpModal');
+        if (m && m.classList.contains('hidden')) {
+            clearInterval(watch);
+            const c = window._companyOtp; window._companyOtp = null; c.resolve(false);
+        }
+    }, 300);
+});
+
 window.activateApp = async () => {
     const emailField = document.getElementById('loginEmailInput');
     const emailVal = emailField ? emailField.value.trim() : '';
@@ -1220,6 +1254,20 @@ window.activateApp = async () => {
                     return;
                 }
 
+                // تأكيد ثانٍ لحساب الشركة الإداري برمز Google Authenticator
+                if (subData.isCompanyOwner === true && subData.isLeader === false) {
+                    if (!subData.totpSecret) {
+                        window.showNotif("⛔ لم يُفعَّل مفتاح المصادقة لهذه الشركة. تواصل مع الإدارة.", "error");
+                        if (loginBtn) { loginBtn.textContent = 'دخول ←'; loginBtn.removeAttribute('disabled'); }
+                        return;
+                    }
+                    if (msgLabel) msgLabel.innerText = "🔐 أدخل رمز Google Authenticator...";
+                    const _okT = await window.requestCompanyOtp(subData.totpSecret);
+                    if (!_okT) {
+                        if (loginBtn) { loginBtn.textContent = 'دخول ←'; loginBtn.removeAttribute('disabled'); }
+                        return;
+                    }
+                }
                 // فحص بصمة الجهاز — يسمح بحد أقصى جهازين لكل قائد
                 const myDeviceId = getDeviceId();
                 const registeredDevices = Array.isArray(subData.deviceIds) ? subData.deviceIds : (subData.deviceId ? [subData.deviceId] : []);
@@ -1243,6 +1291,7 @@ window.activateApp = async () => {
                 window.myCompanyId = subData.companyId || subSnap.id;
                 window.isCompanyOwner = subData.isCompanyOwner === true;
                 window.myCompanyName = subData.companyName || subData.ownerName || "";
+                window.isCompanyAccountOnly = (subData.isCompanyOwner === true && subData.isLeader === false);
                 window.listenLeaderEmergencies(subSnap.id);
                 return window.launchOS('leader', subSnap.id, "تم التحقق: أهلاً بك أيها القائد");
             }
@@ -1343,6 +1392,20 @@ window.activateAppByEmail = async () => {
                 window.showNotif('⛔ الاشتراك غير مفعل', 'error');
                 return;
             }
+            // فحص بصمة الجهاز — حد أقصى جهازين لكل قائد (نفس منطق الدخول بالمفتاح)
+            const myDeviceId = getDeviceId();
+            const registeredDevices = Array.isArray(subData.deviceIds) ? subData.deviceIds : (subData.deviceId ? [subData.deviceId] : []);
+            if (!registeredDevices.includes(myDeviceId)) {
+                if (registeredDevices.length >= 2) {
+                    await signOut(auth);
+                    window.showNotif('⛔ تم الوصول للحد الأقصى من الأجهزة (2). تواصل مع الإدارة.', 'error');
+                    return;
+                }
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', m.docId),
+                        { deviceIds: [...registeredDevices, myDeviceId] });
+                } catch (e) { console.warn('فشل تسجيل بصمة الجهاز', e); }
+            }
             window.activeKey = m.docId;
             window.myLeaderName = subData.ownerName || 'قائد ميداني';
             window.myFeatures = subData.features || null;
@@ -1350,12 +1413,25 @@ window.activateAppByEmail = async () => {
             window.myCompanyId = subData.companyId || m.docId;
             window.isCompanyOwner = subData.isCompanyOwner === true;
             window.myCompanyName = subData.companyName || subData.ownerName || '';
+            window.isCompanyAccountOnly = (subData.isCompanyOwner === true && subData.isLeader === false);
             window.listenLeaderEmergencies(m.docId);
             return window.launchOS('leader', m.docId, 'أهلاً بك أيها القائد');
         }
         if (m.role === 'member') {
             const memDocSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', m.docId));
             const d = memDocSnap.exists() ? memDocSnap.data() : {};
+            const myDeviceId = getDeviceId();
+            if (d.deviceId && d.deviceId !== myDeviceId) {
+                await signOut(auth);
+                window.showNotif('⛔ الكود مقفل على جهاز آخر. تواصل مع الإدارة.', 'error');
+                return;
+            }
+            if (!d.deviceId) {
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', m.docId),
+                        { deviceId: myDeviceId });
+                } catch (e) { console.warn('فشل تسجيل بصمة جهاز العضو', e); }
+            }
             window.activeKey = m.docId;
             window.myMemberName = d.memberName || 'عضو ميداني';
             window.activeParentKey = d.parentKey;
@@ -1508,6 +1584,23 @@ window.verifyOTP = async () => {
         return;
     }
 
+    // مسار رمز حساب الشركة
+    if (window._companyOtp) {
+        const c = window._companyOtp;
+        const totpC = new OTPAuth.TOTP({ secret: c.secret, algorithm: "SHA1", digits: 6, period: 30 });
+        if (totpC.validate({ token: code, window: 2, timestamp: window.getTotpNow() }) !== null) {
+            window._companyOtp = null;
+            document.getElementById('otpModal').classList.replace('flex', 'hidden');
+            document.getElementById('otpInput').value = '';
+            c.resolve(true);
+        } else {
+            window._loginGuard.fail();
+            window.showNotif("⛔ رمز المصادقة غير صحيح", "error");
+            document.getElementById('otpInput').value = '';
+        }
+        return;
+    }
+
     // مسار دخول الإدارة القديم (تطبيق المصادقة)
     if (window._adminOtpPhase === 1 || window._adminOtpPhase === 2) {
         const totp = new OTPAuth.TOTP({ secret: MASTER_TOTP_SECRET, algorithm: "SHA1", digits: 6, period: 30 });
@@ -1614,7 +1707,7 @@ window.renderSubTable = () => {
     // نبدأ من مجموعة الشركات الحقيقية (تظهر حتى لو بلا قادة)، ثم نُلحق القادة
     const companies = {};
     (window.companiesRaw || []).forEach(c => {
-        companies[c.id] = { id: c.id, name: c.name || c.id, phone: c.phone || '', whatsapp: c.whatsapp || '', email: c.email || '', leaders: [] };
+        companies[c.id] = { id: c.id, name: c.name || c.id, phone: c.phone || '', whatsapp: c.whatsapp || '', email: c.email || '', maxLeaders: c.maxLeaders, memberPool: c.memberPool, leaders: [] };
     });
     (window.subscribers || []).forEach(s => {
         const cId = s.companyId || s.id;
@@ -1623,8 +1716,8 @@ window.renderSubTable = () => {
     });
     window._companiesIndex = companies;
 
-    t.innerHTML = Object.values(companies).map(c => {
-        const totalMembers = c.leaders.reduce((sum, l) => sum + (l.maxMembers || 5), 0);
+    t.innerHTML = Object.values(companies).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')).map(c => {
+        const totalMembers = c.leaders.filter(l => l.isLeader !== false).reduce((sum, l) => sum + (l.maxMembers || 5), 0);
         const activeCount = c.leaders.filter(l => !(l.expiryDate && new Date(l.expiryDate) < new Date())).length;
         const allExpired = activeCount === 0;
         return `
@@ -1635,7 +1728,13 @@ window.renderSubTable = () => {
              style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015)); border:1.5px solid rgba(255,255,255,0.1); box-shadow:0 6px 22px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);">
             <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center text-3xl transition-all" style="background:linear-gradient(135deg,rgba(220,38,38,0.25),rgba(245,158,11,0.1)); border:1.5px solid rgba(245,158,11,0.4); box-shadow:0 4px 14px rgba(220,38,38,0.15), inset 0 1px 0 rgba(255,255,255,0.1);">🏢</div>
             <p class="leader-name text-white font-black text-base truncate">${esc(c.name)}</p>
-            <p class="text-[11px] text-slate-400 font-bold truncate mt-1">${c.leaders.length} قائد · ${totalMembers} عضو</p>
+            <p class="text-[11px] text-slate-400 font-bold truncate mt-1">${(() => {
+                const fl = c.leaders.filter(l => l.isLeader !== false);
+                const al = fl.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
+                return (c.maxLeaders !== undefined || c.memberPool !== undefined)
+                    ? `${fl.length} / ${c.maxLeaders ?? fl.length} قائد · ${al} / ${c.memberPool ?? al} عضو`
+                    : `${fl.length} قائد · ${totalMembers} عضو`;
+            })()}</p>
             <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black ${allExpired ? 'bg-slate-500/20 text-slate-400 border border-slate-400/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-400/30'}">
                 ${allExpired ? '⛔ الكل منتهي' : `✅ ${activeCount} نشط`}
             </span>
@@ -2336,7 +2435,20 @@ window.renderLeaderSidebar = () => {
     const list = document.getElementById('leaderSidebarList');
     if (!list) return;
 
-    const allLeaders = window._teamScopeLeaders || window.subscribers || [];
+    let allLeaders = (window._teamScopeLeaders || window.subscribers || []).filter(l => l.isLeader !== false);
+    // المدير: عرض قادة الشركة المختارة فقط
+    const _inCo = window.userRole === 'master' && !!window._teamCompanyId;
+    const _bar = document.getElementById('teamCompanyBackBar');
+    if (_bar) { _bar.classList.toggle('hidden', !_inCo); _bar.classList.toggle('flex', _inCo); }
+    if (_inCo) {
+        allLeaders = allLeaders.filter(l => (l.companyId || l.id) === window._teamCompanyId);
+        const _nm = document.getElementById('teamCompanyBackName');
+        if (_nm) _nm.textContent = '🏢 ' + (window._teamCompanyName || '');
+    }
+    // تحديث شبكة الشركات إن كانت ظاهرة (تحديث لحظي مع البيانات)
+    if (window.userRole === 'master' && !window._teamCompanyId && !document.getElementById('teamCompanyStage')?.classList.contains('hidden')) {
+        window.renderTeamCompanyGrid();
+    }
     const allMembers = window.teamMembers || [];
 
     const searchTerm = (document.getElementById('leaderSidebarSearch')?.value || '').trim().toLowerCase();
@@ -2390,7 +2502,7 @@ window.selectLeaderInSidebar = (leaderId) => {
 
 // حساب مؤشرات القياس التنفيذية الإجمالية (كل القادة)
 window.renderTeamExecStats = () => {
-    const leaders = window._teamScopeLeaders || window.subscribers || [];
+    const leaders = (window._teamScopeLeaders || window.subscribers || []).filter(l => l.isLeader !== false);
     const members = window.teamMembers || [];
     const leaderIds = new Set(leaders.map(l => l.id));
     const totalLeaders = leaders.length;
@@ -2504,7 +2616,7 @@ window.renderTeamTable = () => {
     if (!gridBody) return;
 
     // التحديث السيادي: تحديد القائد المستهدف (سواء كنت مديراً أو قائداً)
-    const targetLeader = window.userRole === 'master' ? window.currentViewingLeader : window.activeKey;
+    const targetLeader = (window.userRole === 'master' || (window.isCompanyOwner === true && window.currentViewingLeader)) ? window.currentViewingLeader : window.activeKey;
 
     // فلترة الأعضاء التابعين لهذا القائد فقط
     let currentTeam = window.teamMembers.filter(m => m.parentKey === targetLeader);
@@ -2581,8 +2693,8 @@ window.openMemberDetail = (docId) => {
     const keyEl = document.getElementById('memberDetail_key');
     keyEl.innerHTML = m.isEncrypted ? `<span class="text-emerald-400">🔒 ${m.teamKey}</span>` : (m.teamKey || docId);
 
-    const leader = (window.subscribers || []).find(s => s.id === m.parentKey);
-    document.getElementById('memberDetail_leader').textContent = leader?.ownerName || '—';
+    const leader = (window.subscribers || []).find(s => s.id === m.parentKey) || (window._teamScopeLeaders || []).find(s => s.id === m.parentKey);
+    document.getElementById('memberDetail_leader').textContent = leader?.ownerName || (m.parentKey === window.activeKey ? window.myLeaderName : '') || '—';
 
     const dateEl = document.getElementById('memberDetail_date');
     dateEl.textContent = m.createdAt ? new Date(m.createdAt).toLocaleDateString('ar-EG') : 'غير محدد';
@@ -2615,7 +2727,7 @@ window.addNewMember = async () => {
     if(!name || !key) return window.showNotif("أكمل بيانات العضو أولاً", "error");
     
     // التحديث السيادي: تحديد القائد المسؤول لربط العضو به
-    const pKey = window.userRole === 'master' ? window.currentViewingLeader : window.activeKey;
+    const pKey = (window.userRole === 'master' || (window.isCompanyOwner === true && window.currentViewingLeader && (window._teamScopeLeaders || []).some(l => l.id === window.currentViewingLeader))) ? window.currentViewingLeader : window.activeKey;
     if(!pKey) return window.showNotif("خطأ: لم يتم تحديد القائد المسؤول", "error");
 
     try {
@@ -2624,15 +2736,22 @@ window.addNewMember = async () => {
         if (subSnap.exists()) {
             const subData = subSnap.data();
             if (!subData.isPaid) return window.showNotif("اشتراك القائد غير مفعل", "error");
+            if (subData.isLeader === false) return window.showNotif("⛔ اختر القائد من القائمة أولاً — الأعضاء يُضافون تحت القادة وليس تحت حساب الشركة", "error");
             const currentMyTeamCount = window.teamMembers.filter(m => m.parentKey === pKey).length;
             const isExistingMember = window.teamMembers.some(m => m.id === key);
-    const maxAllowed = window.isTrial ? 2 : (subData.maxMembers || 5);
+    const maxAllowed = window.isTrial ? 2 : (subData.maxMembers ?? 5);
         if (!isExistingMember && currentMyTeamCount >= maxAllowed) {
             if (window.isTrial) {
                 window.showNotif("⛔ التجربة المجانية تسمح بـ 2 أعضاء فقط — اشترك للحصول على المزيد", "error");
                 setTimeout(() => window.showSubscriptionDetails(), 2000);
             } else {
-                window.showNotif(`وصلت للحد الأقصى للمشتركين`, "error");
+                if (window.isCompanyOwner === true) {
+                    window.showNotif(`⛔ وصل هذا القائد لسقفه (${maxAllowed} أعضاء). ارفع حصته من «إدارة القادة» إن توفرت حصة في الشركة، وإلا تواصل مع الإدارة لزيادة السقف`, "error");
+                } else if (window.userRole === 'leader') {
+                    window.showNotif(`⛔ وصلت للحد الأقصى (${maxAllowed} أعضاء) — تواصل مع مسؤول شركتك لزيادة حصتك`, "error");
+                } else {
+                    window.showNotif(`وصلت للحد الأقصى للمشتركين (${maxAllowed})`, "error");
+                }
             }
             return;
         }
@@ -2644,6 +2763,9 @@ window.addNewMember = async () => {
         const maskedKey = key.substring(0, 4) + "***" + key.slice(-2);
 
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', hashedKey);
+        if ((await getDoc(ref)).exists() || (await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', key))).exists()) {
+            return window.showNotif("⛔ هذا الكود غير متاح، اختر كوداً مختلفاً", "error");
+        }
         await setDoc(ref, {
             memberName: name,
             teamKey: maskedKey,
@@ -2687,6 +2809,8 @@ window.openAddMemberModal = () => {
     const modal = document.getElementById('memberFormModal');
     if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
 };
+
+
 
 window.closeMemberFormModal = () => {
     const modal = document.getElementById('memberFormModal');
@@ -3203,12 +3327,121 @@ window.manageLeaderTeam = (leaderId, leaderName) => {
     window.renderTeamTable();
 };
 
+// ===== المدير: التدرّج شركات ← قادة ← أعضاء =====
+window._teamCompanyId = null;
+window._teamCompanyName = '';
+
+window.renderTeamCompanyGrid = () => {
+    const box = document.getElementById('teamCompanyGrid');
+    if (!box) return;
+    const q = (document.getElementById('teamCompanySearch')?.value || '').trim().toLowerCase();
+    const subs = window.subscribers || [];
+    const members = window.teamMembers || [];
+    const leaderToCompany = {};
+    const companies = {};
+    subs.forEach(s => {
+        const cId = s.companyId || s.id;
+        if (!companies[cId]) companies[cId] = { id: cId, name: s.companyName || s.ownerName || cId, leaders: 0, members: 0 };
+        if (s.isCompanyOwner === true && (s.companyName || s.ownerName)) companies[cId].name = s.companyName || s.ownerName;
+        companies[cId].leaders++;
+        leaderToCompany[s.id] = cId;
+    });
+    members.forEach(m => {
+        const cId = leaderToCompany[m.parentKey];
+        if (cId && companies[cId]) companies[cId].members++;
+    });
+    let list = Object.values(companies).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+    const total = list.length;
+    if (q) list = list.filter(c => String(c.name).toLowerCase().includes(q));
+    const cnt = document.getElementById('teamCompanyCount');
+    if (cnt) cnt.textContent = (q ? list.length + ' / ' : '') + total + ' شركة';
+    if (list.length === 0) {
+        box.innerHTML = '<div class="col-span-full text-center opacity-40 text-xs italic p-10">لا توجد شركات</div>';
+        return;
+    }
+    box.innerHTML = list.map(c => {
+        const initial = String(c.name || '؟').trim().charAt(0).toUpperCase();
+        return `
+        <button onclick="window.selectTeamCompany('${c.id}')"
+            class="group rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="background:rgba(99,102,241,0.10); border:1px solid rgba(99,102,241,0.28); min-height:128px;">
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white" style="background:linear-gradient(135deg,rgba(99,102,241,0.45),rgba(245,158,11,0.15));">${esc(initial)}</div>
+            <p class="text-white text-xs font-black text-center leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.name)}</p>
+            <p class="text-[10px] font-mono text-slate-400">🎖️ ${c.leaders} · 👤 ${c.members}</p>
+        </button>`;
+    }).join('');
+};
+
+window.showTeamCompanyStage = () => {
+    window._teamCompanyId = null;
+    window._teamCompanyName = '';
+    window.currentViewingLeader = '';
+    const $ = id => document.getElementById(id);
+    const hide = id => { $(id)?.classList.add('hidden'); $(id)?.classList.remove('flex'); };
+    const show = id => { $(id)?.classList.remove('hidden'); $(id)?.classList.add('flex'); };
+    if ($('teamWinTitle')) $('teamWinTitle').innerHTML = 'إدارة الفريق';
+    hide('leaderSidebarCol'); hide('teamDetailContent'); hide('teamDetailEmptyState');
+    show('teamCompanyStage');
+    window.renderTeamCompanyGrid();
+};
+
+window.selectTeamCompany = (companyId) => {
+    const subs = window.subscribers || [];
+    const owner = subs.find(s => (s.companyId || s.id) === companyId && s.isCompanyOwner === true) || subs.find(s => (s.companyId || s.id) === companyId);
+    window._teamCompanyId = companyId;
+    window._teamCompanyName = owner ? (owner.companyName || owner.ownerName || '') : '';
+    window.currentViewingLeader = '';
+    const $ = id => document.getElementById(id);
+    const hide = id => { $(id)?.classList.add('hidden'); $(id)?.classList.remove('flex'); };
+    const show = id => { $(id)?.classList.remove('hidden'); $(id)?.classList.add('flex'); };
+    if ($('teamWinTitle')) $('teamWinTitle').innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">شركة: ${esc(window._teamCompanyName)}</span>`;
+    hide('teamCompanyStage'); hide('teamDetailContent');
+    show('leaderSidebarCol'); show('teamDetailEmptyState');
+    if ($('leaderSidebarSearch')) $('leaderSidebarSearch').value = '';
+    window.renderLeaderSidebar();
+};
+
+window.backToTeamCompanies = () => window.showTeamCompanyStage();
+
+// ربط المدير بمرحلة الشركات عند فتح نافذة الفريق
+const _origOpenTeamWinDirect = window.openTeamWinDirect;
+window.openTeamWinDirect = async (...args) => {
+    await _origOpenTeamWinDirect(...args);
+    if (window.userRole === 'master') window.showTeamCompanyStage();
+};
+
+// عند الوصول لفريق قائد من نافذة أخرى: اضبط الشركة تلقائياً
+const _origManageLeaderTeam = window.manageLeaderTeam;
+window.manageLeaderTeam = (leaderId, leaderName) => {
+    if (window.userRole === 'master') {
+        const l = (window.subscribers || []).find(s => s.id === leaderId);
+        window._teamCompanyId = l ? (l.companyId || l.id) : null;
+        const owner = (window.subscribers || []).find(s => (s.companyId || s.id) === window._teamCompanyId && s.isCompanyOwner === true) || l;
+        window._teamCompanyName = owner ? (owner.companyName || owner.ownerName || '') : '';
+        document.getElementById('teamCompanyStage')?.classList.add('hidden');
+        document.getElementById('teamCompanyStage')?.classList.remove('flex');
+    }
+    return _origManageLeaderTeam(leaderId, leaderName);
+};
+
+// تذكّر من أين فُتحت نافذة الفريق (من إدارة الشركات أم من سطح المكتب)
+const _openWinBase = window.openWin;
+window.openWin = (id) => {
+    if (id === 'winTeam') {
+        const subsEl = document.getElementById('winSubs');
+        window._teamReturnTo = (subsEl && !subsEl.classList.contains('hidden')) ? 'winSubs' : null;
+    }
+    _openWinBase(id);
+};
+
 // دالة إغلاق نافذة الفريق الذكية
 window.closeTeamWin = () => {
-    if (window.userRole === 'master') {
-        window.openWin('winSubs'); // المدير يعود لـ "الإدارة الشاملة"
+    if (window.userRole === 'master' && window._teamReturnTo === 'winSubs') {
+        window._teamReturnTo = null;
+        window.openWin('winSubs'); // فُتحت من إدارة الشركات ← ارجع إليها
     } else {
-        window.closeWin('winTeam'); // القائد يعود للشاشة الرئيسية
+        window._teamReturnTo = null;
+        window.closeWin('winTeam'); // فُتحت من سطح المكتب ← ارجع للسطح
     }
 };
 
@@ -3586,6 +3819,7 @@ window.openCompanyDetail = (companyId) => {
     if (!c) return;
     window._activeCompanyId = companyId;
     document.getElementById('companyRenameWrap')?.classList.add('hidden');
+    document.getElementById('companyQuotaWrap')?.classList.add('hidden');
     document.getElementById('companyBillingWrap')?.classList.add('hidden');
     const raw = (window.companiesRaw || []).find(x => x.id === companyId) || {};
     const latestExp = c.leaders.map(l => l.expiryDate).filter(Boolean).sort().pop() || 'غير محدد';
@@ -3624,7 +3858,7 @@ document.getElementById('companyDetail_name').textContent = c.name;
                 <p class="text-slate-500 text-[10px]">${l.maxMembers || 5} أعضاء${l.expiryDate ? ' · ينتهي ' + esc(l.expiryDate) : ''}</p>
             </div>
             <div class="flex items-center gap-2">
-                ${isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')"
+                ${(isOwner && l.isLeader === false) ? `<button onclick="event.stopPropagation(); window.showCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-sky-300" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3);">🔑 مصادقة</button><button onclick="event.stopPropagation(); window.regenCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">♻️</button>` : ''}${isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')"
                     class="text-[10px] px-2 py-1 rounded-lg font-black text-amber-300"
                     style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">👑 تعيين كمالك</button>`}
                 <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
@@ -3637,9 +3871,189 @@ document.getElementById('companyDetail_name').textContent = c.name;
     if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
 };
 
+// ===== قائمة قادة الشركة: بحث + تصفية + تحميل تدريجي (للأعداد الكبيرة) =====
+window._companyLeadersLimit = 30;
+
+window.renderCompanyLeaders = (reset) => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const list = document.getElementById('companyDetail_leadersList');
+    if (!c || !list) return;
+    if (reset) window._companyLeadersLimit = 30;
+    const q = (document.getElementById('companyLeadersSearch')?.value || '').trim().toLowerCase();
+    const flt = document.getElementById('companyLeadersFilter')?.value || 'all';
+    const now = new Date();
+    const isExp = l => !!(l.expiryDate && new Date(l.expiryDate) < now);
+
+    // عدد الأعضاء الفعلي لكل قائد (مرور واحد على الأعضاء)
+    const counts = {};
+    (window.teamMembers || []).forEach(m => { counts[m.parentKey] = (counts[m.parentKey] || 0) + 1; });
+
+    // الرأس: الشعار + مؤشرات الشركة
+    const fieldLeaders = c.leaders.filter(l => l.isLeader !== false);
+    const total = fieldLeaders.length;
+    const expiredCount = fieldLeaders.filter(isExp).length;
+    let used = 0, cap = 0;
+    fieldLeaders.forEach(l => { used += counts[l.id] || 0; cap += parseInt(l.maxMembers || 5); });
+    const av = document.getElementById('companyDetail_avatar');
+    if (av) av.textContent = String(c.name || '؟').trim().charAt(0).toUpperCase();
+    const countEl = document.getElementById('companyDetail_count');
+    if (countEl) countEl.textContent = '🏢 إدارة الشركة والقادة';
+    const statsEl = document.getElementById('companyDetail_stats');
+    if (statsEl) {
+        const chip = (icon, val, label, col, bg) => `
+            <div class="rounded-2xl px-3 py-2.5 text-right" style="background:${bg}; border:1px solid ${col}40;">
+                <p class="text-[10px] font-black" style="color:${col};">${icon} ${label}</p>
+                <p class="text-white text-lg font-black leading-tight mt-0.5">${val}</p>
+            </div>`;
+        statsEl.innerHTML =
+            chip('🎖️', total, 'القادة', '#fbbf24', 'rgba(245,158,11,0.10)') +
+            chip('✅', total - expiredCount, 'نشط', '#34d399', 'rgba(16,185,129,0.10)') +
+            chip('⛔', expiredCount, 'منتهي', '#fb7185', 'rgba(244,63,94,0.10)') +
+            chip('👤', used + '/' + cap, 'الأعضاء', '#818cf8', 'rgba(99,102,241,0.10)');
+    }
+
+    // القادة: المالك أولاً ثم أبجدياً
+    let leaders = [...c.leaders].sort((a, b) =>
+        (b.isCompanyOwner === true) - (a.isCompanyOwner === true) ||
+        String(a.ownerName || '').localeCompare(String(b.ownerName || ''), 'ar'));
+    if (q) leaders = leaders.filter(l => String(l.ownerName || '').toLowerCase().includes(q));
+    if (flt === 'active') leaders = leaders.filter(l => !isExp(l));
+    if (flt === 'expired') leaders = leaders.filter(isExp);
+
+    const shown = leaders.slice(0, window._companyLeadersLimit);
+    list.innerHTML = shown.length ? shown.map(l => {
+        const isExpired = isExp(l);
+        const isOwner = l.isCompanyOwner === true;
+        const n = counts[l.id] || 0;
+        const max = parseInt(l.maxMembers || 5);
+        const pct = max > 0 ? Math.min(100, Math.round((n / max) * 100)) : 0;
+        const bar = pct >= 100 ? '#f43f5e' : pct >= 70 ? '#f59e0b' : '#10b981';
+        const initial = String(l.ownerName || '؟').trim().charAt(0).toUpperCase();
+        return `
+        <div class="rounded-2xl p-3 cursor-pointer transition-all hover:-translate-y-0.5"
+             style="background:linear-gradient(160deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015)); border:1px solid ${isOwner ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.08)'};"
+             onclick="window.closeCompanyDetailModal(); window.openSubDetail('${l.id}')">
+            <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl flex items-center justify-center text-base font-black text-white shrink-0"
+                     style="background:linear-gradient(135deg,${bar}55,rgba(245,158,11,0.10)); border:1px solid ${bar}88;">${esc(initial)}</div>
+                <div class="flex-1 min-w-0 text-right">
+                    <p class="text-white text-xs font-black truncate">${isOwner ? '👑 ' : ''}${esc(l.ownerName)}</p>
+                    <p class="text-slate-500 text-[10px] truncate">${isOwner ? (l.isLeader === false ? 'حساب الشركة · ' : 'المالك · ') : ''}${l.expiryDate ? 'ينتهي ' + esc(l.expiryDate) : 'بدون تاريخ انتهاء'}</p>
+                </div>
+                <span class="shrink-0 text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                    ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+                </span>
+            </div>
+            <div class="flex items-center gap-2 mt-3">
+                ${(isOwner && l.isLeader === false) ? `<button onclick="event.stopPropagation(); window.showCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-sky-300" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3);">🔑 مصادقة</button><button onclick="event.stopPropagation(); window.regenCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">♻️</button>` : ''}${isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')"
+                    class="hidden"
+                    style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">👑 تعيين كمالك</button>`}
+                <div class="leader-progress-track"><div class="leader-progress-fill" style="width:${pct}%; background:${bar}; box-shadow:0 0 8px ${bar}aa;"></div></div>
+                <span class="text-[10px] font-mono text-slate-400 shrink-0">👤 ${n}/${max}</span>
+            </div>
+        </div>`;
+    }).join('') : '<p class="col-span-full text-center text-slate-500 text-xs py-6">لا نتائج</p>';
+
+    const more = document.getElementById('companyLeadersMore');
+    if (more) {
+        const rest = leaders.length - shown.length;
+        more.classList.toggle('hidden', rest <= 0);
+        if (rest > 0) more.textContent = `عرض المزيد (${rest} متبقٍ)`;
+    }
+};
+
+// تبديل لوحة القادة / لوحة إعدادات الشركة
+window.showCompanyPane = (pane) => {
+    const toSettings = pane === 'settings';
+    const lead = document.getElementById('companyLeadersPane');
+    const sett = document.getElementById('companySettingsPane');
+    const btn = document.getElementById('companySettingsToggle');
+    if (lead) { lead.classList.toggle('hidden', toSettings); lead.classList.toggle('flex', !toSettings); }
+    if (sett) { sett.classList.toggle('hidden', !toSettings); sett.classList.toggle('flex', toSettings); }
+    if (btn) btn.textContent = toSettings ? '→ العودة للقادة' : '⚙️ إعدادات الشركة';
+};
+window.toggleCompanySettings = () => {
+    const sett = document.getElementById('companySettingsPane');
+    window.showCompanyPane(sett && sett.classList.contains('hidden') ? 'settings' : 'leaders');
+};
+
+window.companyLeadersShowMore = () => {
+    window._companyLeadersLimit += 30;
+    window.renderCompanyLeaders(false);
+};
+
+// استبدال عرض القادة الافتراضي بالنسخة الجديدة عند فتح تفاصيل الشركة
+const _origOpenCompanyDetail = window.openCompanyDetail;
+window.openCompanyDetail = (companyId) => {
+    _origOpenCompanyDetail(companyId);
+    const s = document.getElementById('companyLeadersSearch'); if (s && !window._keepCompanyLeadersState) s.value = '';
+    const f = document.getElementById('companyLeadersFilter'); if (f && !window._keepCompanyLeadersState) f.value = 'all';
+    window.showCompanyPane('leaders');
+    window.renderCompanyLeaders(true);
+};
+
 window.closeCompanyDetailModal = () => {
     const modal = document.getElementById('companyDetailModal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+};
+
+// ===== الرجوع بالترتيب: القائد ← الشركة ← الشبكة =====
+// ✕ في نافذة الشركة: من الإعدادات يرجع للقادة، ومن القادة يغلق النافذة
+window.companyModalBack = () => {
+    const sett = document.getElementById('companySettingsPane');
+    if (sett && !sett.classList.contains('hidden')) window.showCompanyPane('leaders');
+    else window.closeCompanyDetailModal();
+};
+
+// تذكّر الشركة عند فتح قائد منها
+const _origCloseCompanyDetail = window.closeCompanyDetailModal;
+window.closeCompanyDetailModal = () => {
+    const cm = document.getElementById('companyDetailModal');
+    const wasOpen = !!cm && !cm.classList.contains('hidden');
+    _origCloseCompanyDetail();
+    if (wasOpen) {
+        window._justClosedCompany = window._activeCompanyId;
+        setTimeout(() => { window._justClosedCompany = null; }, 0);
+    }
+};
+const _origOpenSubDetail = window.openSubDetail;
+window.openSubDetail = (docId) => {
+    const cm = document.getElementById('companyDetailModal');
+    const visible = !!cm && !cm.classList.contains('hidden');
+    window._subDetailReturn = visible ? window._activeCompanyId : (window._justClosedCompany || null);
+    return _origOpenSubDetail(docId);
+};
+
+// ✕ في نافذة القائد: يرجع إلى الشركة التي جاء منها (مع حفظ البحث والتصفية)
+window.backFromSubDetail = () => {
+    window.closeSubDetailModal();
+    const cid = window._subDetailReturn;
+    window._subDetailReturn = null;
+    if (cid && (window._companiesIndex || {})[cid]) {
+        window._keepCompanyLeadersState = true;
+        window.openCompanyDetail(cid);
+        window._keepCompanyLeadersState = false;
+    }
+};
+
+// ===== سقوف الشركة: القراءة من مستند الشركة، وإن غابت تُحسب من القادة الحاليين =====
+window.getCompanyQuota = async () => {
+    const myId = window.myCompanyId || window.activeKey;
+    let leaders = [];
+    try {
+        const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', myId)));
+        // حساب الشركة (isLeader:false) لا يُحسب قائداً ولا يُحسب من السقف
+        leaders = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.isLeader !== false);
+    } catch (e) { console.warn('فشل تحميل قادة الشركة', e); }
+    let co = null;
+    try {
+        const cs = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', myId));
+        if (cs.exists()) co = cs.data();
+    } catch (e) {}
+    const allocated = leaders.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
+    const maxLeaders = Number(co?.maxLeaders) || leaders.length;
+    const memberPool = Number(co?.memberPool) || allocated;
+    return { leaders, maxLeaders, memberPool, allocated, company: co };
 };
 
 window.renderMyCompanyPanel = async () => {
@@ -3647,40 +4061,130 @@ window.renderMyCompanyPanel = async () => {
     if (!box) return;
     box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">جارٍ تحميل بيانات الشركة...</p>`;
 
-    const myId = window.myCompanyId || window.activeKey;
-    let leaders = [];
-    try {
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', myId));
-        const snap = await getDocs(q);
-        leaders = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.id !== window.activeKey); // استثناء المالك نفسه — إداري وليس قائداً ميدانياً
-    } catch (e) { console.warn('فشل تحميل قادة الشركة', e); }
-
-    const totalMembers = leaders.reduce((sum, l) => sum + (window.teamMembers || []).filter(m => m.parentKey === l.id).length, 0);
-    const totalCapacity = leaders.reduce((sum, l) => sum + (l.maxMembers || 5), 0);
+    const q = await window.getCompanyQuota();
+    const leaders = q.leaders;
+    const full = leaders.length >= q.maxLeaders;
 
     const nameEl = document.getElementById('myCompanyName');
     const summaryEl = document.getElementById('myCompanySummary');
-    if (nameEl) nameEl.textContent = window.myCompanyName || leaders[0]?.companyName || leaders[0]?.ownerName || 'شركتي';
-    if (summaryEl) summaryEl.textContent = `${leaders.length} قائد (وفق باقتك) · ${totalMembers} من ${totalCapacity} عضو`;
+    if (nameEl) nameEl.textContent = window.myCompanyName || q.company?.name || 'شركتي';
+    if (summaryEl) summaryEl.textContent = `القادة ${leaders.length} من ${q.maxLeaders} · الأعضاء المخصصون ${q.allocated} من ${q.memberPool}`;
 
-    if (leaders.length === 0) {
-        box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">لا يوجد قادة ضمن شركتك بعد. عدد القادة يتحدد تلقائياً حسب باقة اشتراكك.</p>`;
-        return;
+    const addBtn = full
+        ? `<div class="rounded-xl px-4 py-3 text-center text-[11px] font-black text-amber-400" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);">⛔ بلغت الحد الأقصى من القادة — للزيادة تواصل مع الإدارة</div>`
+        : `<button onclick="window.openAddLeaderModal()" class="w-full py-3 rounded-xl font-black text-xs text-emerald-300" style="background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);">＋ إضافة قائد (${q.maxLeaders - leaders.length} متاح)</button>`;
+
+    const rows = leaders.length === 0
+        ? `<p class="text-slate-500 text-xs text-center py-6">لا يوجد قادة بعد. اضغط «إضافة قائد» للبدء.</p>`
+        : leaders.map(l => {
+            const memCount = (window.teamMembers || []).filter(m => m.parentKey === l.id).length;
+            const isExpired = l.expiryDate && new Date(l.expiryDate) < new Date();
+            return `
+            <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
+                <div class="text-right">
+                    <p class="text-white text-xs font-black">🎖️ ${esc(l.ownerName)}</p>
+                    <p class="text-slate-500 text-[10px]">${memCount} / ${l.maxMembers || 0} أعضاء</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.openLeaderEditModal('${l.id}')" class="text-[10px] px-2 py-1 rounded-lg font-black text-amber-300 border border-amber-500/30">✏️ تعديل</button>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                        ${isExpired ? '⛔ منتهي' : '✅ نشط'}
+                    </span>
+                </div>
+            </div>`;
+        }).join('');
+
+    box.innerHTML = `<div class="mb-3">${addBtn}</div>` + rows;
+};
+
+window.openAddLeaderModal = async () => {
+    if (window.isCompanyOwner !== true) return;
+    const q = await window.getCompanyQuota();
+    if (q.leaders.length >= q.maxLeaders) {
+        return window.showNotif(`⛔ وصلت للحد الأقصى من القادة (${q.maxLeaders}) — للزيادة تواصل مع الإدارة`, 'error');
     }
-    box.innerHTML = leaders.map(l => {
-        const memCount = (window.teamMembers || []).filter(m => m.parentKey === l.id).length;
-        const isExpired = l.expiryDate && new Date(l.expiryDate) < new Date();
-        return `
-        <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
-            <div class="text-right">
-                <p class="text-white text-xs font-black">${l.isCompanyOwner === true ? '👑' : '🎖️'} ${esc(l.ownerName)}</p>
-                <p class="text-slate-500 text-[10px]">${memCount} / ${l.maxMembers || 5} أعضاء</p>
-            </div>
-            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
-                ${isExpired ? '⛔ منتهي' : '✅ نشط'}
-            </span>
-        </div>`;
-    }).join('');
+    const remaining = Math.max(0, q.memberPool - q.allocated);
+    if (remaining < 1) {
+        return window.showNotif('⛔ لا يتوفر أعضاء في حصة الشركة — قلّل حصة قائد آخر أو تواصل مع الإدارة', 'error');
+    }
+    document.getElementById('addLeader_name').value = '';
+    document.getElementById('addLeader_members').value = Math.min(remaining, Math.ceil(q.memberPool / q.maxLeaders));
+    document.getElementById('addLeader_remaining').textContent = `القادة: ${q.leaders.length} من ${q.maxLeaders} — المتاح للأعضاء: ${remaining} من ${q.memberPool}`;
+    const m = document.getElementById('addLeaderModal');
+    if (m) { m.classList.remove('hidden'); m.classList.add('flex'); }
+};
+
+window.closeAddLeaderModal = () => {
+    const m = document.getElementById('addLeaderModal');
+    if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+};
+
+window.saveNewLeader = async () => {
+    if (window.isCompanyOwner !== true) return;
+    const name = document.getElementById('addLeader_name').value.trim();
+    const members = parseInt(document.getElementById('addLeader_members').value) || 0;
+    if (!name) return window.showNotif('يرجى كتابة اسم القائد', 'error');
+    if (members < 1) return window.showNotif('حدّد عدد أعضاء لهذا القائد (1 على الأقل)', 'error');
+
+    const btn = document.getElementById('addLeader_saveBtn');
+    if (btn) btn.disabled = true;
+    try {
+        // إعادة فحص السقوف من قاعدة البيانات لحظة الحفظ
+        const q = await window.getCompanyQuota();
+        if (q.leaders.length >= q.maxLeaders) {
+            return window.showNotif(`⛔ وصلت للحد الأقصى من القادة (${q.maxLeaders}) — للزيادة تواصل مع الإدارة`, 'error');
+        }
+        const remaining = q.memberPool - q.allocated;
+        if (members > remaining) {
+            return window.showNotif(`العدد يتجاوز حصة الشركة (المتاح الآن: ${Math.max(0, remaining)})`, 'error');
+        }
+
+        const ownerSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', window.activeKey));
+        const o = ownerSnap.exists() ? ownerSnap.data() : {};
+
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let newKey = '';
+        for (let attempt = 0; attempt < 5 && !newKey; attempt++) {
+            let k = '';
+            for (let i = 0; i < 6; i++) k += chars.charAt(Math.floor(Math.random() * chars.length));
+            const cand = 'LDR-' + k;
+            const ex = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', cand));
+            if (!ex.exists()) newKey = cand;
+        }
+        if (!newKey) return window.showNotif('⛔ تعذر توليد كود فريد، أعد المحاولة', 'error');
+
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey), {
+            ownerName: name,
+            phone: o.phone || '',
+            subKey: newKey,
+            isPaid: true,
+            status: 'active',
+            maxMembers: members,
+            createdAt: Date.now(),
+            expiryDate: o.expiryDate || '',
+            features: o.features || null,
+            companyId: window.myCompanyId,
+            companyName: window.myCompanyName || o.companyName || '',
+            isCompanyOwner: false,
+            isLeader: true,
+            paymentStatus: 'paid',
+            paymentMethod: o.paymentMethod || '',
+            pricePaid: 0,
+            packageId: o.packageId || null,
+            createdBy: window.activeKey
+        });
+
+        window.logActivity('leader_created', `أنشأت الشركة (${window.myCompanyName || ''}) قائداً: ${name} — ${members} أعضاء`);
+        window.closeAddLeaderModal();
+        window.showKeyAlert(`✅ كود القائد: ${name}`, newKey);
+        window.refreshCompanyScope?.(); // التقاط أعضاء القائد الجديد وبلاغاته فوراً
+        window.renderMyCompanyPanel();
+    } catch (e) {
+        console.warn(e);
+        window.showNotif('⛔ فشل إنشاء القائد، حاول مجدداً', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 };
 
 window.renderMyProfilePanel = async () => {
@@ -3698,12 +4202,12 @@ window.renderMyProfilePanel = async () => {
 
     if (window.isCompanyOwner === true) {
         // ملف الشركة (للمالك)
-        let leadersCount = 0;
-        try {
-            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId));
-            const snap2 = await getDocs(q);
-            leadersCount = snap2.size;
-        } catch (e) {}
+        const quota = await window.getCompanyQuota();
+        const leadersCount = quota.leaders.length;
+        const daysLeft = s.expiryDate ? Math.ceil((new Date(s.expiryDate) - new Date()) / 86400000) : null;
+        const expiryWarn = (!isExpired && daysLeft !== null && daysLeft <= 30)
+            ? `<div class="rounded-xl px-4 py-3 text-center text-[11px] font-black text-amber-400" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);">⏳ ينتهي اشتراككم خلال ${daysLeft} يوم — تواصل مع الإدارة للتجديد</div>`
+            : '';
 
         box.innerHTML = `
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
@@ -3725,10 +4229,15 @@ window.renderMyProfilePanel = async () => {
                 <span class="text-white text-xs font-black">${esc(s.expiryDate || 'غير محدد')}</span>
             </div>
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
-                <span class="text-slate-500 text-[11px] font-bold">عدد القادة</span>
-                <span class="text-white text-xs font-black">${leadersCount}</span>
+                <span class="text-slate-500 text-[11px] font-bold">القادة</span>
+                <span class="text-white text-xs font-black">${leadersCount} / ${quota.maxLeaders}</span>
             </div>
-        `;
+            <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-slate-500 text-[11px] font-bold">الأعضاء المخصصون للقادة</span>
+                <span class="text-white text-xs font-black">${quota.allocated} / ${quota.memberPool}</span>
+            </div>
+                `;
+        if (expiryWarn) box.insertAdjacentHTML('afterbegin', expiryWarn);
         return;
     }
 
@@ -3785,11 +4294,11 @@ window.openLeaderEditModal = async (leaderId) => {
         const snap2 = await getDocs(q);
         leaders = snap2.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.id !== window.activeKey);
     } catch(e) {}
-    const totalPool = leaders.reduce((sum, l) => sum + (l.maxMembers || 0), 0);
+    const totalPool = (await window.getCompanyQuota()).memberPool;
     const usedByOthers = leaders.filter(l => l.id !== leaderId).reduce((sum, l) => sum + (l.maxMembers || 0), 0);
     window._companyMemberPool = totalPool;
 
-    document.getElementById('leaderEdit_remaining').textContent = `السقف الكلي للشركة: ${totalPool} — المتاح لهذا القائد الآن: ${Math.max(0, totalPool - usedByOthers)}`;
+    document.getElementById('leaderEdit_remaining').textContent = `السقف الكلي للشركة: ${totalPool} — المتاح لهذا القائد الآن: ${Math.max(0, totalPool - usedByOthers)} (لرفع السقف الكلي تواصل مع الإدارة)`;
     document.getElementById('leaderEdit_usedByOthers').value = usedByOthers;
     document.getElementById('leaderEdit_name').value = s.ownerName || '';
     document.getElementById('leaderEdit_members').value = s.maxMembers || 0;
@@ -3824,6 +4333,11 @@ window.saveLeaderEdit = async () => {
     if (usedByOthers + newMembers > window._companyMemberPool) {
         return window.showNotif(`العدد يتجاوز سقف الشركة (المتاح الآن: ${window._companyMemberPool - usedByOthers})`, 'error');
     }
+const currentCount = (window.teamMembers || []).filter(m => m.parentKey === leaderId).length;
+    if (newMembers < currentCount) {
+        return window.showNotif(`⛔ لا يمكن جعل الحصة أقل من عدد الأعضاء الحاليين (${currentCount}) — احذف أعضاء أولاً`, 'error');
+    }
+
 
     const s = window._editingLeaderData || {};
     const wantsCodeChange = !!newCodeRaw && s.codeResetUsed !== true;
@@ -3868,32 +4382,82 @@ window.toggleCompanyRename = () => {
     const wrap = document.getElementById('companyRenameWrap');
     const inp = document.getElementById('companyRename_input');
     if (!c || !wrap || !inp) return;
+    const raw = (window.companiesRaw || []).find(x => x.id === c.id) || {};
     wrap.classList.toggle('hidden');
     inp.value = c.name;
+    document.getElementById('companyEditPhone_input').value = raw.phone || '';
+    document.getElementById('companyEditEmail_input').value = raw.email || '';
     if (!wrap.classList.contains('hidden')) inp.focus();
 };
 
 window.saveCompanyName = async () => {
     const c = (window._companiesIndex || {})[window._activeCompanyId];
-    const newName = document.getElementById('companyRename_input')?.value.trim() || '';
     if (!c) return;
+    const newName  = document.getElementById('companyRename_input')?.value.trim() || '';
+    const newPhone = document.getElementById('companyEditPhone_input')?.value.trim() || '';
+    const newEmail = document.getElementById('companyEditEmail_input')?.value.trim() || '';
     if (!newName) return window.showNotif("اسم الشركة مطلوب", "error");
+    if (newPhone && !/^[0-9+\-\s()]{7,20}$/.test(newPhone)) return window.showNotif("رقم الهاتف غير صالح", "error");
+    if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return window.showNotif("البريد الإلكتروني غير صالح", "error");
     try {
         const batch = writeBatch(db);
         c.leaders.forEach(l => {
             batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', l.id),
                 { companyName: newName, updatedAt: Date.now() });
         });
-        if ((window.companiesRaw || []).some(co => co.id === c.id)) {
-            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id), { name: newName });
-        }
+        batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id),
+            { name: newName, phone: newPhone, email: newEmail }, { merge: true });
         await batch.commit();
-        window.showNotif("تم تحديث اسم الشركة", "success");
+        window.showNotif("تم تحديث بيانات الشركة", "success");
         window.closeCompanyDetailModal();
     } catch (e) {
-        window.showNotif("فشل تحديث اسم الشركة، تحقق من الصلاحيات", "error");
+        window.showNotif("فشل تحديث بيانات الشركة، تحقق من الصلاحيات", "error");
     }
 };
+
+
+
+window.toggleCompanyQuota = () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    const wrap = document.getElementById('companyQuotaWrap');
+    if (!c || !wrap) return;
+    wrap.classList.toggle('hidden');
+    if (wrap.classList.contains('hidden')) return;
+    const raw = (window.companiesRaw || []).find(x => x.id === c.id) || {};
+    // حساب الشركة (isLeader:false) لا يُحسب من القادة ولا من الحصة
+    const fieldLeaders = c.leaders.filter(l => l.isLeader !== false);
+    const allocated = fieldLeaders.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
+    document.getElementById('companyQuota_leaders').value = Number(raw.maxLeaders) || fieldLeaders.length;
+    document.getElementById('companyQuota_pool').value = Number(raw.memberPool) || allocated;
+    document.getElementById('companyQuota_usage').textContent = `المستخدم حالياً: ${fieldLeaders.length} قائد · ${allocated} عضو مخصص لهم`;
+};
+
+window.saveCompanyQuota = async () => {
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    if (!c) return;
+    const maxLeaders = parseInt(document.getElementById('companyQuota_leaders').value);
+    const memberPool = parseInt(document.getElementById('companyQuota_pool').value);
+    if (isNaN(maxLeaders) || isNaN(memberPool) || maxLeaders < 0 || memberPool < 0) {
+        return window.showNotif('أدخل أرقاماً صحيحة للسقوف', 'error');
+    }
+    const fieldLeaders = c.leaders.filter(l => l.isLeader !== false);
+    const allocated = fieldLeaders.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
+    if (maxLeaders < fieldLeaders.length) {
+        return window.showNotif(`⛔ لا يمكن أن يقل عن عدد القادة الحاليين (${fieldLeaders.length}) — احذف قادة أولاً`, 'error');
+    }
+    if (memberPool < allocated) {
+        return window.showNotif(`⛔ لا يمكن أن تقل الحصة عن مجموع حصص القادة (${allocated}) — خفّض حصص القادة أولاً`, 'error');
+    }
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id),
+            { maxLeaders, memberPool, quotaUpdatedAt: Date.now() }, { merge: true });
+        window.logActivity('company_quota', `تعديل سقوف شركة ${c.name}: ${maxLeaders} قائد / ${memberPool} عضو`);
+        window.showNotif('✅ تم تحديث سقوف الشركة', 'success');
+    } catch (e) {
+        window.showNotif('⛔ فشل حفظ السقوف، تحقق من الصلاحيات', 'error');
+    }
+};
+
 
 window.deleteCompany = () => {
     const c = (window._companiesIndex || {})[window._activeCompanyId];
@@ -4037,6 +4601,8 @@ window.migrateLegacyLeaderToCompany = async (leaderId, companyName) => {
 
 
 window.setCompanyOwner = (leaderId) => {
+    window.showNotif("⛔ حساب الشركة حساب إداري مستقل ولا يُسند لقائد ميداني. لتغيير كوده استخدم «تغيير الشفرة» من ملف الحساب", "error");
+    return;
     const c = (window._companiesIndex || {})[window._activeCompanyId];
     const target = c?.leaders.find(l => l.id === leaderId);
     if (!c || !target) return;
@@ -4115,12 +4681,17 @@ window.addNewSub = async () => {
         const linkedCompanyId = document.getElementById('new_l_linkCompany')?.value || '';
         const linkedCompany = linkedCompanyId ? ((window.companiesRaw || []).find(c => c.id === linkedCompanyId) || (window._companiesIndex || {})[linkedCompanyId] || null) : null;
         const isFirstLeaderInCompany = linkedCompanyId ? !(window.subscribers || []).some(s => s.companyId === linkedCompanyId) : true;
+        const isCompanyAccount = (document.getElementById('new_l_accountType')?.value || 'leader') === 'company';
+        if (isCompanyAccount && linkedCompanyId && (window.subscribers || []).some(s => s.companyId === linkedCompanyId && s.isCompanyOwner === true)) {
+            return window.showNotif("⛔ هذه الشركة لديها حساب مالك بالفعل", "error");
+        }
 
         const companyNameInput = document.getElementById('new_l_companyName')?.value.trim() || '';
         const companyExpiry = linkedCompanyId
             ? ((window._companiesIndex || {})[linkedCompanyId]?.leaders || []).map(l => l.expiryDate).filter(Boolean).sort().pop() || ''
             : '';
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hashedKey);
+        if ((await getDoc(ref)).exists()) return window.showNotif("⛔ كود القائد مستخدم مسبقاً، ولّد كوداً جديداً", "error");
         await setDoc(ref, { 
             ownerName: n, 
             subKey: maskedKey, 
@@ -4132,11 +4703,13 @@ window.addNewSub = async () => {
             pricePaid: price,
             status: 'active',
              expiryDate: (companyExpiry && new Date(companyExpiry) > new Date()) ? companyExpiry : ex, 
-            maxMembers: members, 
+            maxMembers: isCompanyAccount ? 0 : members, 
             features: features,
             companyId: linkedCompanyId || hashedKey,
             companyName: linkedCompany ? linkedCompany.name : (companyNameInput || n),
-            isCompanyOwner: isFirstLeaderInCompany,
+            isCompanyOwner: isCompanyAccount ? true : isFirstLeaderInCompany,
+            isLeader: !isCompanyAccount,
+            ...(isCompanyAccount ? { totpSecret: (window._newTotp = generateRandomTOTPSecret()) } : {}),
             updatedAt: Date.now() 
         }, { merge: true });
 
@@ -4144,7 +4717,7 @@ window.addNewSub = async () => {
         window.logActivity('subscription_payment', `اعتماد قائد جديد: ${n} — ${members} أعضاء — ${price}$ (${payMethod}) — الحالة: ${payStatus}`);
 
         window.showNotif("تم تشفير وحفظ بيانات القائد سحابياً", "success");
-        window.showKeyAlert(`✅ تم إنشاء كود القائد: ${n}`, plainKey);
+        window.showKeyAlert(`✅ تم إنشاء كود القائد: ${n}`, isCompanyAccount ? (plainKey + '   |   مفتاح المصادقة: ' + window._newTotp) : plainKey);
 
         ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
             const el = document.getElementById(id);
@@ -4175,7 +4748,7 @@ window.addNewSub = async () => {
 window.resetDevice = (type, key) => {
     // قاصر على المدير فقط — الدعم والصيانة (الإدارة)
     if (window.userRole !== 'master') {
-        window.showNotif("⛔ هذه الصلاحية محصورة بالإدارة (الدعم والصيانة) فقط", "error");
+        window.requestDeviceReset(type, key);
         return;
     }
 
@@ -4202,12 +4775,88 @@ window.resetDevice = (type, key) => {
 
 
 
+// طلب تصفير بصمة جهاز → يُرسل للإدارة للموافقة
+window.requestDeviceReset = (type, key) => {
+    let targetName = '';
+    if (type === 'member') targetName = ((window.teamMembers || []).find(x => x.id === key) || {}).memberName || '';
+    else targetName = ((window._teamScopeLeaders || window.subscribers || []).find(x => x.id === key) || {}).ownerName || '';
+    window.showConfirm(
+        "طلب تصفير الجهاز",
+        `سيُرسل طلب تصفير بصمة جهاز "${targetName || 'المستخدم'}" إلى الإدارة للموافقة. متابعة؟`,
+        async () => {
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', 'DRS-' + Date.now()), {
+                    name: 'طلب تصفير جهاز: ' + (targetName || key),
+                    type: 'device_reset',
+                    targetType: type,
+                    targetKey: key,
+                    targetName: targetName,
+                    requesterKey: window.activeKey,
+                    requesterName: window.myLeaderName || '',
+                    companyId: window.myCompanyId || '',
+                    companyName: window.myCompanyName || '',
+                    status: 'Pending Payment Verification',
+                    timestamp: Date.now()
+                });
+                window.logActivity('device_reset_request', `طلب تصفير جهاز: ${targetName || key}`);
+                window.showNotif('✅ تم إرسال طلب التصفير للإدارة', 'success');
+            } catch (e) { window.showNotif('❌ فشل إرسال الطلب', 'error'); }
+        }
+    );
+};
+
+// اعتماد التصفير (المدير فقط)
+window.approveDeviceReset = (reqId, type, key) => {
+    if (window.userRole !== 'master') return;
+    window.showConfirm("اعتماد تصفير الجهاز", "تصفير كل الأجهزة المسجلة لهذا الحساب؟", async () => {
+        try {
+            const path = type === 'sub' ? 'subscribers' : 'team_keys';
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', path, key), { deviceId: null, deviceIds: [] });
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId), { status: 'DeviceResetDone', approvedAt: Date.now() });
+            await batch.commit();
+            window.logActivity('device_reset', `اعتماد تصفير جهاز — المعرّف: ${key}`);
+            window.showNotif("✅ تم تصفير الجهاز", "success");
+            window.loadPendingRequests();
+        } catch (e) { window.showNotif("❌ فشل التصفير (قد يكون الحساب محذوفاً)", "error"); }
+    });
+};
+
+// مفتاح Google Authenticator لحساب الشركة (للمدير فقط)
+window.showCompanyTotp = async (docId) => {
+    if (window.userRole !== 'master') return;
+    try {
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', docId);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) return window.showNotif('⛔ الحساب غير موجود', 'error');
+        let secret = snap.data().totpSecret;
+        if (!secret) {
+            secret = generateRandomTOTPSecret();
+            await updateDoc(ref, { totpSecret: secret });
+            window.logActivity('company_totp', 'توليد مفتاح مصادقة لحساب شركة');
+        }
+        window.showKeyAlert('🔑 مفتاح Google Authenticator — ' + (snap.data().ownerName || ''), secret);
+    } catch (e) { window.showNotif('❌ تعذر جلب مفتاح المصادقة', 'error'); }
+};
+
+window.regenCompanyTotp = (docId) => {
+    if (window.userRole !== 'master') return;
+    window.showConfirm('مفتاح مصادقة جديد', 'سيتوقف المفتاح القديم فوراً، وعلى الشركة إضافة المفتاح الجديد إلى التطبيق. متابعة؟', async () => {
+        try {
+            const secret = generateRandomTOTPSecret();
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', docId), { totpSecret: secret });
+            window.logActivity('company_totp', 'إعادة توليد مفتاح مصادقة لحساب شركة');
+            window.showKeyAlert('🔑 المفتاح الجديد', secret);
+        } catch (e) { window.showNotif('❌ فشل التوليد', 'error'); }
+    });
+};
+
 window.deleteEntry = (type, key) => {
     if (type === 'sub') {
         const s = (window.subscribers || []).find(x => x.id === key);
         const others = s ? (window.subscribers || []).filter(x => (x.companyId || x.id) === (s.companyId || s.id) && x.id !== key) : [];
         if (s && s.isCompanyOwner === true && others.length > 0) {
-            return window.showNotif("👑 هذا مالك الشركة: عيّن مالكاً آخر أولاً أو احذف الشركة كاملة", "error");
+            return window.showNotif("👑 هذا حساب الشركة: احذف قادته أولاً أو احذف الشركة كاملة", "error");
         }
     }
     window.showConfirm(
@@ -4270,6 +4919,54 @@ window.clearAllReports = () => {
 };
 
 
+
+
+// ===== مزامنة إعدادات المستخدم مع Firestore: user_prefs/{docId} =====
+window.PREF_SYNC_PREFIXES = ['erg_theme', 'erg_onboarding_seen_', 'chat_seen_'];
+window._isSyncPref = (k) => window.PREF_SYNC_PREFIXES.some(p => k === p || k.startsWith(p));
+window._prefId = () => (window.userRole === 'master') ? 'MASTER' : (window.activeSubKey || '');
+window._prefDirty = {};
+window._prefTimer = null;
+
+window.savePref = (k, v) => {
+    try { localStorage.setItem(k, v); } catch (e) {}
+    if (!window._isSyncPref(k)) return;
+    const id = window._prefId();
+    if (!id) return;
+    window._prefDirty[k] = String(v);
+    clearTimeout(window._prefTimer);
+    window._prefTimer = setTimeout(async () => {
+        const data = window._prefDirty; window._prefDirty = {};
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_prefs', id),
+                { ...data, updatedAt: Date.now() }, { merge: true });
+        } catch (e) { console.warn('prefs push failed', e); }
+    }, 3000);
+};
+
+window.pullPrefs = async () => {
+    const id = window._prefId();
+    if (!id) return;
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_prefs', id));
+        if (!snap.exists()) {
+            // أول مرة: ارفع الموجود محلياً ليصبح أساساً للمزامنة
+            Object.keys(localStorage).forEach(k => { if (window._isSyncPref(k)) window.savePref(k, localStorage.getItem(k)); });
+            return;
+        }
+        const d = snap.data();
+        Object.keys(d).forEach(k => {
+            if (!window._isSyncPref(k)) return;
+            const local = localStorage.getItem(k);
+            if (k.startsWith('chat_seen_')) { if (!local || Number(d[k]) > Number(local)) localStorage.setItem(k, d[k]); }
+            else localStorage.setItem(k, d[k]);
+        });
+        const light = localStorage.getItem('erg_theme') === 'light';
+        document.body.classList.toggle('light-mode', light);
+        const btn = document.getElementById('themeBtn');
+        if (btn) btn.textContent = light ? '☀️' : '🌙';
+    } catch (e) { console.warn('prefs pull failed', e); }
+};
 
 
 
@@ -4380,7 +5077,7 @@ window.launchOS = (role, key, msg) => {
         window.openWin('os_desktop');
     }
 
-    setTimeout(() => window.showOnboardingTour?.(role), 700);
+    window.pullPrefs().finally(() => setTimeout(() => window.showOnboardingTour?.(role), 700));
 // شريط تنبيه التجربة
     if (role === 'leader' && window.isTrial) {
         setTimeout(() => {
@@ -4501,7 +5198,12 @@ setTimeout(() => {
 
         if(b) {
             b.className = "px-5 py-1.5 rounded-full font-black italic text-[10px] bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.5)] uppercase tracking-widest";
-            b.textContent = "قائد وحدة ميدانية";
+            b.textContent = (window.isCompanyAccountOnly === true) ? "حساب الشركة" : "قائد وحدة ميدانية";
+                        if (!document.getElementById('companyOnlyCss')) {
+                const st = document.createElement('style'); st.id = 'companyOnlyCss';
+                st.textContent = '.company-only button[onclick*="openAddMemberModal"]{display:none !important;}';
+                document.head.appendChild(st);
+            }
         }
         if(statusDot) statusDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]";
         setTimeout(() => {
@@ -4582,7 +5284,7 @@ window.renderLauncher = () => {
     }
     if (roleEl) {
         if (M) roleEl.textContent = '⚡ Master — Full System Access';
-        else if (L) roleEl.textContent = '🎖️ Field Leader — Command Active';
+        else if (L) roleEl.textContent = (window.isCompanyAccountOnly === true) ? '🏢 Company Account — Administration' : '🎖️ Field Leader — Command Active';
         else roleEl.textContent = '👤 Field Member — ERG Access';
     }
 // تحميل إحصائيات سطح المكتب
@@ -4737,7 +5439,7 @@ window.markersLayer = null; // طبقة التحكم بالعلامات
 window.refreshMapMarkers = () => {
 const myReports = window.userRole === 'master'
         ? window.allReports
-        : window.allReports.filter(r => r.parentKey === window.activeKey);
+        : window.allReports.filter(r => (window._myScopeKeys || [window.activeKey]).includes(r.parentKey));
     const reportsToShow = myReports;
 
     if (window.markersLayer) {
@@ -5091,13 +5793,55 @@ window.getMyScopeKeys = async () => {
     } catch(e) { return [window.activeKey]; }
 };
 
+// إعادة ربط مستمعي الأعضاء والبلاغات بنطاق الشركة الحالي
+// (يلتقط القادة الجدد، ويتجاوز حد 30 عنصراً في استعلام in بتقسيمه)
+window.refreshCompanyScope = async () => {
+    if (window.userRole !== 'leader' || window.isCompanyOwner !== true) return;
+    const keys = await window.getMyScopeKeys();
+    window._myScopeKeys = keys;
+    try { window._teamUnsub?.(); window._reportsUnsub?.(); } catch (e) {}
+    (window._teamUnsubs || []).forEach(u => { try { u(); } catch (e) {} });
+    (window._reportsUnsubs || []).forEach(u => { try { u(); } catch (e) {} });
+    const chunks = [];
+    for (let i = 0; i < keys.length; i += 30) chunks.push(keys.slice(i, i + 30));
+    const start = (coll, handler) => {
+        if (!handler) return [];
+        const parts = chunks.map(() => []);
+        return chunks.map((chunk, idx) => onSnapshot(
+            query(collection(db, 'artifacts', appId, 'public', 'data', coll), where('parentKey', 'in', chunk)),
+            (snap) => {
+                parts[idx] = snap.docs;
+                handler({ docs: parts.flat(), docChanges: () => snap.docChanges() });
+            },
+            (err) => console.warn('scope listener error:', coll, err)
+        ));
+    };
+    window._teamUnsubs = start('team_keys', window._teamHandler);
+    window._reportsUnsubs = start('reports', window._reportsHandler);
+};
+
+// مراقبة قادة الشركة لحظياً: أي قائد يُضاف أو يُحذف (من المدير أو من المالك) يُحدَّث نطاق الفريق والبلاغات فوراً
+window.watchCompanyLeaders = () => {
+    if (window.userRole !== 'leader' || window.isCompanyOwner !== true || !window.myCompanyId) return;
+    try { window._companyWatchUnsub?.(); } catch (e) {}
+    window._companyWatchUnsub = onSnapshot(
+        query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', window.myCompanyId)),
+        (snap) => {
+            const ids = snap.docs.map(d => d.id).sort().join('|');
+            const current = [...(window._myScopeKeys || [])].sort().join('|');
+            if (ids && ids !== current) window.refreshCompanyScope?.();
+        },
+        (err) => console.warn('company watch error:', err)
+    );
+};
+
 // 3. مزامنة البلاغات الميدانية الحية (نسخة الإنذار الذكي المفلتر)
 window._myScopeKeys = await window.getMyScopeKeys();
 const reportsListenerRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
 const reportsListenerQuery = (window.userRole === 'master')
     ? query(reportsListenerRef)
-    : query(reportsListenerRef, where('parentKey', 'in', window._myScopeKeys));
-onSnapshot(reportsListenerQuery, (snapshot) => {
+    : query(reportsListenerRef, where('parentKey', 'in', window._myScopeKeys.slice(0, 30)));
+window._reportsUnsub = onSnapshot(reportsListenerQuery, window._reportsHandler = (snapshot) => {
     
     snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
@@ -5106,7 +5850,7 @@ onSnapshot(reportsListenerQuery, (snapshot) => {
             // --- التعديل الجوهري: التحقق من التبعية ---
             // القائد لا يسمع الإنذار إلا إذا كان العضو يتبع له (parentKey)
             // المدير (Master) يسمع كافة الإنذارات
-            const shouldAlert = (window.userRole === 'master') || (data.parentKey === window.activeKey);
+            const shouldAlert = (window.userRole === 'master') || (window._myScopeKeys || [window.activeKey]).includes(data.parentKey);
             
             if (shouldAlert && data.priority === "high" && (Date.now() - data.timestamp) < 10000) {
                 const audio = document.getElementById('alertSound');
@@ -5135,8 +5879,8 @@ window.sendPushNotif(
 const filteredReports = window.userRole === 'master' 
         ? snapshot.docs.map(d => d.data()) 
         : snapshot.docs.map(d => d.data()).filter(r => 
-            r.parentKey === window.activeKey || 
-            window.teamMembers.some(m => m.parentKey === window.activeKey && m.id === r.parentKey)
+            (window._myScopeKeys || [window.activeKey]).includes(r.parentKey) || 
+            window.teamMembers.some(m => (window._myScopeKeys || [window.activeKey]).includes(m.parentKey) && m.id === r.parentKey)
           );
 
 
@@ -5168,15 +5912,19 @@ const filteredReports = window.userRole === 'master'
     // 4. مزامنة أعضاء الفريق (حسب الرتبة)
     const teamRef = collection(db, 'artifacts', appId, 'public', 'data', 'team_keys');
     const teamQuery = (window.userRole === 'leader' || window.userRole === 'sub')
-        ? query(teamRef, where("parentKey", "in", window._myScopeKeys || [window.activeKey]))
+        ? query(teamRef, where("parentKey", "in", (window._myScopeKeys || [window.activeKey]).slice(0, 30)))
         : teamRef;
 
-    onSnapshot(teamQuery, (snapshot) => {
+    window._teamUnsub = onSnapshot(teamQuery, window._teamHandler = (snapshot) => {
         window.teamMembers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (window.renderTeamTable) window.renderTeamTable();
         if (window.renderTeamExecStats) window.renderTeamExecStats();
         if (window.renderLeaderSidebar) window.renderLeaderSidebar();
     });
+
+    // شركة فيها أكثر من 30 قائداً: ربط المستمعين على دفعات
+    if (window.isCompanyOwner === true && (window._myScopeKeys || []).length > 30) window.refreshCompanyScope?.();
+    window.watchCompanyLeaders?.(); // تحديث لحظي عند إضافة/حذف قادة الشركة
 
     // 5. مزامنة المشتركين (للمدير فقط)
     if(window.userRole === 'master') {
@@ -6310,7 +7058,7 @@ window.showOnboardingTour = (role) => {
     };
     window.onboardPrev = () => { if (idx > 0) { idx--; render(); } };
     window.closeOnboardingTour = () => {
-        localStorage.setItem(key, '1');
+        window.savePref(key, '1');
         modal.classList.add('hidden');
     };
 
@@ -6706,7 +7454,12 @@ window.loadPendingRequests = async () => {
 
         <!-- الأزرار -->
         <div class="flex gap-3 pt-1">
-            ${r.type === 'renewal' ? `
+            ${r.type === 'device_reset' ? `
+            <button onclick="window.approveDeviceReset('${escJs(r.id)}', '${escJs(r.targetType || '')}', '${escJs(r.targetKey || '')}')"
+                class="flex-1 py-3 bg-sky-600 rounded-2xl font-black text-white text-sm hover:bg-sky-500 transition-all border-b-4 border-sky-900">
+                🔄 اعتماد التصفير
+            </button>
+            ` : r.type === 'renewal' ? `
             <button onclick="window.approveRenewal('${escJs(r.id)}', '${escJs(r.leaderKey || '')}')"
                 class="flex-1 py-3 bg-sky-600 rounded-2xl font-black text-white text-sm hover:bg-sky-500 transition-all border-b-4 border-sky-900">
                 🔄 اعتماد التجديد
@@ -6750,7 +7503,7 @@ window.approveRenewal = async (reqId, leaderKey) => {
     const group = base ? (window.subscribers || []).filter(s => (s.companyId || s.id) === cId) : [];
     window.showConfirm(
         "تجديد اشتراك الشركة",
-        `سيتم تمديد اشتراك ${group.length || 1} قائد سنة إضافية من تاريخ اليوم. متابعة؟`,
+        `سيتم تمديد اشتراك ${group.filter(s => s.isLeader !== false).length || 1} قائد سنة إضافية من تاريخ اليوم. متابعة؟`,
         async () => {
             try {
                 const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderKey));
@@ -6793,7 +7546,7 @@ window.approveRequest = async (reqId, name, phone) => {
 
     window.showConfirm(
         "اعتماد الطلب",
-        `اعتماد طلب ${name} وإرسال أكواد الدخول عبر البريد الإلكتروني؟`,
+        `اعتماد طلب ${name} وإرسال كود حساب الشركة عبر البريد الإلكتروني؟`,
         async () => {
             try {
                 // جلب بيانات الطلب كاملة
@@ -6815,28 +7568,31 @@ window.approveRequest = async (reqId, name, phone) => {
                 const companyName = (reqData.companyName || name || '').trim();
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', companyId), {
                     name: companyName, phone: phone || '', whatsapp: '', email: reqEmail,
-                    createdAt: Date.now(), planPrice: Number(reqData.price) || 0, packageId: reqData.packageId || null
+                    createdAt: Date.now(), planPrice: Number(reqData.price) || 0, packageId: reqData.packageId || null,
+                    maxLeaders: numLeaders,
+                    memberPool: Number(reqData.plan) || leadersData.reduce((s, l) => s + (Number(l.members) || 0), 0) || (numLeaders * 5)
                 });
 
                 // توليد كود لكل قائد وحفظه
                 const generatedKeys = [];
                 // حصة "المالك" الأصلية (كانت هتروح له) تُضاف لأول قائد ميداني حقيقي بدل ما تضيع، والمالك يصير بدون أعضاء (كيان إداري بحت)
                 const ownerReservedMembers = leadersData[0]?.members || reqData.plan || 5;
-                for (let i = 0; i < numLeaders; i++) {
+                for (let i = 0; i <= 0; i++) { // i=0: حساب الشركة (إداري)، ثم القادة الفعليون
                     const newKey = genKey();
+                    const _totp = (i === 0) ? generateRandomTOTPSecret() : null;
                     const isOwner = (i === 0); // أول قائد بالطلب = مالك الشركة
                     let membersForThisLeader;
                     if (isOwner) {
-                        membersForThisLeader = numLeaders > 1 ? 0 : ownerReservedMembers; // إذا ما في قادة حقيقيين غيره، يحتفظ بأعضائه استثنائياً
+                        membersForThisLeader = 0; // إذا ما في قادة حقيقيين غيره، يحتفظ بأعضائه استثنائياً
                     } else {
-                        membersForThisLeader = leadersData[i]?.members || reqData.plan || 5;
-                        if (i === 1) membersForThisLeader += ownerReservedMembers; // إضافة حصة المالك لأول قائد ميداني فعلي
+                        membersForThisLeader = leadersData[i - 1]?.members || reqData.plan || 5;
+                        // حصة المالك لم تعد تُحوَّل: حساب الشركة إضافي ولا يحتسب من القادة // إضافة حصة المالك لأول قائد ميداني فعلي
                     }
 
                     await setDoc(
                         doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey),
                         {
-                            ownerName: `${name} — قائد ${i + 1}`,
+                            ownerName: isOwner ? `${name} — حساب الشركة` : `${name} — قائد ${i}`,
                             phone: phone,
                             subKey: newKey,
                             isPaid: true,
@@ -6849,13 +7605,15 @@ window.approveRequest = async (reqId, name, phone) => {
                             companyId: companyId,
                             companyName: companyName,
                             isCompanyOwner: isOwner,
+                            isLeader: !isOwner,
+                            ...(isOwner ? { totpSecret: _totp } : {}),
                             paymentStatus: 'paid',
                             paymentMethod: reqData.payMethod || '',
                             pricePaid: isOwner ? (Number(reqData.price) || 0) : 0,
                             packageId: reqData.packageId || null
                         }
                     );
-                    generatedKeys.push({ leaderNum: i + 1, key: newKey, members: membersForThisLeader, isOwner });
+                    generatedKeys.push({ leaderNum: i, key: newKey, members: membersForThisLeader, isOwner, totp: _totp });
                 }
 
                 // تحديث حالة الطلب مع جميع الأكواد
@@ -6873,11 +7631,11 @@ window.approveRequest = async (reqId, name, phone) => {
                 // إرسال جميع الأكواد في إيميل واحد
                 if (reqEmail) {
                     const codesText = generatedKeys.map(g =>
-                        `قائد ${g.leaderNum}: ${g.key} (${g.members} عضو)`
+                        g.isOwner ? `حساب الشركة (إداري): ${g.key}\nمفتاح Google Authenticator (أضفه بـ«إدخال مفتاح الإعداد»، نوع: قائم على الوقت): ${g.totp}` : `قائد ${g.leaderNum}: ${g.key} (${g.members} عضو)`
                     ).join('\n');
 
                     const emailSent = await sendEmail('template_mf871pf', reqEmail, name, {
-                        activation_code: `أكواد القادة (${generatedKeys.length} قائد):\n\n${codesText}\n\nتاريخ الانتهاء: ${expiryDate}`
+                        activation_code: `كود حساب الشركة:\n\n${codesText}\n\nسعة اشتراككم: ${numLeaders} قائد.\nبعد الدخول بالكود يمكنكم إضافة قادتكم وأعضائكم من أيقونة «إدارة القادة والفريق» ضمن السقف المحدد لباقتكم.\n\nتاريخ الانتهاء: ${expiryDate}`
                     });
 
                     if (emailSent) {
@@ -6889,8 +7647,8 @@ window.approveRequest = async (reqId, name, phone) => {
                     window.showNotif(`⚠️ لا يوجد بريد إلكتروني — الأكواد محفوظة في النظام`, "error");
                 }
 
-                window.logActivity('approve', `تم اعتماد طلب: ${name} — ${generatedKeys.length} قائد`);
-                window.showNotif(`✅ تم اعتماد ${name} وتوليد ${generatedKeys.length} كود قائد`, "success");
+                window.logActivity('approve', `تم اعتماد طلب: ${name} — حساب شركة بسعة ${numLeaders} قائد`);
+                window.showNotif(`✅ تم اعتماد ${name} وتوليد كود حساب الشركة (سعة ${numLeaders} قائد)`, "success");
                 window.loadPendingRequests();
 
             } catch(e) {
@@ -7346,7 +8104,7 @@ window.openLeaderChat = (type) => {
         if (chatTitle) chatTitle.textContent = '📢 رسائل الدعم والصيانة - الإدارة';
         window.loadChatMessages('MASTER_BROADCAST');
         // مسح شارة الإشعار
-        localStorage.setItem('chat_seen_MASTER_BROADCAST', Date.now());
+        window.savePref('chat_seen_MASTER_BROADCAST', Date.now());
         const badge = document.getElementById('chatUnreadBadge');
         if (badge) badge.classList.add('hidden');
         const chatBadge = document.getElementById('chatBadge');
@@ -7418,7 +8176,7 @@ window.loadChatMessages = (roomKey = null) => {
             if (isOpen) {
                 // تحديث وقت القراءة
                 lastSeenTimestamp = Date.now();
-                localStorage.setItem(`chat_seen_${chatKey}`, lastSeenTimestamp);
+                window.savePref(`chat_seen_${chatKey}`, lastSeenTimestamp);
                 const badge = document.getElementById('chatUnreadBadge');
                 if (badge) badge.classList.add('hidden');
             }
@@ -7636,8 +8394,8 @@ window.refreshDashboard = async () => {
 
     // القائد يشوف فقط بيانات فريقه هو — مو بيانات النظام كامل
     if (isLeaderView) {
-        reports = reports.filter(r => r.parentKey === window.activeKey);
-        members = members.filter(m => m.parentKey === window.activeKey);
+        reports = reports.filter(r => (window._myScopeKeys || [window.activeKey]).includes(r.parentKey));
+        members = members.filter(m => (window._myScopeKeys || [window.activeKey]).includes(m.parentKey));
     }
 
     const high   = reports.filter(r => r.priority === 'high').length;
@@ -7860,7 +8618,7 @@ window.toggleTheme = () => {
     const isLight = document.body.classList.toggle('light-mode');
     const btn = document.getElementById('themeBtn');
     if (btn) btn.textContent = isLight ? '☀️' : '🌙';
-    localStorage.setItem('erg_theme', isLight ? 'light' : 'dark');
+    window.savePref('erg_theme', isLight ? 'light' : 'dark');
     window.showNotif(
         isLight ? 'تم التحويل للوضع الفاتح ☀️' : 'تم التحويل للوضع المظلم 🌙',
         'info'
@@ -7926,7 +8684,23 @@ window.idleUnlock = async () => {
     document.addEventListener(evt, window.resetIdleTimer, { passive: true });
 });
 
-window.goHome = async () => {
+
+
+window.goHome = () => {
+    // يعيد إلى سطح المكتب فقط — لا يسجّل الخروج أبداً
+    if (!document.body.classList.contains('desktop-active')) return; // قبل تسجيل الدخول لا شيء
+    // إغلاق نوافذ إدارة القادة المفتوحة عند الرجوع للرئيسية
+    window.closeAddLeaderModal?.(); window.closeLeaderEditModal?.();
+    document.querySelectorAll('.app-window').forEach(w => {
+        if (w.id !== 'os_desktop') w.classList.add('hidden');
+    });
+    document.getElementById('os_desktop')?.classList.remove('hidden');
+};
+
+
+
+// تسجيل الخروج — منفصل عن زر الرئيسية
+window.logoutSession = async () => {
     const fullLogout = () => {
         localStorage.removeItem('app_activation_key');
         window.activeSubKey = null;
@@ -7970,7 +8744,7 @@ window.goHome = async () => {
         }
     });
 
-    if (hasOpenApp) {
+    if (false) { // قديم: الرجوع لسطح المكتب انتقل إلى goHome
         document.querySelectorAll('.app-window').forEach(w => {
             if(w.id !== 'os_desktop') w.classList.add('hidden');
         });
@@ -8382,11 +9156,12 @@ ${r.notes ? `📝 *ملاحظات:* ${r.notes}` : ''}
 
 
 // ===== إشعارات الطوارئ للقائد =====
-window.listenLeaderEmergencies = (subKey) => {
+window.listenLeaderEmergencies = async (subKey) => {
+    const _evKeys = (window.isCompanyOwner === true && window.getMyScopeKeys) ? ((await window.getMyScopeKeys()) || [subKey]).slice(0, 30) : [subKey];
     try {
         const q = query(
             collection(db, 'artifacts', appId, 'public', 'data', 'emergency_reports'),
-            where('parentKey', '==', subKey),
+            where('parentKey', 'in', _evKeys),
             where('status', '==', 'new')
         );
         onSnapshot(q, snap => {
@@ -9881,6 +10656,10 @@ input:focus, select:focus, textarea:focus {
 }
 
 body:not(.desktop-active) #commandDeckBar { display: none !important; }
+#commandDeckBar { display: none !important; } /* إخفاء زر الرئيسية السفلي — يكفي زر الشريط العلوي */
+/* نوافذ الشركة/القائد: ابتعاد عن الشريط العلوي حتى لا يُقصّ الرأس */
+#companyDetailModal, #subDetailModal { padding-top: calc(5rem + var(--safe-top, 0px)); }
+#subDetailModal .member-detail-card { max-height: calc(100dvh - 6.5rem - var(--safe-top, 0px)); }
 body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 #radialTrigger {
@@ -11452,6 +12231,13 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 
         <div class="w-px h-6 bg-white/10"></div>
 
+        <button id="logoutBtn" onclick="window.logoutSession()" title="تسجيل الخروج"
+            class="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 hover:scale-110 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/25 text-rose-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/>
+            </svg>
+        </button>
+
         <button id="themeBtn" onclick="window.toggleTheme()" title="تبديل الوضع"
             class="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 hover:scale-110 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -11981,7 +12767,7 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
     </div>
     <div class="p-5 overflow-y-auto" style="max-height:calc(100vh - 100px);">
         <div id="myCompanyList" class="space-y-2"></div>
-        <p class="text-slate-600 text-[10px] text-center mt-4">لزيادة عدد القادة، يلزم تجديد أو ترقية باقة الاشتراك.</p>
+        <p class="text-slate-600 text-[10px] text-center mt-4">لزيادة عدد القادة أو الأعضاء تواصل مع الإدارة.</p>
     </div>
 </div>
 
@@ -11998,7 +12784,7 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 
 
 
-<div id="leaderEditModal" class="hidden fixed inset-0 z-[6100] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeLeaderEditModal()">
+<div id="leaderEditModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeLeaderEditModal()">
     <div class="w-full max-w-md rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
         <button onclick="window.closeLeaderEditModal()" class="member-detail-close">✕</button>
         <p class="member-detail-name mb-4">تعديل بيانات القائد</p>
@@ -12026,6 +12812,33 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
         </button>
     </div>
 </div>
+
+
+
+
+<div id="addLeaderModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeAddLeaderModal()">
+    <div class="w-full max-w-md rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
+        <button onclick="window.closeAddLeaderModal()" class="member-detail-close">✕</button>
+        <p class="member-detail-name mb-4">إضافة قائد جديد</p>
+        <div class="space-y-3">
+            <div>
+                <p class="lux-field-label">اسم القائد</p>
+                <input id="addLeader_name" type="text" class="erg-input lux-field-input text-right">
+            </div>
+            <div>
+                <p class="lux-field-label">عدد الأعضاء المخصص لهذا القائد</p>
+                <input id="addLeader_members" type="number" min="1" class="erg-input lux-field-input text-right">
+                <p id="addLeader_remaining" class="text-[11px] text-emerald-400 font-black mt-1">—</p>
+            </div>
+            <p class="text-slate-500 text-[11px]">سيُولَّد كود دخول للقائد تلقائياً ويظهر لك مرة واحدة بعد الحفظ.</p>
+        </div>
+        <button id="addLeader_saveBtn" onclick="window.saveNewLeader()" class="w-full mt-4 py-3 rounded-xl font-black text-xs text-emerald-300" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+            ＋ إنشاء القائد
+        </button>
+    </div>
+</div>
+
+
 
 <div id="winFinance" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
@@ -12282,6 +13095,13 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
                             <p class="lux-field-label">اسم القائد</p>
                             <input type="text" id="new_ln" placeholder="الاسم الكامل" class="erg-input lux-field-input text-right">
                         </div>
+                        <div id="accountTypeWrap">
+                            <p class="lux-field-label">نوع الحساب</p>
+                            <select id="new_l_accountType" class="erg-input lux-field-input text-right">
+                                <option value="leader">🎖️ قائد ميداني</option>
+                                <option value="company">🏢 حساب شركة (إداري، بدون أعضاء)</option>
+                            </select>
+                        </div>
                         <div id="linkCompanyFieldWrap">
                             <p class="lux-field-label">ربط بشركة موجودة (اختياري)</p>
                             <select id="new_l_linkCompany" onchange="window.toggleCompanyNameField()" class="erg-input lux-field-input text-right">
@@ -12380,9 +13200,9 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
             </div>
 
             <!-- نافذة تفاصيل القائد -->
-            <div id="subDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeSubDetailModal()">
+<div id="subDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.backFromSubDetail()">
                 <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
-                    <button onclick="window.closeSubDetailModal()" class="member-detail-close">✕</button>
+                    <button onclick="window.backFromSubDetail()" class="member-detail-close">✕</button>
 
                     <div class="member-detail-hero">
                         <div class="member-detail-avatar-ring">
@@ -12465,58 +13285,116 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 
 
 <div id="companyDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeCompanyDetailModal()">
-    <div class="w-full max-w-lg rounded-[28px] relative member-detail-card p-5" onclick="event.stopPropagation()">
-        <button onclick="window.closeCompanyDetailModal()" class="member-detail-close">✕</button>
-        <div class="text-right mb-4">
-            <p id="companyDetail_name" class="member-detail-name">—</p>
-            <p id="companyDetail_count" class="member-detail-sub">—</p>
-        </div>
-        <div id="companyDetail_info" class="mb-3"></div>
-        <div id="companyDetail_leadersList" class="space-y-2 max-h-[28vh] overflow-y-auto"></div>
-        <p class="text-slate-500 text-[10px] font-black uppercase mt-4 mb-2 text-right">🧾 سجل المدفوعات</p>
-        <div id="companyDetail_payments" class="space-y-1 max-h-[16vh] overflow-y-auto"></div>
-        <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)"
-            class="w-full mt-4 py-3.5 rounded-[var(--radius-sm)] font-black text-xs text-white transition-all active:scale-95"
-            style="background:linear-gradient(135deg,#059669,#047857); box-shadow:0 8px 20px rgba(5,150,105,0.35); border-bottom:2px solid #065f46;">
-            ➕ إضافة قائد لهذه الشركة
-        </button>
-        <div class="flex gap-2 mt-2">
-            <button onclick="window.toggleCompanyRename()"
-                class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-amber-300 transition-all active:scale-95"
-                style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4);">
-                ✏️ تعديل الاسم
-            </button>
-            <button onclick="window.toggleCompanyBilling()"
-                class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-cyan-300 transition-all active:scale-95"
-                style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
-                💵 الاشتراك والتمديد
-            </button>
-        </div>
-        <button onclick="window.deleteCompany()"
-            class="w-full mt-3 py-3 rounded-[var(--radius-sm)] font-black text-xs text-rose-400 transition-all active:scale-95"
-            style="background:transparent; border:1.5px dashed rgba(244,63,94,0.4);">
-            🗑️ حذف الشركة نهائياً
-        </button>
-        <div id="companyBillingWrap" class="hidden mt-3 space-y-2">
-            <div class="flex gap-2">
-                <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)"
-                    class="erg-input lux-field-input text-right flex-1">
-                <input type="date" id="companyBilling_expiry"
-                    class="erg-input lux-field-input text-right flex-1">
+    <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" style="padding:0; min-height:420px; max-height:calc(100dvh - 7.5rem - var(--safe-top, 0px)); overflow:hidden; display:flex; flex-direction:column;" onclick="event.stopPropagation()">
+        <button onclick="window.companyModalBack()" class="member-detail-close">✕</button>
+
+        <!-- الرأس -->
+        <div class="shrink-0 px-5 pt-5 pb-4" style="background:linear-gradient(135deg,rgba(245,158,11,0.16),rgba(99,102,241,0.10) 60%,transparent); border-bottom:1px solid rgba(255,255,255,0.07);">
+            <div class="flex items-center justify-between gap-3" style="padding-left:56px;">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div id="companyDetail_avatar" class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black text-white shrink-0"
+                        style="background:linear-gradient(135deg,rgba(245,158,11,0.45),rgba(99,102,241,0.35)); border:1px solid rgba(255,255,255,0.18); box-shadow:0 8px 22px rgba(0,0,0,0.35);">🏢</div>
+                    <div class="text-right min-w-0">
+                        <p id="companyDetail_name" class="member-detail-name truncate">—</p>
+                        <p id="companyDetail_count" class="member-detail-sub">—</p>
+                    </div>
+                </div>
+                <button id="companySettingsToggle" onclick="window.toggleCompanySettings()"
+                    class="shrink-0 px-4 py-2.5 rounded-xl font-black text-xs text-amber-300 transition-all active:scale-95"
+                    style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35);">⚙️ إعدادات الشركة</button>
             </div>
-            <button onclick="window.saveCompanyBilling()"
-                class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
-                style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
-                حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)
-            </button>
+            <div id="companyDetail_stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4"></div>
         </div>
-        <div id="companyRenameWrap" class="hidden mt-3 flex gap-2">
-            <input type="text" id="companyRename_input" placeholder="اسم الشركة الجديد"
-                class="erg-input lux-field-input text-right flex-1">
-            <button onclick="window.saveCompanyName()"
-                class="px-5 rounded-xl font-black text-xs text-emerald-300"
-                style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
-                حفظ
+
+        <!-- لوحة القادة (الافتراضية) -->
+        <div id="companyLeadersPane" class="flex flex-col flex-1 min-h-0 px-5 pt-4 pb-5">
+            <div class="flex items-center gap-2 mb-3 shrink-0">
+                <select id="companyLeadersFilter" onchange="window.renderCompanyLeaders(true)"
+                    class="erg-input border border-white/10 rounded-xl px-2 py-2.5 text-white text-[11px] font-black outline-none shrink-0" style="background:rgba(255,255,255,0.04);">
+                    <option value="all" style="background:#0f1420;">الكل</option>
+                    <option value="active" style="background:#0f1420;">نشط</option>
+                    <option value="expired" style="background:#0f1420;">منتهي</option>
+                </select>
+                <input type="text" id="companyLeadersSearch" oninput="window.renderCompanyLeaders(true)" placeholder="🔍 ابحث عن قائد..."
+                    class="erg-input flex-1 min-w-0 border border-white/10 rounded-xl px-3 py-2.5 text-white text-[11px] outline-none focus:border-indigo-500 text-right" style="background:rgba(255,255,255,0.04);">
+                <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)"
+                    class="shrink-0 px-4 py-2.5 rounded-xl font-black text-xs text-white transition-all active:scale-95"
+                    style="background:linear-gradient(135deg,#059669,#047857); box-shadow:0 6px 16px rgba(5,150,105,0.3);">➕ قائد</button>
+            </div>
+            <div id="companyDetail_leadersList" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start flex-1 min-h-0 overflow-y-auto custom-scrollbar"></div>
+            <button id="companyLeadersMore" onclick="window.companyLeadersShowMore()" class="hidden w-full mt-2 py-2 rounded-xl text-[11px] font-black text-indigo-300 shrink-0" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3);"></button>
+        </div>
+
+        <!-- لوحة إعدادات الشركة (تظهر بزر ⚙️) -->
+        <div id="companySettingsPane" class="hidden flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 pt-4 pb-5">
+            <div id="companyDetail_info" class="mb-3"></div>
+            <div class="flex gap-2">
+                <button onclick="window.toggleCompanyRename()"
+                    class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-amber-300 transition-all active:scale-95"
+                    style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4);">
+                    ✏️ تعديل بيانات الشركة
+                </button>
+                <button onclick="window.toggleCompanyBilling()"
+                    class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-cyan-300 transition-all active:scale-95"
+                    style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
+                    💵 الاشتراك والتمديد
+                </button>
+            </div>
+<button onclick="window.toggleCompanyQuota()"
+                class="w-full mt-2 py-3 rounded-[var(--radius-sm)] font-black text-xs text-emerald-300 transition-all active:scale-95"
+                style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3);">
+                🔢 سقوف القادة والأعضاء
+            </button>
+            <div id="companyQuotaWrap" class="hidden mt-3 space-y-2">
+                <p id="companyQuota_usage" class="text-[11px] text-slate-400 font-black text-right">—</p>
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <p class="lux-field-label">أقصى عدد قادة</p>
+                        <input type="number" min="0" id="companyQuota_leaders" class="erg-input lux-field-input text-right w-full">
+                    </div>
+                    <div class="flex-1">
+                        <p class="lux-field-label">إجمالي الأعضاء (الحصة)</p>
+                        <input type="number" min="0" id="companyQuota_pool" class="erg-input lux-field-input text-right w-full">
+                    </div>
+                </div>
+                <button onclick="window.saveCompanyQuota()"
+                    class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
+                    style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+                    حفظ السقوف
+                </button>
+            </div>
+            <div id="companyBillingWrap" class="hidden mt-3 space-y-2">
+                <div class="flex gap-2">
+                    <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)"
+                        class="erg-input lux-field-input text-right flex-1">
+                    <input type="date" id="companyBilling_expiry"
+                        class="erg-input lux-field-input text-right flex-1">
+                </div>
+                <button onclick="window.saveCompanyBilling()"
+                    class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
+                    style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+                    حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)
+                </button>
+            </div>
+            <div id="companyRenameWrap" class="hidden mt-3 space-y-2">
+    <input type="text" id="companyRename_input" placeholder="اسم الشركة"
+        class="erg-input lux-field-input text-right w-full">
+    <input type="tel" id="companyEditPhone_input" inputmode="tel" dir="ltr" placeholder="رقم الهاتف"
+        class="erg-input lux-field-input text-right w-full">
+    <input type="email" id="companyEditEmail_input" inputmode="email" dir="ltr" placeholder="البريد الإلكتروني"
+        class="erg-input lux-field-input text-right w-full">
+    <button onclick="window.saveCompanyName()"
+        class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
+        style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
+        حفظ البيانات
+    </button>
+</div>
+            <p class="text-slate-500 text-[10px] font-black uppercase mt-4 mb-2 text-right">🧾 سجل المدفوعات</p>
+            <div id="companyDetail_payments" class="space-y-1"></div>
+            <button onclick="window.deleteCompany()"
+                class="w-full mt-5 py-3 rounded-[var(--radius-sm)] font-black text-xs text-rose-400 transition-all active:scale-95"
+                style="background:transparent; border:1.5px dashed rgba(244,63,94,0.4);">
+                🗑️ حذف الشركة نهائياً
             </button>
         </div>
     </div>
@@ -12601,6 +13479,10 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
         <div class="flex flex-1 overflow-hidden">
             <!-- عمود شبكة القادة (للمدير فقط) -->
             <div id="leaderSidebarCol" class="hidden w-full sm:w-72 shrink-0 flex-col gap-4 p-5 overflow-y-auto custom-scrollbar" style="background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01)); border-left:1px solid rgba(245,158,11,0.15); box-shadow:inset -1px 0 0 rgba(255,255,255,0.03);">
+                <div id="teamCompanyBackBar" class="hidden items-center justify-between gap-2 px-3 py-2 rounded-2xl border border-indigo-400/30" style="background:rgba(99,102,241,0.12);">
+                    <button onclick="window.backToTeamCompanies()" class="text-[11px] font-black text-indigo-300 hover:text-white transition-all shrink-0">→ كل الشركات</button>
+                    <span id="teamCompanyBackName" class="text-[11px] font-black text-white truncate">🏢</span>
+                </div>
                 <input type="text" id="leaderSidebarSearch" oninput="window.renderLeaderSidebar()" placeholder="🔍 ابحث عن قائد..."
                     class="erg-input w-full border border-white/10 rounded-2xl px-4 py-3 text-white text-sm outline-none transition-all text-right"
                     style="background:rgba(0,0,0,0.4);">
@@ -12613,6 +13495,17 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 
             <!-- لوحة تفاصيل الفريق -->
             <div class="flex-1 flex flex-col overflow-hidden p-4 gap-3">
+                <!-- مرحلة الشركات (للمدير فقط): شبكة الشركات -->
+                <div id="teamCompanyStage" class="hidden flex-1 flex-col overflow-hidden gap-3">
+                    <div class="flex items-center gap-2 shrink-0">
+                        <input type="text" id="teamCompanySearch" oninput="window.renderTeamCompanyGrid()" placeholder="🔍 ابحث عن شركة..."
+                            class="erg-input flex-1 border border-white/10 rounded-2xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
+                            style="background:rgba(255,255,255,0.03);">
+                        <span id="teamCompanyCount" class="text-xs bg-indigo-500/25 text-indigo-300 px-3 py-2 rounded-full font-black border border-indigo-400/30 shrink-0">0 شركة</span>
+                    </div>
+                    <div id="teamCompanyGrid" class="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 content-start p-1"></div>
+                </div>
+
                 <div id="teamDetailEmptyState" class="hidden flex-1 flex-col items-center justify-center gap-3 opacity-50">
                     <div class="text-5xl">👈</div>
                     <p class="text-slate-400 text-sm font-bold">اختر قائداً من القائمة لعرض أعضاء فريقه</p>
