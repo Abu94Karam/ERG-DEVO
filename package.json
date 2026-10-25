@@ -1,0 +1,9 @@
+{
+  "name": "erg-login-api",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "otpauth": "^9.3.4"
+  }
+}
