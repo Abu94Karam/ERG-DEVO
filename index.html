@@ -1143,6 +1143,96 @@ window.rejectTrialByAdmin = async (phoneHash, name) => {
     });
 };
 
+
+
+
+// ===== الدخول عبر بوابة الخادم (Vercel) للقائد والعضو =====
+// مرحلة انتقالية: يعمل فقط إذا فُعّل للتجربة (localStorage.erg_srv_login = '1') أو إذا صارت القيمة الافتراضية true.
+// عند تعذّر الخادم (غير منشور/لا اتصال/خطأ 5xx) يرجع تلقائياً إلى الطريقة القديمة.
+window.SERVER_LOGIN_DEFAULT = false;
+
+window.askCompanyOtpCode = () => new Promise((resolve) => {
+    window._companyOtp = { collect: true, resolve };
+    const t = document.getElementById('otpModalTitle');
+    const s2 = document.getElementById('otpModalSubtitle');
+    if (t) t.textContent = '🛡️ تأكيد دخول الشركة';
+    if (s2) s2.textContent = 'أدخل الرمز من تطبيق Google Authenticator';
+    const inp = document.getElementById('otpInput');
+    if (inp) inp.value = '';
+    document.getElementById('otpModal')?.classList.replace('hidden', 'flex');
+    const watch = setInterval(() => {
+        if (!window._companyOtp) { clearInterval(watch); return; }
+        const m = document.getElementById('otpModal');
+        if (m && m.classList.contains('hidden')) {
+            clearInterval(watch);
+            const c = window._companyOtp; window._companyOtp = null; c.resolve(false);
+        }
+    }, 300);
+});
+
+window.serverLogin = async (type, key) => {
+    window._serverVerified = false;
+    let on = window.SERVER_LOGIN_DEFAULT === true;
+    try { if (localStorage.getItem('erg_srv_login') === '1') on = true; } catch (e) {}
+    if (!on) return 'legacy';
+
+    const callApi = async (otp) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        try {
+            const r = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type, key, deviceId: getDeviceId(), otp }),
+                signal: ctrl.signal
+            });
+            let j = {};
+            try { j = await r.json(); } catch (e) {}
+            return { status: r.status, body: j };
+        } finally { clearTimeout(timer); }
+    };
+
+    try {
+        let res = await callApi();
+        if (res.status === 200 && res.body && res.body.needOtp) {
+            const code = await window.askCompanyOtpCode();
+            if (!code) return 'fail';
+            res = await callApi(code);
+        }
+        if (res.status === 200 && res.body && res.body.ok && res.body.token) {
+            await signInWithCustomToken(auth, res.body.token);
+            window._serverVerified = true;
+            return 'ok';
+        }
+        if (res.status === 401 || res.status === 403 || res.status === 429) {
+            const e = (res.body && res.body.error) || '';
+            const msgs = {
+                invalid: type === 'leader' ? 'كود القائد غير صحيح' : 'كود العضو غير صحيح',
+                inactive: '⛔ الاشتراك غير مفعل أو منتهي',
+                expired: '⛔ الاشتراك غير مفعل أو منتهي',
+                device_limit: '⛔ تم الوصول للحد الأقصى من الأجهزة (2). تواصل مع الإدارة.',
+                device_locked: '⛔ الكود مقفل على جهاز آخر. تواصل مع الإدارة.',
+                bad_otp: '⛔ رمز المصادقة غير صحيح',
+                no_totp: '⛔ لم يُفعَّل مفتاح المصادقة لهذه الشركة. تواصل مع الإدارة.',
+                too_many_attempts: '⛔ محاولات خاطئة كثيرة. أعد المحاولة بعد ' + ((res.body && res.body.retryAfter) || 900) + ' ثانية'
+            };
+            if (e === 'invalid' || e === 'bad_otp') window._loginGuard.fail();
+            const msgLabel = document.getElementById('loginMsg');
+            if (msgLabel) msgLabel.innerText = msgs[e] || '⛔ تعذّر الدخول';
+            window.showNotif(msgs[e] || '⛔ تعذّر الدخول', 'error');
+            return 'fail';
+        }
+        return 'legacy';   // 404 / 5xx / رد غير مفهوم → الطريقة القديمة
+    } catch (e) {
+        console.warn('serverLogin fallback:', e && e.message);
+        return 'legacy';   // لا اتصال بالخادم → الطريقة القديمة
+    }
+};
+
+
+
+
+
 // رمز المصادقة الثنائية لحساب الشركة (Google Authenticator)
 window.requestCompanyOtp = (secret) => new Promise((resolve) => {
     window._companyOtp = { secret, resolve };
@@ -1240,6 +1330,8 @@ window.activateApp = async () => {
         // === مسار القائد فقط ===
         if (loginType === 'leader') {
             const inputHash = await hashInput(key, MASTER_SALT);
+const _sv = await window.serverLogin('leader', key);
+            if (_sv === 'fail') return;
             let subRef = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', inputHash || "NO_HASH");
             let subSnap = await getDoc(subRef);
 
@@ -1257,7 +1349,7 @@ window.activateApp = async () => {
                 }
 
                 // تأكيد ثانٍ لحساب الشركة الإداري برمز Google Authenticator
-                if (subData.isCompanyOwner === true && subData.isLeader === false) {
+                if (!window._serverVerified && subData.isCompanyOwner === true && subData.isLeader === false) {
                     if (!subData.totpSecret) {
                         window.showNotif("⛔ لم يُفعَّل مفتاح المصادقة لهذه الشركة. تواصل مع الإدارة.", "error");
                         if (loginBtn) { loginBtn.textContent = 'دخول ←'; loginBtn.removeAttribute('disabled'); }
@@ -1307,6 +1399,8 @@ window.activateApp = async () => {
         // === مسار العضو الميداني فقط ===
         if (loginType === 'member') {
             const inputHash = await hashInput(key, MASTER_SALT);
+const _sv = await window.serverLogin('member', key);
+            if (_sv === 'fail') return;
             let memRef = doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', inputHash || "NO_HASH");
             let memSnap = await getDoc(memRef);
 
@@ -1589,6 +1683,13 @@ window.verifyOTP = async () => {
     // مسار رمز حساب الشركة
     if (window._companyOtp) {
         const c = window._companyOtp;
+if (c.collect) {
+            window._companyOtp = null;
+            document.getElementById('otpModal').classList.replace('flex', 'hidden');
+            document.getElementById('otpInput').value = '';
+            c.resolve(code);
+            return;
+        }
         const totpC = new OTPAuth.TOTP({ secret: c.secret, algorithm: "SHA1", digits: 6, period: 30 });
         if (totpC.validate({ token: code, window: 2, timestamp: window.getTotpNow() }) !== null) {
             window._companyOtp = null;
@@ -1679,7 +1780,10 @@ window.sendEmergencyReport = async () => {
         unNum,
         priority: (level === 'عالي' || level === 'حرج') ? 'high' : 'normal',
         notes,
-        location: loc,
+                location: loc,
+        coords: loc ? { lat: loc.lat, lng: loc.lng } : null,
+        un: unNum,
+        material: material,
         parentKey: window.activeParentKey || '',
         timestamp: Date.now(),
         status: 'new',
@@ -8831,6 +8935,7 @@ window.logoutSession = async () => {
         if(inputField) inputField.value = '';
 
         document.body.classList.remove('desktop-active');
+if (window._serverVerified) { try { signOut(auth); } catch (e) {} }
         window.showNotif("تم تصفير الجلسة بنجاح", "success");
         setTimeout(() => { location.reload(); }, 1000);
     };
@@ -9280,7 +9385,8 @@ window.listenLeaderEmergencies = async (subKey) => {
     const _evKeys = (window.isCompanyOwner === true && window.getMyScopeKeys) ? ((await window.getMyScopeKeys()) || [subKey]).slice(0, 30) : [subKey];
     try {
         const q = query(
-            collection(db, 'artifacts', appId, 'public', 'data', 'emergency_reports'),
+            collection(db, 'artifacts', appId, 'public', 'data', 'reports'),
+            where('type', '==', 'emergency'),
             where('parentKey', 'in', _evKeys),
             where('status', '==', 'new')
         );
@@ -9290,7 +9396,7 @@ window.listenLeaderEmergencies = async (subKey) => {
                     const d = change.doc.data();
                     const age = Date.now() - (d.timestamp || 0);
                     if (age < 30000) { // فقط البلاغات الجديدة خلال 30 ثانية
-                        window.showNotif(`🚨 بلاغ طارئ من ${d.memberName} — ${d.material}`, "error");
+                        window.showNotif(`🚨 بلاغ طارئ من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
                         // إضافة شارة على زر البلاغات
                         const badge = document.getElementById('emergencyBadge');
                         if (badge) { badge.classList.remove('hidden'); }
