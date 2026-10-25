@@ -1740,7 +1740,8 @@ if (c.collect) {
 
 
 // ===== نظام البلاغات الطارئة =====
-window.openEmergencyReport = () => {
+window.openEmergencyReport = () => window.sendFieldReport({ quick: true });
+window._legacyOpenEmergencyReport = () => {
     const modal = document.getElementById('winEmergencyReport');
     if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
     // تحديد المادة الحالية إن وجدت
@@ -5664,7 +5665,7 @@ const myReports = window.userRole === 'master'
     
     if (window.allReports && window.allReports.length > 0) {
         reportsToShow.forEach(r => {
-            if (r.coords && r.coords.lat && r.coords.lng) {
+     if (r.coords && r.coords.lat && r.coords.lng && !(r.status === 'ended' && Date.now() - (r.timestamp || 0) > 86400000)) {
                 // تحديد لون النقطة حسب الخطورة
                 const markerColor = r.priority === 'high' ? '#e11d48' : '#06b6d4'; // أحمر أو سيان
                 
@@ -5784,13 +5785,135 @@ window.genAutoKey = (t) => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let k
         window.exportRegistryBackup = async () => { const b = new Blob([JSON.stringify({ registry: window.appData, subscribers: window.subscribers, timestamp: Date.now() }, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `ERG_BACKUP.json`; a.click(); };
         
 
+// ===== البلاغ الميداني المباشر: إرسال الموقع + بلاغ للقائد المسؤول + بث حي (زر موحّد) =====
+window._fieldReportId = null;
+window._fieldReportRef = null;
+window._fieldReportQuick = false;
+
+window.setReportPriority = (p) => {
+    const hid = document.getElementById('repPrioritySelect');
+    if (hid) hid.value = p;
+    const hi = document.getElementById('repPrioHigh');
+    const no = document.getElementById('repPrioNormal');
+    const on = (el, bg, bd) => { if (el) { el.style.background = bg; el.style.borderColor = bd; el.style.color = '#fff'; } };
+    const off = (el) => { if (el) { el.style.background = 'rgba(255,255,255,0.05)'; el.style.borderColor = 'rgba(255,255,255,0.12)'; el.style.color = '#94a3b8'; } };
+    if (p === 'high') { on(hi, 'rgba(220,38,38,0.85)', '#ef4444'); off(no); }
+    else { off(hi); on(no, 'rgba(16,185,129,0.85)', '#10b981'); }
+};
+
+window._fieldReportUI = (active) => {
+    const btn = document.getElementById('btnLiveReport');
+    const chip = document.getElementById('fieldReportStatus');
+    if (btn) {
+        btn.innerHTML = active ? '🛑 إيقاف البلاغ والبث' : '🚨 إرسال البلاغ وبث موقعي';
+        btn.style.background = active ? 'linear-gradient(135deg,#475569,#334155)' : 'linear-gradient(135deg,#b91c1c,#dc2626)';
+        btn.style.borderBottomColor = active ? '#1e293b' : '#7f1d1d';
+        btn.classList.toggle('animate-pulse', !active);
+    }
+    if (chip) {
+        chip.textContent = active ? '🟢 البث نشط' : '⚪ غير نشط';
+        chip.style.background = active ? 'rgba(16,185,129,0.18)' : 'rgba(148,163,184,0.15)';
+        chip.style.color = active ? '#34d399' : '#94a3b8';
+    }
+};
+
+window.sendFieldReport = async (opts = {}) => {
+    // الضغط أثناء البث = إيقاف
+    if (window._fieldReportId) { await window._stopFieldReport(); return; }
+    if (!auth.currentUser || !window.activeKey) { window.showNotif('⛔ سجّل الدخول أولاً', 'error'); return; }
+
+    // القائد المسؤول: العضو → قائده، القائد → نفسه (وتصل لشركته عبر نطاقها)، المدير → MASTER
+    const role = window.userRole;
+    const parentKey = role === 'member' ? (window.activeParentKey || '') : (role === 'leader' ? window.activeKey : 'MASTER');
+    if (!parentKey) { window.showNotif('⛔ حسابك غير مرتبط بقائد، تواصل مع الإدارة.', 'error'); return; }
+
+    // الزر العائم: تأكيد واحد لتفادي الضغط بالخطأ
+    if (opts.quick && !opts.confirmed) {
+        window.showConfirm('🚨 بلاغ ميداني مباشر', 'سيُرسل موقعك الآن لقائدك المسؤول ويُبثّ حتى تُوقفه. هل تريد المتابعة؟',
+            () => window.sendFieldReport({ quick: true, confirmed: true }));
+        return;
+    }
+
+    window._fieldReportQuick = !!opts.quick;
+    const priority = opts.quick ? 'high' : (document.getElementById('repPrioritySelect')?.value || 'high');
+    const notes = document.getElementById('repNotes')?.value?.trim() || '';
+    const mat = window.activeMaterial;
+    const materialName = mat ? (mat.name || mat.NAME || 'غير محددة') : 'غير محددة';
+    const un = mat ? (mat.un || mat.UN || '—') : '—';
+    const memberName = role === 'member' ? (window.myMemberName || 'عضو ميداني')
+        : (role === 'leader' ? (window.myLeaderName || 'القائد') : 'الإدارة');
+
+    if (!navigator.geolocation) window.showNotif('⚠️ جهازك لا يدعم تحديد الموقع، سيُرسل البلاغ بدونه', 'error');
+    else window.showNotif('📍 جاري تحديد موقعك...', 'info');
+    const first = navigator.geolocation
+        ? await new Promise(res => navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }))
+        : null;
+    const pt = (p) => p ? { lat: p.coords.latitude, lng: p.coords.longitude } : null;
+    const c0 = pt(first);
+
+    const now = Date.now();
+    const id = `${window.activeKey}_${now}`;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', id);
+    try {
+        await setDoc(ref, {
+            type: 'emergency', status: 'new', priority, notes, materialName, un, memberName,
+            memberKey: window.activeKey, parentKey,
+            coords: c0, location: c0 ? { ...c0, acc: first.coords.accuracy } : null,
+            startedAt: now, timestamp: now
+        });
+    } catch (e) {
+        console.error('field report failed:', e);
+        window.showNotif('❌ تعذّر إرسال البلاغ، تحقق من الاتصال وأعد المحاولة', 'error');
+        return;
+    }
+    window._fieldReportId = id;
+    window._fieldReportRef = ref;
+    window._fieldReportUI(true);
+    window.showNotif(c0 ? '🚨 تم إرسال البلاغ وموقعك لقائدك، والبث مستمر' : '⚠️ أُرسل البلاغ بدون موقع — فعّل GPS ثم أعد الإرسال', c0 ? 'success' : 'error');
+    if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+
+    // البث الحي: تحديث الموقع في نفس البلاغ (بحد أقصى مرة كل 10 ثوانٍ لتوفير الحصة والبطارية)
+    if (c0) {
+        let last = now;
+        window.activeTrackingId = navigator.geolocation.watchPosition(async (pos) => {
+            const t = Date.now();
+            if (t - last < 10000) return;
+            last = t;
+            const c = pt(pos);
+            try {
+                await setDoc(ref, {
+                    coords: c, location: { ...c, acc: pos.coords.accuracy }, timestamp: t,
+                    priority: window._fieldReportQuick ? 'high' : (document.getElementById('repPrioritySelect')?.value || priority),
+                    notes: document.getElementById('repNotes')?.value?.trim() || notes
+                }, { merge: true });
+            } catch (e) { console.warn('field report update failed'); }
+        }, () => {
+            window.showNotif('⚠️ فقدان إشارة GPS — يبقى البلاغ بآخر موقع معروف', 'error');
+        }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+    }
+};
+
+window._stopFieldReport = async () => {
+    if (window.activeTrackingId != null) { try { navigator.geolocation.clearWatch(window.activeTrackingId); } catch (e) {} }
+    window.activeTrackingId = null;
+    const ref = window._fieldReportRef;
+    window._fieldReportId = null;
+    window._fieldReportRef = null;
+    window._fieldReportUI(false);
+    try { if (ref) await setDoc(ref, { status: 'ended', endedAt: Date.now() }, { merge: true }); } catch (e) {}
+    window.showNotif('تم إيقاف البلاغ والبث الحي', 'info');
+};
+
+// توافق مع أي استدعاء قديم
+window.sendLiveReport = (...a) => window.sendFieldReport(...a);
+
 
 
 
 
 window.activeTrackingId = null; // متغير لحفظ حالة التتبع
 
-window.sendLiveReport = async () => {
+window._oldSendLiveReport = async () => {
     if(!window.activeMaterial || !auth.currentUser) return;
     
     const btn = document.getElementById('btnLiveReport'); // يجب إعطاء الزر هذا الـ ID
@@ -7235,7 +7358,7 @@ window.ERG_ONBOARD_STEPS = {
     ],
     member: [
         {icon:'👤', title:'أهلاً بك', desc:'هذي شاشتك الرئيسية للعمل الميداني ووصول سريع لكل أدواتك.'},
-        {icon:'🚨', title:'البلاغ الطارئ', desc:'استخدم الزر العائم لإرسال بلاغ طارئ فوري لقائدك.'},
+        {icon:'🚨', title:'البلاغ الميداني المباشر', desc:'اضغط الزر العائم لإرسال موقعك وبلاغك فوراً لقائدك المسؤول، ويستمر البث حتى توقفه.'},
         {icon:'📚', title:'المواد والدليل', desc:'راجع بيانات المواد الخطرة وخطط الإخلاء بأي وقت تحتاجه.'}
     ]
 };
@@ -9394,9 +9517,10 @@ window.listenLeaderEmergencies = async (subKey) => {
             snap.docChanges().forEach(change => {
                 if (change.type === 'added') {
                     const d = change.doc.data();
-                    const age = Date.now() - (d.timestamp || 0);
+                    const age = Date.now() - (d.startedAt || d.timestamp || 0);
+                    if (d.memberKey && d.memberKey === window.activeKey) return;   // لا تُنبّه صاحب البلاغ نفسه
                     if (age < 30000) { // فقط البلاغات الجديدة خلال 30 ثانية
-                        window.showNotif(`🚨 بلاغ طارئ من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
+                    window.showNotif(`${d.priority === 'high' ? '🚨 بلاغ عاجل' : '📡 بلاغ ميداني'} من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
                         // إضافة شارة على زر البلاغات
                         const badge = document.getElementById('emergencyBadge');
                         if (badge) { badge.classList.remove('hidden'); }
@@ -11827,50 +11951,58 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                             <div class="text-right flex-1 w-full">
                                 <div id="resForm" class="text-2xl md:text-3xl font-black text-blue-400 mb-2 tracking-[0.2em] uppercase italic">--</div>
                                 <h2 id="resN" class="text-4xl md:text-6xl font-black text-white italic leading-tight mb-8">اسم المادة</h2>
-                                <div class="flex flex-wrap gap-4">
-                                    <button onclick="window.viewGuide()" class="px-8 py-5 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-xl border-b-4 border-blue-900 active:translate-y-1 transition-all">
-                                        📖 إجراءات الدليل (GUIDE <span id="resGuideNum">--</span>)
-                                    </button>
-                                    <button onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
-                                        class="px-6 py-5 rounded-2xl font-black text-sm shadow-xl border-b-4 active:translate-y-1 transition-all"
-                                        style="background:rgba(139,92,246,0.8); border-bottom-color:#4c1d95; color:white;">
-                                        📱 QR Code
-                                    </button>
-                                    <button onclick="window.exportFullIncidentPDF()"
-                                        class="px-6 py-5 rounded-2xl font-black text-sm shadow-xl border-b-4 active:translate-y-1 transition-all"
-                                        style="background:rgba(220,38,38,0.8); border-bottom-color:#7f1d1d; color:white;">
-                                        📄 تقرير PDF
-                                    </button>
+                                <div class="w-full flex flex-col gap-4">
 
-
-
-
-<div class="flex flex-col gap-3 w-full md:w-auto">
-    <div class="flex gap-3">
-        <select id="repPrioritySelect"
-            class="bg-black/60 border border-white/10 rounded-2xl px-4 py-3
-                   text-white font-black text-sm outline-none focus:border-emerald-500 transition-all">
-            <option value="high">⚠️ عاجل</option>
-            <option value="normal">✅ عادي</option>
-        </select>
-        <button id="btnLiveReport" onclick="window.sendLiveReport()"
-            class="px-8 py-3 bg-emerald-600 text-white rounded-2xl font-black text-sm
-                   shadow-xl border-b-4 border-emerald-900 active:translate-y-1
-                   transition-all hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
-            📡 بث GPS
+    <!-- إجراءات المادة -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <button onclick="window.viewGuide()"
+            class="col-span-2 px-6 py-5 rounded-2xl font-black text-sm md:text-base text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
+            style="background:linear-gradient(135deg,#2563eb,#1d4ed8); border-bottom-color:#1e3a8a;">
+            📖 إجراءات الدليل (GUIDE <span id="resGuideNum">--</span>)
+        </button>
+        <button onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
+            class="px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
+            style="background:rgba(139,92,246,0.85); border-bottom-color:#4c1d95;">
+            📱 QR Code
+        </button>
+        <button onclick="window.exportFullIncidentPDF()"
+            class="px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
+            style="background:rgba(220,38,38,0.85); border-bottom-color:#7f1d1d;">
+            📄 تقرير PDF
         </button>
     </div>
-    <input id="repNotes" type="text" placeholder="ملاحظات اختيارية..."
-        class="bg-black/60 border border-white/10 rounded-2xl px-4 py-3
-               text-white text-sm font-bold italic outline-none
-               focus:border-emerald-500 transition-all text-right">
+
+    <!-- البلاغ الميداني المباشر -->
+    <div id="fieldReportCard" class="w-full rounded-3xl p-5 flex flex-col gap-4 text-right"
+         style="background:linear-gradient(135deg,rgba(220,38,38,0.12),rgba(0,0,0,0.45)); border:1px solid rgba(220,38,38,0.35);">
+        <div class="flex items-start justify-between gap-3">
+            <span id="fieldReportStatus" class="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-full"
+                  style="background:rgba(148,163,184,0.15); color:#94a3b8;">⚪ غير نشط</span>
+            <div class="text-right">
+                <p class="text-white font-black text-base">🚨 بلاغ ميداني مباشر</p>
+                <p class="text-rose-200/60 text-[11px] font-bold mt-1">يُرسل موقعك والمادة لقائدك المسؤول فوراً، ويبثّ حركتك حتى تُوقفه، وتصل نسخة لشركتك.</p>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="repPrioHigh" onclick="window.setReportPriority('high')"
+                class="py-3 rounded-2xl font-black text-sm transition-all border"
+                style="background:rgba(220,38,38,0.85); border-color:#ef4444; color:#fff;">⚠️ عاجل</button>
+            <button type="button" id="repPrioNormal" onclick="window.setReportPriority('normal')"
+                class="py-3 rounded-2xl font-black text-sm transition-all border"
+                style="background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.12); color:#94a3b8;">✅ عادي</button>
+        </div>
+        <input type="hidden" id="repPrioritySelect" value="high">
+        <input id="repNotes" type="text" placeholder="ملاحظات اختيارية (عدد المصابين، نوع التسرب...)"
+            class="w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-rose-500 transition-all text-right">
+        <button id="btnLiveReport" onclick="window.sendFieldReport()"
+            class="w-full py-4 rounded-2xl font-black text-white text-base border-b-4 active:translate-y-1 transition-all animate-pulse"
+            style="background:linear-gradient(135deg,#b91c1c,#dc2626); border-bottom-color:#7f1d1d; box-shadow:0 6px 25px rgba(220,38,38,0.35);">
+            🚨 إرسال البلاغ وبث موقعي
+        </button>
+    </div>
+</div>
 </div>
 
-
-
-
-                                </div>
-                            </div>
                             <div class="text-center bg-black/60 p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner min-w-[280px]">
                                 <span class="text-[12px] text-rose-500 block mb-2 font-black uppercase tracking-widest italic opacity-80">UN Identifier</span>
                                 <span id="resU" class="text-7xl md:text-9xl font-black text-white italic tracking-tighter block mb-6">0000</span>
@@ -12806,7 +12938,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(220,38,38,0.2);">
                 <span style="font-size:1.5rem;">🚨</span>
             </div>
-            <span class="text-rose-400 text-xs font-black text-center">بلاغ طارئ</span>
+            <span class="text-rose-400 text-xs font-black text-center">بلاغ ميداني مباشر</span>
         </button>
 
         <!-- سجل البلاغات -->
