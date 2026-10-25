@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 
 
@@ -361,6 +361,7 @@ window.resetPackageForm = () => {
     document.getElementById('pkgLeaders').value = 1;
     document.getElementById('pkgMembers').value = 5;
     document.getElementById('pkgPrice').value = '';
+    document.getElementById('pkgCodeChanges').value = 1;
     document.getElementById('pkgFeatured').checked = false;
     window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = false; });
 };
@@ -373,13 +374,13 @@ window.savePackageForm = async () => {
     const membersPerLeader = parseInt(document.getElementById('pkgMembers')?.value) || 5;
     const price = parseInt(document.getElementById('pkgPrice')?.value) || 0;
     const featured = document.getElementById('pkgFeatured')?.checked || false;
-
+    const leaderCodeChanges = Math.max(0, parseInt(document.getElementById('pkgCodeChanges')?.value) || 0);
     const features = {};
     window.FEATURE_CATALOG.forEach(f => { features[f] = document.getElementById('pkgFeat_' + f)?.checked || false; });
 
     if (!title || !price) return window.showNotif('يرجى تعبئة اسم الباقة والسعر', 'error');
 
-    const data = { title, badge, leadersCount, membersPerLeader, price, featured, features, active: true, updatedAt: Date.now() };
+       const data = { title, badge, leadersCount, membersPerLeader, price, featured, features, leaderCodeChanges, active: true, updatedAt: Date.now() };
 
     try {
         if (editId) {
@@ -405,6 +406,7 @@ window.editPackageStart = (id) => {
     document.getElementById('pkgLeaders').value = p.leadersCount || 1;
     document.getElementById('pkgMembers').value = p.membersPerLeader || 5;
     document.getElementById('pkgPrice').value = p.price || '';
+    document.getElementById('pkgCodeChanges').value = p.leaderCodeChanges ?? 0;
     document.getElementById('pkgFeatured').checked = !!p.featured;
     window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = !!(p.features && p.features[f]); });
 };
@@ -439,7 +441,7 @@ window.renderAdminPackagesList = () => {
             </div>
             <div class="text-right">
                 <p class="text-white font-black text-sm">${esc(p.title)} ${p.featured ? '⭐' : ''}</p>
-                <p class="text-slate-500 text-[10px]">${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء — <span class="text-emerald-400 font-black">${p.price}$</span></p>
+                <p class="text-slate-500 text-[10px]">${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء · ${p.leaderCodeChanges ?? 0} تغيير كود — <span class="text-emerald-400 font-black">${p.price}$</span></p>
                 <p class="text-slate-600 text-[9px] mt-1">${window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ') || 'مزايا أساسية فقط'}</p>
             </div>
         </div>
@@ -1382,7 +1384,7 @@ window.activateAppByEmail = async () => {
 
         if (m.role === 'master') {
             window.activeKey = 'MASTER_SESSION';
-            return window.launchOS('master', 'MASTER_SESSION', 'دخول الإدارة');
+        return window.launchOS('master', 'MASTER_SESSION', 'دخول الإدارة');
         }
         if (m.role === 'leader') {
             const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', m.docId));
@@ -1732,7 +1734,7 @@ window.renderSubTable = () => {
                 const fl = c.leaders.filter(l => l.isLeader !== false);
                 const al = fl.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
                 return (c.maxLeaders !== undefined || c.memberPool !== undefined)
-                    ? `${fl.length} / ${c.maxLeaders ?? fl.length} قائد · ${al} / ${c.memberPool ?? al} عضو`
+                                        ? `${fl.length} قائد (الحد ${c.maxLeaders ?? fl.length}) · ${al} عضو (الحد ${c.memberPool ?? al})`
                     : `${fl.length} قائد · ${totalMembers} عضو`;
             })()}</p>
             <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black ${allExpired ? 'bg-slate-500/20 text-slate-400 border border-slate-400/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-400/30'}">
@@ -2622,8 +2624,20 @@ window.renderTeamTable = () => {
     let currentTeam = window.teamMembers.filter(m => m.parentKey === targetLeader);
 
     // تحديث الإحصائيات (يعمل حتى لو الفريق فارغ) — قبل فلترة البحث
-    const targetSub = (window.subscribers || []).find(s => s.id === targetLeader);
-    const maxM = parseInt(targetSub?.maxMembers || 0);
+    const targetSub = (window._teamScopeLeaders || window.subscribers || []).find(s => s.id === targetLeader);
+    let maxM = parseInt(targetSub?.maxMembers || 0);
+    if (!targetSub && targetLeader) {
+        // القائد العادي: قائمة القادة غير محمّلة عنده، فنقرأ حصته من مستنده مرة واحدة ونحتفظ بها
+        const cached = (window._capCache || {})[targetLeader];
+        if (cached !== undefined) maxM = cached;
+        else if (!window._capLoading) {
+            window._capLoading = true;
+            getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', targetLeader))
+                .then(s => { window._capCache = window._capCache || {}; window._capCache[targetLeader] = s.exists() ? (parseInt(s.data().maxMembers) || 0) : 0; })
+                .catch(() => { window._capCache = window._capCache || {}; window._capCache[targetLeader] = 0; })
+                .finally(() => { window._capLoading = false; window.renderTeamTable(); });
+        }
+    }
     const total = currentTeam.length;
     const totalEl = document.getElementById('team_stat_total');
     const activeEl = document.getElementById('team_stat_active');
@@ -3303,7 +3317,7 @@ window.manageLeaderTeam = (leaderId, leaderName) => {
     // تحديث عنوان نافذة الفريق ليوضح اسم القائد
     const headerTitle = document.getElementById('teamWinTitle');
     if (headerTitle) {
-        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${leaderName}</span>`;
+        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${esc(leaderName)}</span>`;
     }
 
     if (window.userRole === 'master') {
@@ -3479,6 +3493,7 @@ const totpDisplay = document.getElementById('totpSecretDisplay');
 
 
 
+
 window.generateNewTOTPSecret = async () => {
     window.showConfirm(
         "توليد سر OTP جديد",
@@ -3539,7 +3554,7 @@ window.updateMasterSecurity = async () => {
         // 1. توليد "ملح" (Salt) عشوائي جديد كلياً
         const array = new Uint8Array(16);
         window.crypto.getRandomValues(array);
-        const newSalt = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+        const newSalt = MASTER_SALT || Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
 
         // 2. تشفير الشفرة الجديدة التي كتبها المدير مع الملح الجديد
         const newHash = await hashInput(newKey, newSalt);
@@ -3883,35 +3898,65 @@ window.renderCompanyLeaders = (reset) => {
     const flt = document.getElementById('companyLeadersFilter')?.value || 'all';
     const now = new Date();
     const isExp = l => !!(l.expiryDate && new Date(l.expiryDate) < now);
-
+ 
     // عدد الأعضاء الفعلي لكل قائد (مرور واحد على الأعضاء)
     const counts = {};
     (window.teamMembers || []).forEach(m => { counts[m.parentKey] = (counts[m.parentKey] || 0) + 1; });
-
-    // الرأس: الشعار + مؤشرات الشركة
+ 
+    // مؤشرات الشركة (حساب الشركة لا يُحسب قائداً ولا من الحصة)
     const fieldLeaders = c.leaders.filter(l => l.isLeader !== false);
     const total = fieldLeaders.length;
     const expiredCount = fieldLeaders.filter(isExp).length;
-    let used = 0, cap = 0;
-    fieldLeaders.forEach(l => { used += counts[l.id] || 0; cap += parseInt(l.maxMembers || 5); });
+    let used = 0, allocated = 0;
+    fieldLeaders.forEach(l => { used += counts[l.id] || 0; allocated += parseInt(l.maxMembers) || 0; });
+    const maxL = (c.maxLeaders !== undefined && c.maxLeaders !== null) ? Number(c.maxLeaders) : null;
+    const pool = (c.memberPool !== undefined && c.memberPool !== null) ? Number(c.memberPool) : null;
+    const owner = c.leaders.find(l => l.isCompanyOwner === true) || fieldLeaders[0] || null;
+    const expiry = owner?.expiryDate || '';
+    const daysLeft = expiry ? Math.ceil((new Date(expiry) - now) / 86400000) : null;
+ 
+    // الرأس: الشعار + الحالة
     const av = document.getElementById('companyDetail_avatar');
     if (av) av.textContent = String(c.name || '؟').trim().charAt(0).toUpperCase();
     const countEl = document.getElementById('companyDetail_count');
-    if (countEl) countEl.textContent = '🏢 إدارة الشركة والقادة';
+    if (countEl) {
+        const off = daysLeft !== null && daysLeft < 0;
+        countEl.textContent = off ? 'الاشتراك منتهٍ' : 'الاشتراك نشط';
+        countEl.dataset.state = off ? 'off' : 'on';
+    }
+ 
+    // مؤشرات السعة: حلقتان + بطاقة الاشتراك
+    const gauge = (val, lim, label, caption) => {
+        const noCap = lim === null || isNaN(lim);
+        const over = !noCap && val > lim;
+        const pct = noCap ? 0 : (lim > 0 ? Math.min(100, Math.round((val / lim) * 100)) : (val > 0 ? 100 : 0));
+        const col = over ? 'var(--cd-rose)' : noCap ? 'var(--cd-indigo)' : pct >= 80 ? 'var(--cd-amber)' : 'var(--cd-teal)';
+        return `
+        <div class="cd-gauge${over ? ' is-over' : ''}">
+            <div class="cd-ring" style="--p:${pct}; --c:${col};">
+                <div class="cd-ring-in"><b dir="ltr">${val}</b><small>${noCap ? 'بلا سقف مسجّل' : 'من ' + lim}</small></div>
+            </div>
+            <p class="cd-gauge-label">${label}</p>
+            <p class="cd-gauge-cap">${over ? '⚠ تجاوز الحد' : caption}</p>
+        </div>`;
+    };
+    let subHtml;
+    if (expiry) {
+        const tone = daysLeft < 0 ? 'off' : daysLeft <= 30 ? 'warn' : 'ok';
+        const txt = daysLeft < 0 ? `انتهى منذ ${Math.abs(daysLeft)} يوماً` : `متبقٍ ${daysLeft} يوماً`;
+        subHtml = `<div class="cd-sub ${tone}"><div><p class="cd-sub-k">ينتهي الاشتراك</p><p class="cd-sub-v" dir="ltr">${esc(expiry)}</p></div><span class="cd-sub-d">${txt}</span></div>`;
+    } else {
+        subHtml = `<div class="cd-sub"><p class="cd-sub-k">لا يوجد تاريخ انتهاء مسجّل</p></div>`;
+    }
     const statsEl = document.getElementById('companyDetail_stats');
     if (statsEl) {
-        const chip = (icon, val, label, col, bg) => `
-            <div class="rounded-2xl px-3 py-2.5 text-right" style="background:${bg}; border:1px solid ${col}40;">
-                <p class="text-[10px] font-black" style="color:${col};">${icon} ${label}</p>
-                <p class="text-white text-lg font-black leading-tight mt-0.5">${val}</p>
-            </div>`;
         statsEl.innerHTML =
-            chip('🎖️', total, 'القادة', '#fbbf24', 'rgba(245,158,11,0.10)') +
-            chip('✅', total - expiredCount, 'نشط', '#34d399', 'rgba(16,185,129,0.10)') +
-            chip('⛔', expiredCount, 'منتهي', '#fb7185', 'rgba(244,63,94,0.10)') +
-            chip('👤', used + '/' + cap, 'الأعضاء', '#818cf8', 'rgba(99,102,241,0.10)');
+            `<div class="cd-gauges">` +
+                gauge(total, maxL, 'القادة', total === 0 ? 'لا يوجد قادة بعد' : (expiredCount ? `${expiredCount} منتهٍ` : 'جميعهم نشطون')) +
+                gauge(allocated, pool, 'حصص الأعضاء', `مستخدم فعلياً ${used}`) +
+            `</div>` + subHtml;
     }
-
+ 
     // القادة: المالك أولاً ثم أبجدياً
     let leaders = [...c.leaders].sort((a, b) =>
         (b.isCompanyOwner === true) - (a.isCompanyOwner === true) ||
@@ -3919,41 +3964,41 @@ window.renderCompanyLeaders = (reset) => {
     if (q) leaders = leaders.filter(l => String(l.ownerName || '').toLowerCase().includes(q));
     if (flt === 'active') leaders = leaders.filter(l => !isExp(l));
     if (flt === 'expired') leaders = leaders.filter(isExp);
-
+ 
     const shown = leaders.slice(0, window._companyLeadersLimit);
     list.innerHTML = shown.length ? shown.map(l => {
         const isExpired = isExp(l);
         const isOwner = l.isCompanyOwner === true;
+        const isAdminAcc = isOwner && l.isLeader === false;
         const n = counts[l.id] || 0;
         const max = parseInt(l.maxMembers || 5);
         const pct = max > 0 ? Math.min(100, Math.round((n / max) * 100)) : 0;
-        const bar = pct >= 100 ? '#f43f5e' : pct >= 70 ? '#f59e0b' : '#10b981';
+        const tone = isExpired ? 'var(--cd-rose)' : isOwner ? 'var(--cd-amber)' : 'var(--cd-teal)';
+        const fill = (n > max || pct >= 100) ? 'var(--cd-rose)' : pct >= 70 ? 'var(--cd-amber)' : 'var(--cd-teal)';
         const initial = String(l.ownerName || '؟').trim().charAt(0).toUpperCase();
+        const slots = (max > 0 && max <= 12)
+            ? Array.from({ length: max }, (_, i) => `<i class="cd-slot${i < n ? ' on' : ''}"></i>`).join('')
+            : `<span class="cd-bar"><i style="width:${pct}%"></i></span>`;
+        const roleTxt = isOwner ? (isAdminAcc ? 'حساب الشركة · ' : 'المالك · ') : '';
+        const footer = isAdminAcc
+            ? `<div class="cd-tile-actions"><button onclick="event.stopPropagation(); window.showCompanyTotp('${l.id}')" class="cd-mini" style="--t:#5fd4f4; --bg:rgba(95,212,244,.10); --bd:rgba(95,212,244,.34);">🔑 مصادقة</button><button onclick="event.stopPropagation(); window.regenCompanyTotp('${l.id}')" class="cd-mini" style="--t:var(--cd-amber); --bg:rgba(255,180,84,.12); --bd:rgba(255,180,84,.38);">♻️</button></div>`
+            : `<div class="cd-capacity"><div class="cd-slots">${slots}</div><span class="cd-count" dir="ltr">${n} / ${max}</span></div>`;
+        const hiddenOwnerBtn = isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')" class="hidden">👑 تعيين كمالك</button>`;
         return `
-        <div class="rounded-2xl p-3 cursor-pointer transition-all hover:-translate-y-0.5"
-             style="background:linear-gradient(160deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015)); border:1px solid ${isOwner ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.08)'};"
-             onclick="window.closeCompanyDetailModal(); window.openSubDetail('${l.id}')">
-            <div class="flex items-center gap-3">
-                <div class="w-11 h-11 rounded-xl flex items-center justify-center text-base font-black text-white shrink-0"
-                     style="background:linear-gradient(135deg,${bar}55,rgba(245,158,11,0.10)); border:1px solid ${bar}88;">${esc(initial)}</div>
-                <div class="flex-1 min-w-0 text-right">
-                    <p class="text-white text-xs font-black truncate">${isOwner ? '👑 ' : ''}${esc(l.ownerName)}</p>
-                    <p class="text-slate-500 text-[10px] truncate">${isOwner ? (l.isLeader === false ? 'حساب الشركة · ' : 'المالك · ') : ''}${l.expiryDate ? 'ينتهي ' + esc(l.expiryDate) : 'بدون تاريخ انتهاء'}</p>
+        <div class="cd-tile" style="--tc:${tone}; --fill:${fill};" onclick="window.closeCompanyDetailModal(); window.openSubDetail('${l.id}')">
+            <div class="cd-tile-head">
+                <span class="cd-initial">${esc(initial)}</span>
+                <div class="cd-tile-id">
+                    <p class="cd-tile-name">${isOwner ? '👑 ' : ''}${esc(l.ownerName)}</p>
+                    <p class="cd-tile-sub">${roleTxt}${l.expiryDate ? 'ينتهي ' + esc(l.expiryDate) : 'بدون تاريخ انتهاء'}</p>
                 </div>
-                <span class="shrink-0 text-[10px] px-2 py-0.5 rounded-full font-black ${isExpired ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">
-                    ${isExpired ? '⛔ منتهي' : '✅ نشط'}
-                </span>
+                <span class="cd-state${isExpired ? ' off' : ''}">${isExpired ? 'منتهٍ' : 'نشط'}</span>
             </div>
-            <div class="flex items-center gap-2 mt-3">
-                ${(isOwner && l.isLeader === false) ? `<button onclick="event.stopPropagation(); window.showCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-sky-300" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3);">🔑 مصادقة</button><button onclick="event.stopPropagation(); window.regenCompanyTotp('${l.id}')" class="shrink-0 text-[10px] px-2 py-1 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">♻️</button>` : ''}${isOwner ? '' : `<button onclick="event.stopPropagation(); window.setCompanyOwner('${l.id}')"
-                    class="hidden"
-                    style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3);">👑 تعيين كمالك</button>`}
-                <div class="leader-progress-track"><div class="leader-progress-fill" style="width:${pct}%; background:${bar}; box-shadow:0 0 8px ${bar}aa;"></div></div>
-                <span class="text-[10px] font-mono text-slate-400 shrink-0">👤 ${n}/${max}</span>
-            </div>
+            ${footer}
+            ${hiddenOwnerBtn}
         </div>`;
-    }).join('') : '<p class="col-span-full text-center text-slate-500 text-xs py-6">لا نتائج</p>';
-
+    }).join('') : '<p class="cd-empty">لا نتائج</p>';
+ 
     const more = document.getElementById('companyLeadersMore');
     if (more) {
         const rest = leaders.length - shown.length;
@@ -3961,6 +4006,7 @@ window.renderCompanyLeaders = (reset) => {
         if (rest > 0) more.textContent = `عرض المزيد (${rest} متبقٍ)`;
     }
 };
+
 
 // تبديل لوحة القادة / لوحة إعدادات الشركة
 window.showCompanyPane = (pane) => {
@@ -3970,7 +4016,9 @@ window.showCompanyPane = (pane) => {
     const btn = document.getElementById('companySettingsToggle');
     if (lead) { lead.classList.toggle('hidden', toSettings); lead.classList.toggle('flex', !toSettings); }
     if (sett) { sett.classList.toggle('hidden', !toSettings); sett.classList.toggle('flex', toSettings); }
-    if (btn) btn.textContent = toSettings ? '→ العودة للقادة' : '⚙️ إعدادات الشركة';
+     if (btn) btn.textContent = toSettings ? '→ العودة للقادة' : '⚙️ إعدادات الشركة';
+    const ttl = document.getElementById('companyPaneTitle');
+    if (ttl) ttl.textContent = toSettings ? 'إعدادات الشركة' : 'قادة الشركة';
 };
 window.toggleCompanySettings = () => {
     const sett = document.getElementById('companySettingsPane');
@@ -4037,8 +4085,10 @@ window.backFromSubDetail = () => {
 };
 
 // ===== سقوف الشركة: القراءة من مستند الشركة، وإن غابت تُحسب من القادة الحاليين =====
-window.getCompanyQuota = async () => {
+window.getCompanyQuota = async (force = false) => {
     const myId = window.myCompanyId || window.activeKey;
+    const cached = window._quotaCache;
+    if (!force && cached && cached.id === myId && Date.now() - cached.t < 15000) return cached.data;
     let leaders = [];
     try {
         const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'subscribers'), where('companyId', '==', myId)));
@@ -4053,10 +4103,13 @@ window.getCompanyQuota = async () => {
     const allocated = leaders.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
     const maxLeaders = Number(co?.maxLeaders) || leaders.length;
     const memberPool = Number(co?.memberPool) || allocated;
-    return { leaders, maxLeaders, memberPool, allocated, company: co };
+    const result = { leaders, maxLeaders, memberPool, allocated, company: co };
+    window._quotaCache = { id: myId, t: Date.now(), data: result };
+    return result;
 };
 
 window.renderMyCompanyPanel = async () => {
+    window._quotaCache = null; // قراءة طازجة عند فتح اللوحة وبعد كل حفظ
     const box = document.getElementById('myCompanyList');
     if (!box) return;
     box.innerHTML = `<p class="text-slate-500 text-xs text-center py-6">جارٍ تحميل بيانات الشركة...</p>`;
@@ -4068,7 +4121,7 @@ window.renderMyCompanyPanel = async () => {
     const nameEl = document.getElementById('myCompanyName');
     const summaryEl = document.getElementById('myCompanySummary');
     if (nameEl) nameEl.textContent = window.myCompanyName || q.company?.name || 'شركتي';
-    if (summaryEl) summaryEl.textContent = `القادة ${leaders.length} من ${q.maxLeaders} · الأعضاء المخصصون ${q.allocated} من ${q.memberPool}`;
+        if (summaryEl) summaryEl.textContent = `القادة: ${leaders.length} (الحد ${q.maxLeaders}) · الأعضاء: ${(window.teamMembers || []).length} فعلياً · ${q.allocated} مخصص (الحد ${q.memberPool})`;
 
     const addBtn = full
         ? `<div class="rounded-xl px-4 py-3 text-center text-[11px] font-black text-amber-400" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);">⛔ بلغت الحد الأقصى من القادة — للزيادة تواصل مع الإدارة</div>`
@@ -4130,6 +4183,7 @@ window.saveNewLeader = async () => {
     if (btn) btn.disabled = true;
     try {
         // إعادة فحص السقوف من قاعدة البيانات لحظة الحفظ
+        window._quotaCache = null;
         const q = await window.getCompanyQuota();
         if (q.leaders.length >= q.maxLeaders) {
             return window.showNotif(`⛔ وصلت للحد الأقصى من القادة (${q.maxLeaders}) — للزيادة تواصل مع الإدارة`, 'error');
@@ -4216,7 +4270,7 @@ window.renderMyProfilePanel = async () => {
             </div>
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
                 <span class="text-slate-500 text-[11px] font-bold">كود دخول الشركة</span>
-                <span class="text-white text-xs font-black" style="direction:ltr;">${esc(window.activeKey || '—')}</span>
+                <span class="text-white text-xs font-black" style="direction:ltr;">${/^[0-9a-f]{64}$/.test(window.activeKey || '') ? 'محفوظ مشفّراً 🔒' : esc(window.activeKey || '—')}</span>
             </div>
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
                 <span class="text-slate-500 text-[11px] font-bold">حالة الاشتراك</span>
@@ -4230,11 +4284,11 @@ window.renderMyProfilePanel = async () => {
             </div>
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
                 <span class="text-slate-500 text-[11px] font-bold">القادة</span>
-                <span class="text-white text-xs font-black">${leadersCount} / ${quota.maxLeaders}</span>
+                <span class="text-white text-xs font-black">${leadersCount} (الحد الأقصى ${quota.maxLeaders})</span>
             </div>
             <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
                 <span class="text-slate-500 text-[11px] font-bold">الأعضاء المخصصون للقادة</span>
-                <span class="text-white text-xs font-black">${quota.allocated} / ${quota.memberPool}</span>
+                <span class="text-white text-xs font-black">${(window.teamMembers || []).length} فعلياً · ${quota.allocated} مخصص (الحد الأقصى ${quota.memberPool})</span>
             </div>
                 `;
         if (expiryWarn) box.insertAdjacentHTML('afterbegin', expiryWarn);
@@ -4250,7 +4304,7 @@ window.renderMyProfilePanel = async () => {
         </div>
         <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
             <span class="text-slate-500 text-[11px] font-bold">كود الدخول</span>
-            <span class="text-white text-xs font-black" style="direction:ltr;">${esc(window.activeKey || '—')}</span>
+            <span class="text-white text-xs font-black" style="direction:ltr;">${/^[0-9a-f]{64}$/.test(window.activeKey || '') ? 'محفوظ مشفّراً 🔒' : esc(window.activeKey || '—')}</span>
         </div>
         <div class="bg-white/3 border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between">
             <span class="text-slate-500 text-[11px] font-bold">حالة الاشتراك</span>
@@ -4429,6 +4483,8 @@ window.toggleCompanyQuota = () => {
     const allocated = fieldLeaders.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
     document.getElementById('companyQuota_leaders').value = Number(raw.maxLeaders) || fieldLeaders.length;
     document.getElementById('companyQuota_pool').value = Number(raw.memberPool) || allocated;
+    document.getElementById('companyQuota_codeChanges').value = Number(raw.codeChangesQuota) || 0;
+    document.getElementById('companyQuota_codeUsed').value = Number(raw.codeChangesUsed) || 0;
     document.getElementById('companyQuota_usage').textContent = `المستخدم حالياً: ${fieldLeaders.length} قائد · ${allocated} عضو مخصص لهم`;
 };
 
@@ -4436,6 +4492,8 @@ window.saveCompanyQuota = async () => {
     const c = (window._companiesIndex || {})[window._activeCompanyId];
     if (!c) return;
     const maxLeaders = parseInt(document.getElementById('companyQuota_leaders').value);
+    const codeChangesQuota = parseInt(document.getElementById('companyQuota_codeChanges').value) || 0;
+    const codeChangesUsed = parseInt(document.getElementById('companyQuota_codeUsed').value) || 0;
     const memberPool = parseInt(document.getElementById('companyQuota_pool').value);
     if (isNaN(maxLeaders) || isNaN(memberPool) || maxLeaders < 0 || memberPool < 0) {
         return window.showNotif('أدخل أرقاماً صحيحة للسقوف', 'error');
@@ -4450,7 +4508,7 @@ window.saveCompanyQuota = async () => {
     }
     try {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', c.id),
-            { maxLeaders, memberPool, quotaUpdatedAt: Date.now() }, { merge: true });
+            { maxLeaders, memberPool, codeChangesQuota, codeChangesUsed, quotaUpdatedAt: Date.now() }, { merge: true });
         window.logActivity('company_quota', `تعديل سقوف شركة ${c.name}: ${maxLeaders} قائد / ${memberPool} عضو`);
         window.showNotif('✅ تم تحديث سقوف الشركة', 'success');
     } catch (e) {
@@ -4969,6 +5027,41 @@ window.pullPrefs = async () => {
 };
 
 
+// صفارة إنذار مولَّدة داخل التطبيق (لا تعتمد على رابط خارجي)
+window.playAlertSiren = () => {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        window._sirenCtx = window._sirenCtx || new Ctx();
+        const ctx = window._sirenCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const t0 = ctx.currentTime, dur = 3;
+        for (let i = 0; i < 3; i++) {
+            osc.frequency.setValueAtTime(600, t0 + i);
+            osc.frequency.linearRampToValueAtTime(1100, t0 + i + 0.5);
+            osc.frequency.linearRampToValueAtTime(600, t0 + i + 1);
+        }
+        gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.05);
+        gain.gain.setValueAtTime(0.25, t0 + dur - 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.start(t0);
+        osc.stop(t0 + dur);
+    } catch (e) { console.warn('تعذر تشغيل الإنذار', e); }
+};
+// المتصفح يمنع الصوت قبل أول نقرة: نفعّل السياق عند أول لمسة أو نقرة
+['click', 'touchstart', 'keydown'].forEach(ev => document.addEventListener(ev, () => {
+    try {
+        const C = window.AudioContext || window.webkitAudioContext;
+        if (!window._sirenCtx && C) window._sirenCtx = new C();
+        if (window._sirenCtx && window._sirenCtx.state === 'suspended') window._sirenCtx.resume();
+    } catch (e) {}
+}, { once: true }));
 
 // --- محرك تشغيل النظام والواجهة (محدث بقوة الإظهار) ---
 window.launchOS = (role, key, msg) => {
@@ -5365,7 +5458,18 @@ window.mapShowReports = async () => {
         const emergencyQ = (window.userRole === 'leader')
             ? query(emergencyColl, where('parentKey', '==', window.activeKey))
             : emergencyColl;
-        const snap = await getDocs(emergencyQ);
+        let snap;
+        if (window.userRole === 'leader' && window.isCompanyOwner === true && window.getMyScopeKeys) {
+            // مالك الشركة: بلاغات كل قادة شركته (مقسّمة كل 30 مفتاحاً بسبب حد الاستعلام)
+            const keys = (await window.getMyScopeKeys()) || [window.activeKey];
+            const parts = [];
+            for (let i = 0; i < keys.length; i += 30) {
+                parts.push(await getDocs(query(emergencyColl, where('parentKey', 'in', keys.slice(i, i + 30)))));
+            }
+            snap = { forEach: (fn) => parts.forEach(p => p.forEach(fn)) };
+        } else {
+            snap = await getDocs(emergencyQ);
+        }
         snap.forEach(doc => {
             const d = doc.data();
             if (d.location?.lat) {
@@ -5715,7 +5819,11 @@ if (window.speechSynthesis.onvoiceschanged !== undefined) {
 
 
 // --- محرك مزامنة البيانات الميدانية ---
+const _rawOnSnapshot = onSnapshot;
 async function startDataSync() {
+    (window._syncUnsubs || []).forEach(u => { try { u(); } catch (e) {} });
+    window._syncUnsubs = [];
+    const onSnapshot = (...args) => { const u = _rawOnSnapshot(...args); window._syncUnsubs.push(u); return u; };
     if (!auth.currentUser) return;
 
     // إظهار مؤشر التحميل
@@ -5853,13 +5961,8 @@ window._reportsUnsub = onSnapshot(reportsListenerQuery, window._reportsHandler =
             const shouldAlert = (window.userRole === 'master') || (window._myScopeKeys || [window.activeKey]).includes(data.parentKey);
             
             if (shouldAlert && data.priority === "high" && (Date.now() - data.timestamp) < 10000) {
-                const audio = document.getElementById('alertSound');
-                if (audio) {
-                    audio.currentTime = 0; 
-                    audio.play().catch(e => console.warn("انقر على الشاشة لتفعيل الإنذار"));
-                }
-                
-                window.showNotif(`🚨 إشارة عاجلة من: ${data.memberName}`, "info");
+                         window.playAlertSiren();
+    window.showNotif(`🚨 إشارة عاجلة من: ${data.memberName}`, "info");
 window.sendPushNotif(
     'إشارة عاجلة!',
     `${data.memberName} — المادة: ${data.materialName || '--'}`,
@@ -5869,7 +5972,7 @@ window.sendPushNotif(
                 
                 // إيقاف الإنذار آلياً بعد 10 ثوانٍ
                 setTimeout(() => { 
-                    if(audio) { audio.pause(); audio.currentTime = 0; }
+                    /* الصفارة تتوقف تلقائياً بعد 3 ثوانٍ */
                 }, 10000); 
             }
         }
@@ -6417,7 +6520,7 @@ window.exportFullIncidentPDF = async () => {
             </tr>
             <tr>
                 <td style="padding:8px 12px; font-weight:700;">اسم الفريق</td>
-                <td style="padding:8px 12px;">${teamName}</td>
+                <td style="padding:8px 12px;">${esc(teamName)}</td>
             </tr>
             <tr style="background:#eff6ff;">
                 <td style="padding:8px 12px; font-weight:700;">التاريخ والوقت</td>
@@ -7518,6 +7621,15 @@ window.approveRenewal = async (reqId, leaderKey) => {
                         { expiryDate: newExpiry, isPaid: true, status: 'active' });
                 });
                 const co = (window.companiesRaw || []).find(x => x.id === cId);
+                let codeQuota = Number(co?.codeChangesQuota) || 0;
+                if (co?.packageId) {
+                    try {
+                        const pk = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'packages', co.packageId));
+                        if (pk.exists() && pk.data().leaderCodeChanges !== undefined) codeQuota = Number(pk.data().leaderCodeChanges) || 0;
+                    } catch (e) {}
+                }
+                if (cId) batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'companies', cId),
+                    { codeChangesQuota: codeQuota, codeChangesUsed: 0 }, { merge: true });
                 batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'pending_requests', reqId), {
                     status: 'Approved', approvedAt: Date.now(),
                     companyId: cId, price: Number(co?.planPrice) || 0,
@@ -7566,11 +7678,19 @@ window.approveRequest = async (reqId, name, phone) => {
                 const companyId = 'CMP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 
                 const companyName = (reqData.companyName || name || '').trim();
+      let codeQuota = 0;
+      if (reqData.packageId) {
+          try {
+              const pk = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'packages', reqData.packageId));
+              if (pk.exists()) codeQuota = Number(pk.data().leaderCodeChanges) || 0;
+          } catch (e) {}
+      }
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', companyId), {
                     name: companyName, phone: phone || '', whatsapp: '', email: reqEmail,
                     createdAt: Date.now(), planPrice: Number(reqData.price) || 0, packageId: reqData.packageId || null,
                     maxLeaders: numLeaders,
-                    memberPool: Number(reqData.plan) || leadersData.reduce((s, l) => s + (Number(l.members) || 0), 0) || (numLeaders * 5)
+                    codeChangesQuota: codeQuota, codeChangesUsed: 0,
+                    memberPool: leadersData.reduce((s, l) => s + (Number(l.members) || 0), 0) || Number(reqData.plan) || (numLeaders * 5)
                 });
 
                 // توليد كود لكل قائد وحفظه
@@ -7812,7 +7932,7 @@ window.showPublicHazmatCard = (mat, un) => {
         <!-- الرأس -->
         <div style="background:linear-gradient(135deg,#1a0505,#120808);border:1px solid rgba(220,38,38,0.3);border-top:4px solid #dc2626;border-radius:1.5rem;padding:1.5rem;margin-bottom:1rem;text-align:center;">
             <p style="color:rgba(220,38,38,0.6);font-size:0.625rem;font-family:monospace;text-transform:uppercase;letter-spacing:0.2em;margin-bottom:0.5rem;">⚡ ERG SYSTEM — HAZMAT PUBLIC CARD</p>
-            <h1 style="color:white;font-size:1.75rem;font-weight:900;margin:0.25rem 0;">${name}</h1>
+            <h1 style="color:white;font-size:1.75rem;font-weight:900;margin:0.25rem 0;">${esc(name)}</h1>
             <div style="display:flex;justify-content:center;gap:0.75rem;margin-top:0.75rem;flex-wrap:wrap;">
                 <span style="background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.4);color:#f87171;padding:0.375rem 1rem;border-radius:2rem;font-weight:900;font-size:1.5rem;font-family:monospace;">UN ${un}</span>
                 <span style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#fbbf24;padding:0.375rem 0.75rem;border-radius:2rem;font-weight:900;font-size:0.75rem;">CLASS ${hazClass}</span>
@@ -7911,7 +8031,7 @@ window.generateMaterialQR = (un, name) => {
                 <div style="width:2rem;"></div>
             </div>
             <div id="qrContainer" style="background:white;border-radius:1rem;padding:1rem;margin-bottom:1rem;display:flex;justify-content:center;"></div>
-            <p style="color:#a78bfa;font-weight:900;font-size:0.875rem;margin-bottom:0.25rem;">${name}</p>
+            <p style="color:#a78bfa;font-weight:900;font-size:0.875rem;margin-bottom:0.25rem;">${esc(name)}</p>
             <p style="color:rgba(255,255,255,0.4);font-size:0.75rem;font-family:monospace;">UN ${un}</p>
             <p style="color:rgba(255,255,255,0.2);font-size:0.625rem;margin-top:0.5rem;word-break:break-all;">${url}</p>
             <button onclick="
@@ -11224,6 +11344,239 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 
 
 
+#companyDetailModal {
+    --cd-bg0:#050a14; --cd-bg1:#0b1628;
+    --cd-surface:#0f1d33; --cd-surface2:#152844;
+    --cd-line:rgba(130,160,210,.16); --cd-line-strong:rgba(130,160,210,.32);
+    --cd-text:#eaf1fc; --cd-mute:#93a7c8; --cd-faint:#6b7fa3;
+    --cd-amber:#ffb454; --cd-teal:#34d3c0; --cd-rose:#ff6b86; --cd-indigo:#8b9bff;
+}
+body.light-mode #companyDetailModal {
+    --cd-bg0:#e8edf6; --cd-bg1:#f5f8fd;
+    --cd-surface:#ffffff; --cd-surface2:#eef2fa;
+    --cd-line:rgba(15,23,42,.10); --cd-line-strong:rgba(15,23,42,.22);
+    --cd-text:#0f1b33; --cd-mute:#4a5d80; --cd-faint:#7a8aa8;
+    --cd-amber:#b8650a; --cd-teal:#0c8f80; --cd-rose:#d1304b; --cd-indigo:#4a5ade;
+}
+ 
+/* الخلفية الجديدة: حبر أزرق عميق مع وهج كهرماني ويشمي خفيف */
+#companyDetailModal.lux-modal-backdrop {
+    background:
+        radial-gradient(1100px 620px at 88% -8%, rgba(255,180,84,.14), transparent 62%),
+        radial-gradient(900px 600px at -5% 105%, rgba(52,211,192,.12), transparent 58%),
+        radial-gradient(800px 520px at 50% 50%, rgba(139,155,255,.08), transparent 70%),
+        linear-gradient(180deg, rgba(4,9,18,.95), rgba(6,13,26,.97)) !important;
+    background-size: 100% 100% !important;
+    animation: none !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    backdrop-filter: blur(8px) !important;
+}
+body.light-mode #companyDetailModal.lux-modal-backdrop {
+    background:
+        radial-gradient(1000px 600px at 88% -8%, rgba(255,180,84,.20), transparent 62%),
+        radial-gradient(900px 600px at -5% 105%, rgba(52,211,192,.16), transparent 58%),
+        linear-gradient(180deg, rgba(222,229,242,.93), rgba(236,241,250,.95)) !important;
+}
+ 
+/* الهيكل: عمود جانبي للشركة + مساحة عمل عريضة */
+#companyDetailModal .cd-shell {
+    position: relative;
+    width: min(1180px, 100%);
+    height: min(780px, calc(100dvh - 4rem - var(--safe-top, 0px)));
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    color: var(--cd-text);
+    background: linear-gradient(165deg, var(--cd-bg1), var(--cd-bg0));
+    border: 1px solid var(--cd-line-strong);
+    border-radius: 26px;
+    overflow: hidden;
+    box-shadow: 0 40px 120px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+}
+#companyDetailModal .cd-shell::before {
+    content: "";
+    position: absolute; inset: 0; pointer-events: none;
+    background-image:
+        linear-gradient(var(--cd-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--cd-line) 1px, transparent 1px);
+    background-size: 38px 38px;
+    opacity: .38;
+    -webkit-mask-image: radial-gradient(ellipse at 25% 15%, #000 0, transparent 72%);
+    mask-image: radial-gradient(ellipse at 25% 15%, #000 0, transparent 72%);
+}
+#companyDetailModal .cd-rail, #companyDetailModal .cd-main { position: relative; z-index: 1; }
+ 
+/* العمود الجانبي */
+#companyDetailModal .cd-rail {
+    display: flex; flex-direction: column; gap: 18px;
+    padding: 28px 22px 22px;
+    border-inline-end: 1px solid var(--cd-line);
+    background: linear-gradient(180deg, rgba(255,255,255,.035), transparent 45%);
+    overflow-y: auto;
+}
+#companyDetailModal .cd-id { display: flex; align-items: center; gap: 14px; }
+#companyDetailModal .cd-avatar {
+    width: 62px; height: 62px; flex-shrink: 0;
+    display: grid; place-items: center;
+    border-radius: 20px;
+    font-size: 26px; font-weight: 900; color: #fff;
+    background: linear-gradient(135deg, rgba(255,180,84,.55), rgba(139,155,255,.45));
+    border: 1px solid rgba(255,255,255,.22);
+    box-shadow: 0 10px 26px rgba(0,0,0,.35);
+}
+#companyDetailModal .cd-id-text { min-width: 0; text-align: right; }
+#companyDetailModal .cd-name { font-size: 21px; font-weight: 900; line-height: 1.3; word-break: break-word; margin: 0; }
+#companyDetailModal .cd-status {
+    display: inline-flex; align-items: center; gap: 7px;
+    margin: 6px 0 0; font-size: 11px; font-weight: 800; color: var(--cd-teal);
+}
+#companyDetailModal .cd-status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+#companyDetailModal .cd-status[data-state="off"] { color: var(--cd-rose); }
+ 
+#companyDetailModal .cd-stats { display: flex; flex-direction: column; gap: 14px; }
+#companyDetailModal .cd-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#companyDetailModal .cd-gauge {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 16px 8px 14px;
+    border: 1px solid var(--cd-line); border-radius: 18px;
+    background: var(--cd-surface);
+}
+#companyDetailModal .cd-gauge.is-over { border-color: rgba(255,107,134,.55); background: linear-gradient(180deg, rgba(255,107,134,.10), var(--cd-surface)); }
+#companyDetailModal .cd-ring {
+    --p: 0; --c: var(--cd-teal);
+    position: relative; width: 96px; height: 96px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(143,163,196,.2) 0);
+    transition: background .5s ease;
+}
+#companyDetailModal .cd-ring::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--cd-surface); }
+#companyDetailModal .cd-ring-in { position: relative; display: flex; flex-direction: column; align-items: center; line-height: 1; }
+#companyDetailModal .cd-ring-in b { font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+#companyDetailModal .cd-ring-in small { margin-top: 4px; font-size: 10.5px; font-weight: 700; color: var(--cd-mute); }
+#companyDetailModal .cd-gauge-label { margin: 6px 0 0; font-size: 12px; font-weight: 900; }
+#companyDetailModal .cd-gauge-cap { margin: 0; font-size: 10.5px; font-weight: 700; color: var(--cd-mute); text-align: center; }
+#companyDetailModal .cd-gauge.is-over .cd-gauge-cap { color: var(--cd-rose); }
+ 
+#companyDetailModal .cd-sub {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 13px 15px; border: 1px solid var(--cd-line); border-radius: 16px; background: var(--cd-surface);
+}
+#companyDetailModal .cd-sub-k { margin: 0; font-size: 10.5px; font-weight: 700; color: var(--cd-mute); }
+#companyDetailModal .cd-sub-v { margin: 3px 0 0; font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; text-align: right; }
+#companyDetailModal .cd-sub-d { font-size: 11px; font-weight: 900; padding: 6px 10px; border-radius: 10px; color: var(--cd-teal); background: rgba(52,211,192,.12); white-space: nowrap; }
+#companyDetailModal .cd-sub.warn .cd-sub-d { color: var(--cd-amber); background: rgba(255,180,84,.14); }
+#companyDetailModal .cd-sub.off .cd-sub-d { color: var(--cd-rose); background: rgba(255,107,134,.14); }
+ 
+/* المساحة الرئيسية */
+#companyDetailModal .cd-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#companyDetailModal .cd-topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 22px 28px 14px; padding-inline-end: 80px;
+}
+#companyDetailModal .cd-title { margin: 0; font-size: 18px; font-weight: 900; }
+#companyDetailModal .cd-pane { padding: 0 28px 26px; }
+#companyDetailModal .cd-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-shrink: 0; }
+#companyDetailModal .cd-search, #companyDetailModal .cd-select {
+    min-height: 44px; padding: 0 14px;
+    color: var(--cd-text); font-size: 12px; font-weight: 700;
+    background: var(--cd-surface); border: 1px solid var(--cd-line); border-radius: 12px; outline: none;
+}
+#companyDetailModal .cd-search { flex: 1; min-width: 0; text-align: right; }
+#companyDetailModal .cd-search::placeholder { color: var(--cd-faint); }
+#companyDetailModal .cd-search:focus, #companyDetailModal .cd-select:focus { border-color: var(--cd-amber); }
+#companyDetailModal .cd-select option { background: var(--cd-surface); color: var(--cd-text); }
+ 
+#companyDetailModal .cd-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 0 18px; border-radius: 12px;
+    font-size: 12px; font-weight: 900; cursor: pointer;
+    color: var(--t, var(--cd-text)); background: var(--bg, var(--cd-surface)); border: 1px solid var(--bd, var(--cd-line));
+    transition: background .18s, border-color .18s, transform .12s;
+}
+#companyDetailModal .cd-btn:hover { border-color: var(--t, var(--cd-line-strong)); }
+#companyDetailModal .cd-btn:active { transform: scale(.97); }
+#companyDetailModal .cd-btn-amber { --t: var(--cd-amber); --bg: rgba(255,180,84,.12); --bd: rgba(255,180,84,.38); }
+#companyDetailModal .cd-btn-teal  { --t: var(--cd-teal);  --bg: rgba(52,211,192,.12);  --bd: rgba(52,211,192,.38); }
+#companyDetailModal .cd-btn-cyan  { --t: #5fd4f4;         --bg: rgba(95,212,244,.10);  --bd: rgba(95,212,244,.34); }
+#companyDetailModal .cd-btn-rose  { --t: var(--cd-rose);  --bg: transparent;           --bd: rgba(255,107,134,.45); border-style: dashed; }
+#companyDetailModal .cd-btn-solid { --t: #06231f; --bg: linear-gradient(135deg, #3fe0cb, #1fb5a2); --bd: transparent; box-shadow: 0 8px 20px rgba(31,181,162,.28); }
+#companyDetailModal .cd-block { width: 100%; }
+ 
+/* بطاقات القادة */
+#companyDetailModal .cd-leaders {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;
+    align-content: start; flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 4px;
+}
+#companyDetailModal .cd-tile {
+    position: relative; display: flex; flex-direction: column; gap: 14px;
+    padding: 15px 16px; border-radius: 16px; cursor: pointer;
+    background: var(--cd-surface); border: 1px solid var(--cd-line);
+    transition: border-color .18s, background .18s, transform .18s;
+}
+#companyDetailModal .cd-tile::before {
+    content: ""; position: absolute; inset-block: 14px; inset-inline-start: 0; width: 3px;
+    border-radius: 3px; background: var(--tc, var(--cd-teal));
+}
+#companyDetailModal .cd-tile:hover { border-color: var(--cd-line-strong); background: var(--cd-surface2); transform: translateY(-1px); }
+#companyDetailModal .cd-tile-head { display: flex; align-items: center; gap: 11px; }
+#companyDetailModal .cd-initial {
+    width: 38px; height: 38px; flex-shrink: 0; display: grid; place-items: center;
+    border-radius: 12px; font-size: 15px; font-weight: 900; color: var(--cd-text);
+    background: var(--cd-surface2); border: 1px solid var(--cd-line-strong);
+}
+#companyDetailModal .cd-tile-id { flex: 1; min-width: 0; text-align: right; }
+#companyDetailModal .cd-tile-name { margin: 0; font-size: 14px; font-weight: 900; line-height: 1.3; word-break: break-word; }
+#companyDetailModal .cd-tile-sub { margin: 3px 0 0; font-size: 10.5px; font-weight: 600; color: var(--cd-mute); }
+#companyDetailModal .cd-state { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 900; color: var(--cd-teal); white-space: nowrap; }
+#companyDetailModal .cd-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+#companyDetailModal .cd-state.off { color: var(--cd-rose); }
+#companyDetailModal .cd-capacity { display: flex; align-items: center; gap: 10px; }
+#companyDetailModal .cd-slots { flex: 1; display: flex; gap: 3px; direction: ltr; }
+#companyDetailModal .cd-slot { flex: 1; height: 8px; border-radius: 3px; background: rgba(143,163,196,.2); }
+#companyDetailModal .cd-slot.on { background: var(--fill, var(--cd-teal)); }
+#companyDetailModal .cd-bar { flex: 1; height: 8px; border-radius: 99px; background: rgba(143,163,196,.2); overflow: hidden; direction: ltr; }
+#companyDetailModal .cd-bar i { display: block; height: 100%; border-radius: 99px; background: var(--fill, var(--cd-teal)); }
+#companyDetailModal .cd-count { font-size: 11.5px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--cd-mute); white-space: nowrap; }
+#companyDetailModal .cd-tile-actions { display: flex; gap: 8px; }
+#companyDetailModal .cd-mini {
+    min-height: 34px; padding: 0 12px; border-radius: 10px; font-size: 11px; font-weight: 900; cursor: pointer;
+    color: var(--t); background: var(--bg); border: 1px solid var(--bd);
+}
+#companyDetailModal .cd-empty { grid-column: 1 / -1; text-align: center; padding: 40px 0; font-size: 12px; color: var(--cd-faint); }
+#companyDetailModal .cd-more { margin-top: 12px; flex-shrink: 0; }
+ 
+/* لوحة الإعدادات */
+#companyDetailModal .cd-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-content: start; }
+#companyDetailModal .cd-card { display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 18px; background: var(--cd-surface); border: 1px solid var(--cd-line); }
+#companyDetailModal .cd-card-title { margin: 0; font-size: 13px; font-weight: 900; color: var(--cd-text); }
+#companyDetailModal .cd-span { grid-column: 1 / -1; }
+#companyDetailModal .cd-danger { border-style: dashed; border-color: rgba(255,107,134,.35); background: transparent; }
+#companyDetailModal .cd-form:not(.hidden) { display: flex; flex-direction: column; gap: 10px; }
+ 
+/* تركيز واضح + احترام تقليل الحركة */
+#companyDetailModal button:focus-visible, #companyDetailModal input:focus-visible, #companyDetailModal select:focus-visible { outline: 2px solid var(--cd-amber); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { #companyDetailModal * { transition: none !important; } }
+ 
+/* الشاشات الصغيرة: عمود واحد والنافذة كلها تتمرر */
+@media (max-width: 900px) {
+    #companyDetailModal .cd-shell {
+        display: flex; flex-direction: column; overflow-y: auto;
+        height: calc(100dvh - 3rem - var(--safe-top, 0px));
+    }
+    #companyDetailModal .cd-rail { overflow: visible; border-inline-end: 0; border-bottom: 1px solid var(--cd-line); padding: 22px 16px 16px; flex-shrink: 0; }
+    #companyDetailModal .cd-ring { width: 82px; height: 82px; }
+    #companyDetailModal .cd-ring-in b { font-size: 22px; }
+    #companyDetailModal .cd-main { overflow: visible; min-height: auto; }
+    #companyDetailModal .cd-topbar { padding: 16px 16px 10px; padding-inline-end: 66px; }
+    #companyDetailModal .cd-pane { padding: 0 16px 20px; }
+    #companyDetailModal .cd-leaders { overflow: visible; grid-template-columns: 1fr; }
+    #companyDetailModal .cd-settings { grid-template-columns: 1fr; }
+    #companyDetailModal .cd-toolbar { flex-wrap: wrap; }
+    #companyDetailModal .cd-search { flex-basis: 100%; order: -1; }
+    #companyDetailModal .cd-close { position: fixed; top: calc(max(1rem, var(--safe-top, 0px)) + 8px); left: calc(max(1rem, var(--safe-left, 0px)) + 8px); z-index: 20; }
+}
+
+
+
 
 /* تركيز واضح وأنيق على حقول شاشة الدخول */
 #lockScreen input:focus, #trialFields input:focus {
@@ -12983,6 +13336,10 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
                             <input type="number" id="pkgPrice" min="0" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
                         </div>
                     </div>
+   <div class="mb-3">
+       <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">تغييرات أكواد القادة المسموحة للشركة (0 = غير مسموح)</p>
+       <input type="number" id="pkgCodeChanges" min="0" value="1" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4)">
+   </div>
                     <div class="mb-3">
                         <p class="text-[9px] text-slate-500 mb-2 font-black uppercase">المزايا المتاحة بهذي الباقة (تشمل تلقائيًا كل تطبيقات سطح المكتب، بما فيها أي تطبيق يُستحدث مستقبلاً)</p>
                         <div class="grid grid-cols-2 gap-2" id="pkgFeatContainer"></div>
@@ -13283,120 +13640,107 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
 </div>
 
 
-
 <div id="companyDetailModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeCompanyDetailModal()">
-    <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" style="padding:0; min-height:420px; max-height:calc(100dvh - 7.5rem - var(--safe-top, 0px)); overflow:hidden; display:flex; flex-direction:column;" onclick="event.stopPropagation()">
-        <button onclick="window.companyModalBack()" class="member-detail-close">✕</button>
-
-        <!-- الرأس -->
-        <div class="shrink-0 px-5 pt-5 pb-4" style="background:linear-gradient(135deg,rgba(245,158,11,0.16),rgba(99,102,241,0.10) 60%,transparent); border-bottom:1px solid rgba(255,255,255,0.07);">
-            <div class="flex items-center justify-between gap-3" style="padding-left:56px;">
-                <div class="flex items-center gap-3 min-w-0">
-                    <div id="companyDetail_avatar" class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black text-white shrink-0"
-                        style="background:linear-gradient(135deg,rgba(245,158,11,0.45),rgba(99,102,241,0.35)); border:1px solid rgba(255,255,255,0.18); box-shadow:0 8px 22px rgba(0,0,0,0.35);">🏢</div>
-                    <div class="text-right min-w-0">
-                        <p id="companyDetail_name" class="member-detail-name truncate">—</p>
-                        <p id="companyDetail_count" class="member-detail-sub">—</p>
-                    </div>
+    <div class="cd-shell" onclick="event.stopPropagation()">
+        <button onclick="window.companyModalBack()" class="member-detail-close cd-close" aria-label="إغلاق">✕</button>
+ 
+        <!-- العمود الجانبي: هوية الشركة + مؤشرات السعة + الاشتراك -->
+        <aside class="cd-rail">
+            <div class="cd-id">
+                <div id="companyDetail_avatar" class="cd-avatar">🏢</div>
+                <div class="cd-id-text">
+                    <p id="companyDetail_name" class="cd-name">—</p>
+                    <p id="companyDetail_count" class="cd-status" data-state="on">—</p>
                 </div>
-                <button id="companySettingsToggle" onclick="window.toggleCompanySettings()"
-                    class="shrink-0 px-4 py-2.5 rounded-xl font-black text-xs text-amber-300 transition-all active:scale-95"
-                    style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35);">⚙️ إعدادات الشركة</button>
             </div>
-            <div id="companyDetail_stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4"></div>
-        </div>
-
-        <!-- لوحة القادة (الافتراضية) -->
-        <div id="companyLeadersPane" class="flex flex-col flex-1 min-h-0 px-5 pt-4 pb-5">
-            <div class="flex items-center gap-2 mb-3 shrink-0">
-                <select id="companyLeadersFilter" onchange="window.renderCompanyLeaders(true)"
-                    class="erg-input border border-white/10 rounded-xl px-2 py-2.5 text-white text-[11px] font-black outline-none shrink-0" style="background:rgba(255,255,255,0.04);">
-                    <option value="all" style="background:#0f1420;">الكل</option>
-                    <option value="active" style="background:#0f1420;">نشط</option>
-                    <option value="expired" style="background:#0f1420;">منتهي</option>
-                </select>
-                <input type="text" id="companyLeadersSearch" oninput="window.renderCompanyLeaders(true)" placeholder="🔍 ابحث عن قائد..."
-                    class="erg-input flex-1 min-w-0 border border-white/10 rounded-xl px-3 py-2.5 text-white text-[11px] outline-none focus:border-indigo-500 text-right" style="background:rgba(255,255,255,0.04);">
-                <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)"
-                    class="shrink-0 px-4 py-2.5 rounded-xl font-black text-xs text-white transition-all active:scale-95"
-                    style="background:linear-gradient(135deg,#059669,#047857); box-shadow:0 6px 16px rgba(5,150,105,0.3);">➕ قائد</button>
+            <div id="companyDetail_stats" class="cd-stats"></div>
+        </aside>
+ 
+        <!-- مساحة العمل -->
+        <section class="cd-main">
+            <div class="cd-topbar">
+                <h3 id="companyPaneTitle" class="cd-title">قادة الشركة</h3>
+                <button id="companySettingsToggle" onclick="window.toggleCompanySettings()" class="cd-btn cd-btn-amber">⚙️ إعدادات الشركة</button>
             </div>
-            <div id="companyDetail_leadersList" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start flex-1 min-h-0 overflow-y-auto custom-scrollbar"></div>
-            <button id="companyLeadersMore" onclick="window.companyLeadersShowMore()" class="hidden w-full mt-2 py-2 rounded-xl text-[11px] font-black text-indigo-300 shrink-0" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3);"></button>
-        </div>
-
-        <!-- لوحة إعدادات الشركة (تظهر بزر ⚙️) -->
-        <div id="companySettingsPane" class="hidden flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 pt-4 pb-5">
-            <div id="companyDetail_info" class="mb-3"></div>
-            <div class="flex gap-2">
-                <button onclick="window.toggleCompanyRename()"
-                    class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-amber-300 transition-all active:scale-95"
-                    style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4);">
-                    ✏️ تعديل بيانات الشركة
-                </button>
-                <button onclick="window.toggleCompanyBilling()"
-                    class="flex-1 py-3 rounded-[var(--radius-sm)] font-black text-xs text-cyan-300 transition-all active:scale-95"
-                    style="background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3);">
-                    💵 الاشتراك والتمديد
-                </button>
-            </div>
-<button onclick="window.toggleCompanyQuota()"
-                class="w-full mt-2 py-3 rounded-[var(--radius-sm)] font-black text-xs text-emerald-300 transition-all active:scale-95"
-                style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3);">
-                🔢 سقوف القادة والأعضاء
-            </button>
-            <div id="companyQuotaWrap" class="hidden mt-3 space-y-2">
-                <p id="companyQuota_usage" class="text-[11px] text-slate-400 font-black text-right">—</p>
-                <div class="flex gap-2">
-                    <div class="flex-1">
-                        <p class="lux-field-label">أقصى عدد قادة</p>
-                        <input type="number" min="0" id="companyQuota_leaders" class="erg-input lux-field-input text-right w-full">
-                    </div>
-                    <div class="flex-1">
-                        <p class="lux-field-label">إجمالي الأعضاء (الحصة)</p>
-                        <input type="number" min="0" id="companyQuota_pool" class="erg-input lux-field-input text-right w-full">
-                    </div>
+ 
+            <!-- لوحة القادة (الافتراضية) -->
+            <div id="companyLeadersPane" class="flex flex-col flex-1 min-h-0 cd-pane">
+                <div class="cd-toolbar">
+                    <input type="text" id="companyLeadersSearch" oninput="window.renderCompanyLeaders(true)" placeholder="ابحث عن قائد..." class="cd-search">
+                    <select id="companyLeadersFilter" onchange="window.renderCompanyLeaders(true)" class="cd-select">
+                        <option value="all">الكل</option>
+                        <option value="active">نشط</option>
+                        <option value="expired">منتهٍ</option>
+                    </select>
+                    <button onclick="window.openAddLeaderForCompany(window._activeCompanyId)" class="cd-btn cd-btn-solid">＋ قائد</button>
                 </div>
-                <button onclick="window.saveCompanyQuota()"
-                    class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
-                    style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
-                    حفظ السقوف
-                </button>
+                <div id="companyDetail_leadersList" class="cd-leaders custom-scrollbar"></div>
+                <button id="companyLeadersMore" onclick="window.companyLeadersShowMore()" class="hidden cd-btn cd-btn-amber cd-block cd-more"></button>
             </div>
-            <div id="companyBillingWrap" class="hidden mt-3 space-y-2">
-                <div class="flex gap-2">
-                    <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)"
-                        class="erg-input lux-field-input text-right flex-1">
-                    <input type="date" id="companyBilling_expiry"
-                        class="erg-input lux-field-input text-right flex-1">
+ 
+            <!-- لوحة إعدادات الشركة (تظهر بزر ⚙️) -->
+            <div id="companySettingsPane" class="hidden flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar cd-pane">
+                <div class="cd-settings">
+ 
+                    <section class="cd-card">
+                        <h4 class="cd-card-title">بيانات الشركة</h4>
+                        <div id="companyDetail_info"></div>
+                        <button onclick="window.toggleCompanyRename()" class="cd-btn cd-btn-amber cd-block">✏️ تعديل بيانات الشركة</button>
+                        <div id="companyRenameWrap" class="hidden cd-form">
+                            <input type="text" id="companyRename_input" placeholder="اسم الشركة" class="erg-input lux-field-input text-right w-full">
+                            <input type="tel" id="companyEditPhone_input" inputmode="tel" dir="ltr" placeholder="رقم الهاتف" class="erg-input lux-field-input text-right w-full">
+                            <input type="email" id="companyEditEmail_input" inputmode="email" dir="ltr" placeholder="البريد الإلكتروني" class="erg-input lux-field-input text-right w-full">
+                            <button onclick="window.saveCompanyName()" class="cd-btn cd-btn-teal cd-block">حفظ البيانات</button>
+                        </div>
+                    </section>
+ 
+                    <section class="cd-card">
+                        <h4 class="cd-card-title">الاشتراك والسقوف</h4>
+                        <button onclick="window.toggleCompanyBilling()" class="cd-btn cd-btn-cyan cd-block">💵 الاشتراك والتمديد</button>
+                        <div id="companyBillingWrap" class="hidden cd-form">
+                            <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)" class="erg-input lux-field-input text-right w-full">
+                            <input type="date" id="companyBilling_expiry" class="erg-input lux-field-input text-right w-full">
+                            <button onclick="window.saveCompanyBilling()" class="cd-btn cd-btn-teal cd-block">حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)</button>
+                        </div>
+                        <button onclick="window.toggleCompanyQuota()" class="cd-btn cd-btn-teal cd-block">🔢 سقوف القادة والأعضاء</button>
+                        <div id="companyQuotaWrap" class="hidden cd-form">
+                            <p id="companyQuota_usage" class="text-[11px] font-black text-right" style="color:var(--cd-mute);">—</p>
+                            <div class="flex gap-2">
+                                <div class="flex-1">
+                                    <p class="lux-field-label">أقصى عدد قادة</p>
+                                    <input type="number" min="0" id="companyQuota_leaders" class="erg-input lux-field-input text-right w-full">
+                                </div>
+                                <div class="flex-1">
+                                    <p class="lux-field-label">إجمالي الأعضاء (الحصة)</p>
+                                    <input type="number" min="0" id="companyQuota_pool" class="erg-input lux-field-input text-right w-full">
+                                </div>
+                            </div>   
+                            <div class="flex gap-2">
+                                <div class="flex-1">
+                                    <p class="lux-field-label">تغييرات أكواد القادة (السقف)</p>
+                                    <input type="number" min="0" id="companyQuota_codeChanges" class="erg-input lux-field-input text-right w-full">
+                                </div>
+                                <div class="flex-1">
+                                    <p class="lux-field-label">المستخدم منها</p>
+                                    <input type="number" min="0" id="companyQuota_codeUsed" class="erg-input lux-field-input text-right w-full">
+                                </div>
+                            </div>
+                            <button onclick="window.saveCompanyQuota()" class="cd-btn cd-btn-teal cd-block">حفظ السقوف</button>
+                        </div>
+                    </section>
+ 
+                    <section class="cd-card cd-span">
+                        <h4 class="cd-card-title">🧾 سجل المدفوعات</h4>
+                        <div id="companyDetail_payments" class="space-y-1"></div>
+                    </section>
+ 
+                    <section class="cd-card cd-danger cd-span">
+                        <button onclick="window.deleteCompany()" class="cd-btn cd-btn-rose cd-block">🗑️ حذف الشركة نهائياً</button>
+                    </section>
+ 
                 </div>
-                <button onclick="window.saveCompanyBilling()"
-                    class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
-                    style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
-                    حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)
-                </button>
             </div>
-            <div id="companyRenameWrap" class="hidden mt-3 space-y-2">
-    <input type="text" id="companyRename_input" placeholder="اسم الشركة"
-        class="erg-input lux-field-input text-right w-full">
-    <input type="tel" id="companyEditPhone_input" inputmode="tel" dir="ltr" placeholder="رقم الهاتف"
-        class="erg-input lux-field-input text-right w-full">
-    <input type="email" id="companyEditEmail_input" inputmode="email" dir="ltr" placeholder="البريد الإلكتروني"
-        class="erg-input lux-field-input text-right w-full">
-    <button onclick="window.saveCompanyName()"
-        class="w-full py-2.5 rounded-xl font-black text-xs text-emerald-300"
-        style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
-        حفظ البيانات
-    </button>
-</div>
-            <p class="text-slate-500 text-[10px] font-black uppercase mt-4 mb-2 text-right">🧾 سجل المدفوعات</p>
-            <div id="companyDetail_payments" class="space-y-1"></div>
-            <button onclick="window.deleteCompany()"
-                class="w-full mt-5 py-3 rounded-[var(--radius-sm)] font-black text-xs text-rose-400 transition-all active:scale-95"
-                style="background:transparent; border:1.5px dashed rgba(244,63,94,0.4);">
-                🗑️ حذف الشركة نهائياً
-            </button>
-        </div>
+        </section>
     </div>
 </div>
 
@@ -13701,7 +14045,7 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
             <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
             <div class="flex items-center gap-2">
                 <button onclick="window.goHome()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
-                <button onclick="window.loadReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-400 border border-white/10 hover:bg-white/5 hover:rotate-180 transition-all duration-500">🔄 تحديث</button>
+                <button onclick="window.filterReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-400 border border-white/10 hover:bg-white/5 hover:rotate-180 transition-all duration-500">🔄 تحديث</button>
                 <button onclick="window.exportReportsPDF()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/10 transition-all" style="box-shadow:0 2px 10px rgba(99,102,241,0.12);">📄 PDF</button>
                 <button onclick="window.clearAllReports()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 transition-all">🗑️ تصفير</button>
             </div>
@@ -14141,9 +14485,6 @@ input[type="date"]::-webkit-date-and-time-value { text-align: right; }
     <span class="text-cyan-400 font-black text-sm italic tracking-wide"></span>
 </div>
 
-
-
-<audio id="alertSound" src="https://actions.google.com/sounds/v1/emergency/emergency_siren_short.ogg" preload="auto" loop></audio>
 
 
 
