@@ -46,38 +46,8 @@ window._loginGuard = {
 <script>
 // ===== Service Worker للعمل بدون إنترنت =====
 if ('serviceWorker' in navigator) {
-    const swCode = `
-const CACHE = 'erg-v1';
-const ASSETS = [
-    'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
-    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-    'https://cdn.tailwindcss.com',
-    'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js',
-    'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js',
-    'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js'
-];
-self.addEventListener('install', e => {
-    e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {})));
-    self.skipWaiting();
-});
-self.addEventListener('activate', e => {
-    e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));
-    self.clients.claim();
-});
-self.addEventListener('fetch', e => {
-    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-        if (res && res.status === 200 && e.request.method === 'GET') {
-            const clone = res.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
-        }
-        return res;
-    }).catch(() => caches.match(e.request))));
-});
-`;
-    const blob = new Blob([swCode], { type: 'application/javascript' });
-    const swUrl = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(swUrl).then(reg => {
+        const swUrl = './sw.js';
+        navigator.serviceWorker.register(swUrl, { updateViaCache: 'none' }).then(reg => {
     }).catch(e => console.warn('SW registration failed:', e));
 }
 </script>
@@ -191,6 +161,40 @@ const firebaseConfig = {
 };
 
 const appId = "erg2024"; 
+
+// ===== مخزن IndexedDB لسجل المواد (بديل localStorage الذي حده نحو 5MB) =====
+window._ergDbOpen = () => new Promise((res) => {
+    try {
+        const rq = indexedDB.open('erg_cache', 1);
+        rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => res(null);
+    } catch (e) { res(null); }
+});
+window.ergIdbGet = async (key) => {
+    const d = await (window._ergDbP ||= window._ergDbOpen());
+    if (!d) return null;
+    return new Promise((res) => {
+        try {
+            const r = d.transaction('kv').objectStore('kv').get(key);
+            r.onsuccess = () => res(r.result ?? null);
+            r.onerror = () => res(null);
+        } catch (e) { res(null); }
+    });
+};
+window.ergIdbPut = async (key, val) => {
+    const d = await (window._ergDbP ||= window._ergDbOpen());
+    if (!d) return false;
+    return new Promise((res) => {
+        try {
+            const tx = d.transaction('kv', 'readwrite');
+            tx.objectStore('kv').put(val, key);
+            tx.oncomplete = () => res(true);
+            tx.onerror = () => res(false);
+        } catch (e) { res(false); }
+    });
+};
+
 
 // --- المتغيرات الأمنية الجديدة للمنظومة ---
 let MASTER_HASH = ""; 
@@ -408,7 +412,7 @@ window.editPackageStart = (id) => {
     document.getElementById('pkgPrice').value = p.price || '';
     document.getElementById('pkgCodeChanges').value = p.leaderCodeChanges ?? 0;
     document.getElementById('pkgFeatured').checked = !!p.featured;
-    window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = !!(p.features && p.features[f]); });
+    window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = !!(p.features && window.featChecked(p.features, f)); });
 };
 
 window.deletePackageEntry = async (id) => {
@@ -855,6 +859,7 @@ const getIsoValue = (val) => {
         window.renderMaterialUI = (m) => {
             document.getElementById('resView')?.classList.remove('hidden');
             document.getElementById('sideQuickNav')?.classList.remove('hidden');
+            window.applySideFeatures?.();
 
 
 // --- تحديث مسافات العزل في التصميم المطور الجديد ---
@@ -909,6 +914,7 @@ const isoInit = document.getElementById('iso_initial');
             const handlingSec = document.getElementById('handlingSection');
             if (handlingSec) handlingSec.classList.toggle('hidden', !m.handling || m.handling.length === 0);
             if(window.drawPlacard) window.drawPlacard(m.class || "خطر");
+            document.getElementById('btnCameoCheck')?.classList.toggle('hidden', !(window.cameoAllowed && window.cameoAllowed()));
                     if(window.drawPlume) window.drawPlume(m);
         };
 
@@ -1382,6 +1388,7 @@ const _sv = await window.serverLogin('leader', key);
                 window.myLeaderName = subData.ownerName || "قائد ميداني";
                 window.myFeatures = subData.features || null;
                 window._leaderSubKey = subSnap.id;
+                window.myMemberFeatures = null;
                 window.myCompanyId = subData.companyId || subSnap.id;
                 window.isCompanyOwner = subData.isCompanyOwner === true;
                 window.myCompanyName = subData.companyName || subData.ownerName || "";
@@ -1506,6 +1513,7 @@ window.activateAppByEmail = async () => {
             window.myLeaderName = subData.ownerName || 'قائد ميداني';
             window.myFeatures = subData.features || null;
             window._leaderSubKey = m.docId;
+            window.myMemberFeatures = subData.memberFeatures || null;
             window.myCompanyId = subData.companyId || m.docId;
             window.isCompanyOwner = subData.isCompanyOwner === true;
             window.myCompanyName = subData.companyName || subData.ownerName || '';
@@ -2149,7 +2157,7 @@ window.loadPayments = async () => {
         const feats = s.features || null; // null = بدون قيود (كل المزايا متاحة — اشتراك يدوي)
         const checksHtml = window.FEATURE_CATALOG.map(f => `
             <label class="flex items-center gap-1.5 text-[10px] text-slate-300 font-bold">
-                <input type="checkbox" class="subFeatCheck" data-feat="${f}" ${(!feats || feats[f]) ? 'checked' : ''}>
+                <input type="checkbox" class="subFeatCheck" data-feat="${f}" ${window.featChecked(feats, f) ? 'checked' : ''}>
                 ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
             </label>
         `).join('');
@@ -2171,6 +2179,12 @@ window.loadPayments = async () => {
             </div>
             <div id="subFeatPanel_${s.id}" class="hidden px-4 pb-3 pt-2 flex items-center flex-wrap gap-3" style="border-top:1px solid rgba(255,255,255,0.06);">
                 ${checksHtml}
+                <div class="w-full text-[10px] font-black text-amber-300 pt-2" style="border-top:1px dashed rgba(255,255,255,0.08);">👥 صلاحيات الأعضاء التابعين (أزرار الشريط الجانبي)</div>
+                ${window.SIDE_FEATURES.map(f => `
+                <label class="flex items-center gap-1.5 text-[10px] text-slate-300 font-bold">
+                    <input type="checkbox" class="subMemFeatCheck" data-feat="${f}" ${window.featChecked(s.memberFeatures, f) ? 'checked' : ''}>
+                    ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
+                </label>`).join('')}
                 <button onclick="window.saveSubscriberFeatures('${s.id}')" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-emerald-300 mr-auto" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">💾 حفظ</button>
 <button onclick="window.saveSubscriberFeatures('${s.id}', true)" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">🏢 حفظ لكل الشركة</button>
             </div>
@@ -2187,13 +2201,17 @@ window.saveSubscriberFeatures = async (id, applyAll = false) => {
     if (!panel) return;
     const features = {};
     panel.querySelectorAll('.subFeatCheck').forEach(cb => { features[cb.dataset.feat] = cb.checked; });
+    const memberFeatures = {};
+    panel.querySelectorAll('.subMemFeatCheck').forEach(cb => { memberFeatures[cb.dataset.feat] = cb.checked; });
+    const upd = { features };
+    if (panel.querySelector('.subMemFeatCheck')) upd.memberFeatures = memberFeatures;
     try {
         const base = (window.subscribers || []).find(s => s.id === id);
         const targets = (applyAll && base)
             ? (window.subscribers || []).filter(s => (s.companyId || s.id) === (base.companyId || base.id))
             : [{ id }];
         const batch = writeBatch(db);
-        targets.forEach(t => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', t.id), { features }));
+        targets.forEach(t => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', t.id), upd));
         await batch.commit();
         window.showNotif(applyAll ? `✅ تم تحديث مزايا ${targets.length} قائد في الشركة` : '✅ تم تحديث مزايا هذا المشترك', 'success');
         panel.classList.add('hidden');
@@ -3139,7 +3157,7 @@ window.radialSections = [
 // ===== كتالوج المزايا الديناميكي — يُبنى تلقائيًا من قائمة تطبيقات سطح المكتب =====
 // أي تطبيق يُستحدث مستقبلاً ويُضاف لقائمة radialSections يصبح ميزة قابلة للتفعيل تلقائيًا بلا أي تعديل إضافي
 window.APP_FEATURE_KEY = { app_map: 'radar', app_cloud: 'cloud', app_dashboard: 'dashboard' }; // مفاتيح قديمة محفوظة للتوافق مع بيانات محفوظة سابقًا
-window.FEATURE_ICONS = { radar:'📍', pdfExport:'📄', cloud:'☁️', dashboard:'📊', erg:'🧯', reps:'📋', subs:'👥', team:'🤝', finance:'💰', import:'⬆️', config:'🔐', cameo:'⚗️' };
+window.FEATURE_ICONS = { radar:'📍', pdfExport:'📄', cloud:'☁️', dashboard:'📊', erg:'🧯', reps:'📋', subs:'👥', team:'🤝', finance:'💰', import:'⬆️', config:'🔐', cameo:'⚗️', voiceBrief:'🔊', locShare:'📡', fieldReport:'🚨', waShare:'💬' };
 
 // هذه الأيقونات حصراً لمدير النظام، ولا يجوز أن تظهر ضمن مزايا أي قائد مهما كان نوع اشتراكه (يدوي أو باقة)
 window.MASTER_ONLY_APPS = ['app_subs', 'app_finance', 'app_cloud', 'app_config', 'app_import'];
@@ -3152,9 +3170,23 @@ window.FEATURE_APPS = window.radialSections
         label: s.label
     }));
 
-window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(['pdfExport']);
+window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(['pdfExport', 'voiceBrief', 'locShare', 'fieldReport', 'waShare']);
 
-window.FEATURE_LABELS = { pdfExport: 'تصدير تقارير PDF' };
+window.FEATURE_LABELS = { pdfExport: 'تصدير تقارير PDF', voiceBrief: 'الموجز الصوتي', locShare: 'بث الموقع المباشر', fieldReport: 'إرسال بلاغ ميداني', waShare: 'مشاركة البيانات واتساب' };
+
+// ===== أزرار الشريط الجانبي الخاضعة للصلاحيات =====
+window.SIDE_FEATURES = ['pdfExport', 'voiceBrief', 'locShare', 'fieldReport', 'waShare'];
+// المفاتيح الجديدة تُعدّ مفعّلة لمن لم تُحفظ له قيمة بعد (حفاظاً على ما يعمل لديهم الآن)
+window.SIDE_DEFAULT_ON = ['voiceBrief', 'locShare', 'fieldReport', 'waShare'];
+window.featChecked = (feats, key) => !feats ? true : (feats[key] === undefined ? window.SIDE_DEFAULT_ON.includes(key) : feats[key] === true);
+// المدير دائماً، القائد/الشركة حسب باقتهم، العضو حسب باقة قائده وصلاحيات الأعضاء المحددة له
+window.sideFeatureOn = (key) => {
+    const r = window.userRole;
+    if (r === 'master') return true;
+    if (r === 'leader') return window.featChecked(window.myFeatures, key);
+    if (r === 'member') return window.featChecked(window.myFeatures, key) && window.featChecked(window.myMemberFeatures, key);
+    return false;
+};
 window.FEATURE_APPS.forEach(f => { window.FEATURE_LABELS[f.key] = f.label; });
 
 window.renderRadialMenu = () => {
@@ -4796,7 +4828,7 @@ window.applyPackageToNewLeaderForm = () => {
     const p = (window._adminAddPackagesCache || []).find(x => x.id === sel?.value);
     window.FEATURE_CATALOG.forEach(f => {
         const cb = document.getElementById('new_lfeat_' + f);
-        if (cb) cb.checked = !!(p && p.features && p.features[f]);
+        if (cb) cb.checked = !!(p && p.features && window.featChecked(p.features, f));
     });
 };
 
@@ -5860,6 +5892,7 @@ window.sendFieldReport = async (opts = {}) => {
         if (last) last.textContent = 'آخر بلاغ أُرسل: ' + new Date(now).toLocaleTimeString('ar-SA') + ' ✓' + (c ? '' : ' (بدون موقع)');
         const notesEl = document.getElementById('repNotes'); if (notesEl) notesEl.value = '';
         if (btn) btn.innerHTML = '✅ تم إرسال البلاغ';
+        setTimeout(() => window.closeFieldReportModal?.(), 1500);
         window.showNotif(c ? '🚨 تم إرسال البلاغ مع موقعك لقائدك' : '⚠️ أُرسل البلاغ بدون موقع — فعّل GPS ثم أعد الإرسال', c ? 'success' : 'error');
         if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
         if (opts.quick && window._posWatch == null) window._startLocationShare(true);
@@ -5934,6 +5967,66 @@ window.toggleLocationShare = () => (window._posWatch != null ? window._stopLocat
 
 // توافق مع أي استدعاء قديم
 window.sendLiveReport = (...a) => window.sendFieldReport(...a);
+
+// ===== الشريط الجانبي: حالة زر بث الموقع + نافذة البلاغ + مشاركة واتساب + الصلاحيات =====
+window._locShareUI = (active) => {
+    const btn = document.getElementById('sideBtnLoc');
+    if (!btn) return;
+    btn.classList.toggle('loc-active', !!active);
+    const ic = btn.querySelector('.sb-ic'), lb = btn.querySelector('.sb-lb');
+    if (ic) ic.textContent = active ? '⏹' : '📍';
+    if (lb) lb.textContent = active ? 'إيقاف البث' : 'بث موقعي';
+    btn.title = active ? 'إيقاف بث موقعي' : 'بث موقعي';
+};
+
+window.applySideFeatures = () => {
+    const map = { sideBtnLoc: 'locShare', sideBtnReport: 'fieldReport', sideBtnPdf: 'pdfExport', sideBtnWa: 'waShare', sideBtnVoice: 'voiceBrief' };
+    Object.entries(map).forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = window.sideFeatureOn(key) ? '' : 'none';
+    });
+    window._locShareUI(window._posWatch != null);
+};
+
+window.openFieldReportModal = () => {
+    if (!window.sideFeatureOn('fieldReport')) { window.showNotif('🔒 هذه الميزة غير متاحة لحسابك. تواصل مع الإدارة.', 'error'); return; }
+    const m = document.getElementById('fieldReportModal');
+    if (!m) return;
+    window.setReportPriority('high');
+    const mat = window.activeMaterial;
+    const t = document.getElementById('fieldReportMatName');
+    if (t) t.textContent = mat ? `🧪 ${mat.name || mat.NAME || ''} — UN ${mat.un || mat.UN || ''}` : '';
+    m.classList.remove('hidden'); m.classList.add('flex');
+};
+window.closeFieldReportModal = () => {
+    const m = document.getElementById('fieldReportModal');
+    if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+};
+
+window.shareMaterialWhatsApp = () => {
+    if (!window.sideFeatureOn('waShare')) { window.showNotif('🔒 هذه الميزة غير متاحة لحسابك. تواصل مع الإدارة.', 'error'); return; }
+    const m = window.activeMaterial;
+    if (!m) { window.showNotif('اختر مادة أولاً', 'error'); return; }
+    const txt = (id) => (document.getElementById(id)?.textContent || '').trim();
+    const list = (a) => (Array.isArray(a) ? a : (typeof a === 'string' ? a.split('\n') : [])).map(x => String(x).trim()).filter(Boolean);
+    const hz = list(m.hazards).slice(0, 3).map(x => '• ' + x).join('\n');
+    const who = window._fieldIdentity ? window._fieldIdentity().memberName : '';
+    const msg = [
+        '☣️ *ERG SYSTEM — بيانات مادة خطرة*',
+        '━━━━━━━━━━━━━━━━',
+        `🧪 *المادة:* ${m.name || m.Name || '--'}`,
+        `🔢 *UN:* ${m.un || m.UN || '--'}${m.formula ? '   🧬 ' + m.formula : ''}`,
+        `⚠️ *التصنيف:* ${m.class || '--'}`,
+        `📖 *دليل الاستجابة:* GUIDE ${m.guide || m.Guide || '--'}`,
+        `🚧 *مسافة العزل:* أولية ${txt('iso_initial') || '--'} | نهاراً ${txt('iso_day') || '--'} | ليلاً ${txt('iso_night') || '--'}`,
+        hz ? `☠️ *المخاطر:*\n${hz}` : '',
+        m.extinguishingAgent ? `🧯 *الإطفاء:* ${m.extinguishingAgent}` : '',
+        m.ppe ? `🦺 *الوقاية:* ${m.ppe}` : '',
+        who ? `👤 *المُرسِل:* ${who}` : '',
+        `🕐 ${new Date().toLocaleString('ar-SA')}`
+    ].filter(Boolean).join('\n');
+    window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+};
 
 // ---------- 3) علامات أعضاء الفريق المباشرة على الرادار ----------
 window.refreshPositionMarkers = () => {
@@ -6126,9 +6219,11 @@ async function startDataSync() {
     };
 
     showLoader("⚙️ جاري مزامنة سجل المواد...");
-    window.renderSkeletonCards('reportFeedCont', 4);
+       window.renderSkeletonCards('reportFeedCont', 4);
     window.renderSkeletonCards('archiveLog', 4);
 
+    // تحميل فوري من الذاكرة المحلية ليعمل التطبيق قبل وصول السحابة
+    window.ergIdbGet('materials').then(a => { if (Array.isArray(a) && a.length && !(window.appData && window.appData.length)) { window.appData = a; hideLoader(); const c = document.getElementById('dataCount'); if (c) c.textContent = `${a.length} سجل (من الذاكرة المحلية)`; } });
 
     // 1. مزامنة سجل المواد الموحد
     onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'erg_full_registry'), (snapshot) => {
@@ -6156,7 +6251,7 @@ hideLoader();
                 window.renderMaterialUI(updated);
             }
         }
-    });
+    }, (err) => { console.error('registry sync error:', err); hideLoader(); window.showNotif('⚠️ تعذّرت مزامنة سجل المواد، يعمل التطبيق بالنسخة المحلية', 'error'); window.loadLocalCache?.(); });
 
     // 2. مزامنة بروتوكولات الأدلة (الـ 4 نقاط الأساسية)
     onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'erg_guides'), (snapshot) => {
@@ -7042,7 +7137,7 @@ window.startEditSub = (k) => {
         window.renderNewLeaderFeatCheckboxes();
         window.FEATURE_CATALOG.forEach(f => {
             const cb = document.getElementById('new_lfeat_' + f);
-            if (cb) cb.checked = !s.features || s.features[f] === true;
+            if (cb) cb.checked = window.featChecked(s.features, f);
         });
 
         window.updateSubPriceLive();
@@ -7162,7 +7257,7 @@ if (_unParam) {
         let mat = null;
         // أولاً من الكاش
         try {
-            const cached = localStorage.getItem('erg_cache_materials');
+            const cached = null; const _arr0 = await window.ergIdbGet('materials'); if (_arr0) mat = _arr0.find(m => (m.un||m.UN||'').toString() === _unParam);
             if (cached) {
                 const arr = JSON.parse(cached);
                 mat = arr.find(m => (m.un||m.UN||'').toString() === _unParam);
@@ -7172,7 +7267,7 @@ if (_unParam) {
         if (!mat) {
             try {
                 await signInAnonymously(auth);
-                const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'materials'));
+                const snap = { docs: [] }; const _s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'erg_full_registry', String(_unParam))); if (_s.exists()) { const x = _s.data(); snap.docs.push({ data: () => ({ ...x, un: x.un || x.UN, name: x.name || x.Name, guide: x.guide || x.Guide, isolation: x.isolation || x.Isolation || {} }) }); }
                 const arr = snap.docs.map(d => d.data());
                 mat = arr.find(m => (m.un||m.UN||'').toString() === _unParam);
             } catch(e) {}
@@ -9208,7 +9303,8 @@ window.initOfflineMode = () => {
     // حفظ البيانات محلياً عند كل تحديث
     window.saveLocalCache = () => {
         try {
-            localStorage.setItem('erg_cache_materials', JSON.stringify(window.appData || []));
+            if (window.appData && window._matSavedRef !== window.appData) { window._matSavedRef = window.appData; window.ergIdbPut('materials', window.appData); }
+            localStorage.removeItem('erg_cache_materials');
             localStorage.setItem('erg_cache_reports',   JSON.stringify(window.allReports || []));
             localStorage.setItem('erg_cache_members',   JSON.stringify(window.teamMembers || []));
             localStorage.setItem('erg_cache_time',      Date.now().toString());
@@ -9218,7 +9314,7 @@ window.initOfflineMode = () => {
     // استعادة البيانات المحلية عند انقطاع الاتصال
     window.loadLocalCache = () => {
         try {
-            const mats = localStorage.getItem('erg_cache_materials');
+            const mats = null; window.ergIdbGet('materials').then(a => { if (Array.isArray(a) && a.length && !(window.appData && window.appData.length)) window.appData = a; });
             const reps = localStorage.getItem('erg_cache_reports');
             const mems = localStorage.getItem('erg_cache_members');
             const time = localStorage.getItem('erg_cache_time');
@@ -10097,7 +10193,7 @@ window.deleteCameoData = async () => {
 
         combo($q('#cm_a1'), 'مثال: 1090 أو Acetone', i => { P1 = i; rPair(); });
         combo($q('#cm_a2'), 'مثال: 1789 أو hydrochloric', i => { P2 = i; rPair(); });
-        combo($q('#cm_b1'), 'رقم UN أو مادة أو مجموعة', it => {
+        combo($q('#cm_b1'), 'رقم UN أو مادة أو مجموعة', window._cmPickOne = it => {
             const res = Object.keys(G).map(Number).map(id => { const rows = cmp(it, { g: new Set([id]) }); return { id, rows, c: rows.length ? rows[0].c : 0 }; });
             const sec = (c, t, open) => {
                 const l = res.filter(x => x.c == c);
@@ -10161,10 +10257,24 @@ window.deleteCameoData = async () => {
             say('❌ تعذّر تحميل بيانات التوافق. حاول مجدداً أو تواصل مع الإدارة.');
         }
     };
+
+    // فتح الكاميو مباشرة على مادة برقم UN (يُستدعى من بطاقة مادة ERG)
+    window.cameoOpenUN = async (un) => {
+        if (!window.cameoAllowed || !window.cameoAllowed()) { window.showNotif('⛔ هذه الميزة غير مفعّلة في باقتك', 'error'); return; }
+        const n = String(un).replace(/\D/g, '').replace(/^0+/, '');
+        if (!n) { window.showNotif('لا يوجد رقم UN صالح لهذه المادة', 'error'); return; }
+        window.openWin('winCameo');
+        for (let i = 0; i < 60 && !(window._cm && window._cm.ver && index.length); i++) await new Promise(r => setTimeout(r, 250));
+        const target = index.find(e => e.t === 'un' && String(e.u).replace(/^0+/, '') === n);
+        if (!target) { window.showNotif('هذه المادة غير موجودة في قاعدة CAMEO (UN ' + un + ')', 'error'); return; }
+        $q('#cm_tabs button[data-m="cm_one"]')?.click();
+        window._cmPickOne(toItem(target));
+    };
 })();
 
 // ================= الصلاحيات وربط فتح النوافذ =================
 const _openWinBeforeCameo = window.openWin;
+window.cameoAllowed = () => { const r = window.userRole; return r === 'master' || (r === 'leader' && (!window.myFeatures || window.myFeatures.cameo === true)); };
 window.openWin = (id) => {
     const role = window.userRole;
     if (id === 'winCameo') {
@@ -11541,6 +11651,21 @@ body:not(.desktop-active) #commandDeckBar { display: none !important; }
 /* نوافذ الشركة/القائد: ابتعاد عن الشريط العلوي حتى لا يُقصّ الرأس */
 #companyDetailModal, #subDetailModal { padding-top: calc(5rem + var(--safe-top, 0px)); }
 #subDetailModal .member-detail-card { max-height: calc(100dvh - 6.5rem - var(--safe-top, 0px)); }
+/* الشريط الجانبي السريع */
+.side-btn { width:64px; min-height:64px; padding:6px 2px; border-radius:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; color:#fff; border-bottom:4px solid rgba(0,0,0,.45); box-shadow:0 12px 28px rgba(0,0,0,.45); transition:transform .15s ease, filter .15s ease; }
+.side-btn:hover { transform:scale(1.08); filter:brightness(1.1); }
+.side-btn:active { transform:scale(.95); }
+.side-btn .sb-ic { font-size:24px; line-height:1; }
+.side-btn .sb-lb { font-size:9px; font-weight:900; line-height:1.1; text-align:center; }
+.side-btn-loc { background:#0891b2; border-bottom-color:#164e63; }
+.side-btn-loc.loc-active { background:#dc2626; border-bottom-color:#7f1d1d; animation:sideLocPulse 1.6s ease-in-out infinite; }
+.side-btn-rep { background:#b91c1c; border-bottom-color:#7f1d1d; }
+.side-btn-pdf { background:#ea580c; border-bottom-color:#7c2d12; }
+.side-btn-wa  { background:#16a34a; border-bottom-color:#14532d; }
+.side-btn-voice { background:#4f46e5; border-bottom-color:#312e81; }
+.side-btn-top { background:#1e293b; border-bottom-color:#020617; }
+@keyframes sideLocPulse { 0%,100% { box-shadow:0 12px 28px rgba(0,0,0,.45), 0 0 0 0 rgba(220,38,38,.55); } 50% { box-shadow:0 12px 28px rgba(0,0,0,.45), 0 0 0 10px rgba(220,38,38,0); } }
+@media (max-height:640px) { .side-btn { width:54px; min-height:54px; } .side-btn .sb-ic { font-size:20px; } #sideQuickNav { gap:.5rem !important; } }
 body:not(.desktop-active) #radialOverlay { display: none !important; }
 
 #radialTrigger {
@@ -12491,32 +12616,16 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             style="background:linear-gradient(135deg,#2563eb,#1d4ed8); border-bottom-color:#1e3a8a;">
             📖 إجراءات الدليل (GUIDE <span id="resGuideNum">--</span>)
         </button>
-        <button onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
-            class="px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
+                <button onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
+            class="col-span-2 px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
             style="background:rgba(139,92,246,0.85); border-bottom-color:#4c1d95;">
             📱 QR Code
         </button>
-        <button onclick="window.exportFullIncidentPDF()"
-            class="px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
-            style="background:rgba(71,85,105,0.9); border-bottom-color:#1e293b;">
-            📄 تقرير PDF
+        <button id="btnCameoCheck" onclick="window.cameoOpenUN(document.getElementById('resU').textContent)"
+            class="hidden col-span-2 md:col-span-4 px-4 py-4 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
+            style="background:linear-gradient(135deg,#d97706,#b45309); border-bottom-color:#78350f;">
+            ⚗️ افحص توافق تخزين هذه المادة (CAMEO)
         </button>
-    </div>
-
-    <!-- مشاركة الموقع المباشر -->
-    <div id="locShareCard" class="w-full rounded-3xl px-5 py-4 flex items-center justify-between gap-3 text-right"
-         style="background:linear-gradient(135deg,rgba(6,182,212,0.10),rgba(0,0,0,0.40)); border:1px solid rgba(6,182,212,0.30);">
-        <div class="flex items-center gap-3 shrink-0">
-            <button id="btnLocShare" onclick="window.toggleLocationShare()"
-                class="px-5 py-3 rounded-2xl font-black text-sm text-white border-b-4 active:translate-y-1 transition-all"
-                style="background:linear-gradient(135deg,#0891b2,#0e7490); border-bottom-color:#164e63;">▶ تشغيل</button>
-            <span id="locShareStatus" class="text-xs font-black px-3 py-1.5 rounded-full"
-                  style="background:rgba(148,163,184,0.15); color:#94a3b8;">⚪ متوقفة</span>
-        </div>
-        <div class="text-right">
-            <p class="text-white font-black text-base">📍 مشاركة موقعي المباشر</p>
-            <p class="text-cyan-100/70 text-xs font-bold mt-1">يظهر موقعك على رادار قائدك وشركتك، ويتوقف عند الإيقاف.</p>
-        </div>
     </div>
 
     <!-- البلاغ الميداني -->
@@ -13595,24 +13704,56 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
 
 
 
-<div id="sideQuickNav" class="hidden fixed right-6 top-1/2 -translate-y-1/2 flex flex-col gap-6 z-[20000] animate-in slide-in-from-right-10">
-    <button onclick="window.exportMaterialPDF()" title="تصدير تقرير PDF" 
-            class="w-16 h-16 bg-red-600 rounded-2xl flex items-center justify-center text-3xl shadow-2xl hover:scale-110 active:scale-95 transition-all border-b-4 border-red-900">
-        📄
+<div id="sideQuickNav" class="hidden fixed right-3 md:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 z-[20000] animate-in slide-in-from-right-10">
+    <button id="sideBtnLoc" onclick="window.toggleLocationShare()" title="بث موقعي" class="side-btn side-btn-loc">
+        <span class="sb-ic">📍</span><span class="sb-lb">بث موقعي</span>
     </button>
-
-    <button onclick="window.speakTactic()" title="موجز صوتي" 
-            class="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-3xl shadow-2xl hover:scale-110 active:scale-95 transition-all border-b-4 border-indigo-900">
-        🔊
+    <button id="sideBtnReport" onclick="window.openFieldReportModal()" title="إرسال بلاغ ميداني" class="side-btn side-btn-rep">
+        <span class="sb-ic">🚨</span><span class="sb-lb">إرسال بلاغ</span>
     </button>
-
-    
-    <button onclick="window.scrollToWinTop()" title="إلى الأعلى" 
-            class="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-3xl shadow-2xl hover:scale-110 transition-all border-b-4 border-slate-950">
-        🔝
+    <button id="sideBtnPdf" onclick="window.exportMaterialPDF()" title="تصدير تقرير PDF" class="side-btn side-btn-pdf">
+        <span class="sb-ic">📄</span><span class="sb-lb">تقرير PDF</span>
+    </button>
+    <button id="sideBtnWa" onclick="window.shareMaterialWhatsApp()" title="مشاركة البيانات عبر واتساب" class="side-btn side-btn-wa">
+        <span class="sb-ic">💬</span><span class="sb-lb">واتساب</span>
+    </button>
+    <button id="sideBtnVoice" onclick="window.speakTactic()" title="موجز صوتي" class="side-btn side-btn-voice">
+        <span class="sb-ic">🔊</span><span class="sb-lb">موجز صوتي</span>
+    </button>
+    <button onclick="window.scrollToWinTop()" title="إلى الأعلى" class="side-btn side-btn-top">
+        <span class="sb-ic">🔝</span><span class="sb-lb">للأعلى</span>
     </button>
 </div>
 
+<!-- نافذة البلاغ الميداني (تُفتح من الشريط الجانبي) -->
+<div id="fieldReportModal" class="hidden fixed inset-0 z-[21000] items-center justify-center p-4 lux-modal-backdrop" onclick="window.closeFieldReportModal()">
+    <div class="w-full max-w-md rounded-3xl p-5 flex flex-col gap-4 text-right relative" onclick="event.stopPropagation()"
+         style="background:linear-gradient(135deg,rgba(220,38,38,0.16),rgba(8,10,18,0.98)); border:1px solid rgba(220,38,38,0.4); box-shadow:0 30px 80px rgba(0,0,0,0.6);">
+        <button onclick="window.closeFieldReportModal()" class="member-detail-close">✕</button>
+        <div class="text-right" style="padding-left:56px;">
+            <p class="text-white font-black text-base">🚨 بلاغ ميداني</p>
+            <p id="fieldReportMatName" class="text-amber-300 text-xs font-black mt-1"></p>
+            <p class="text-rose-100/70 text-xs font-bold mt-1">يُرسل بلاغاً بموقعك الحالي والمادة لقائدك المسؤول فوراً، وتصل نسخة لشركتك.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="repPrioHigh" onclick="window.setReportPriority('high')"
+                class="py-3 rounded-2xl font-black text-sm transition-all border"
+                style="background:rgba(220,38,38,0.85); border-color:#ef4444; color:#fff;">⚠️ عاجل</button>
+            <button type="button" id="repPrioNormal" onclick="window.setReportPriority('normal')"
+                class="py-3 rounded-2xl font-black text-sm transition-all border"
+                style="background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.12); color:#94a3b8;">✅ عادي</button>
+        </div>
+        <input type="hidden" id="repPrioritySelect" value="high">
+        <input id="repNotes" type="text" placeholder="ملاحظات اختيارية (عدد المصابين، نوع التسرب...)"
+            class="w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-rose-500 transition-all text-right">
+        <button id="btnLiveReport" onclick="window.sendFieldReport()"
+            class="w-full py-4 rounded-2xl font-black text-white text-base border-b-4 active:translate-y-1 transition-all disabled:opacity-60"
+            style="background:linear-gradient(135deg,#b91c1c,#dc2626); border-bottom-color:#7f1d1d; box-shadow:0 6px 25px rgba(220,38,38,0.35);">
+            🚨 إرسال البلاغ
+        </button>
+        <p id="fieldReportLast" class="text-center text-xs text-slate-400 font-bold min-h-[1rem]"></p>
+    </div>
+</div>
 
 
 
