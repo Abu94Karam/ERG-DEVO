@@ -12627,32 +12627,6 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             ⚗️ افحص توافق تخزين هذه المادة (CAMEO)
         </button>
     </div>
-
-    <!-- البلاغ الميداني -->
-    <div id="fieldReportCard" class="w-full rounded-3xl p-5 flex flex-col gap-4 text-right"
-         style="background:linear-gradient(135deg,rgba(220,38,38,0.12),rgba(0,0,0,0.45)); border:1px solid rgba(220,38,38,0.35);">
-        <div class="text-right">
-            <p class="text-white font-black text-base">🚨 بلاغ ميداني</p>
-            <p class="text-rose-100/70 text-xs font-bold mt-1">يُرسل بلاغاً بموقعك الحالي والمادة لقائدك المسؤول فوراً، وتصل نسخة لشركتك.</p>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-            <button type="button" id="repPrioHigh" onclick="window.setReportPriority('high')"
-                class="py-3 rounded-2xl font-black text-sm transition-all border"
-                style="background:rgba(220,38,38,0.85); border-color:#ef4444; color:#fff;">⚠️ عاجل</button>
-            <button type="button" id="repPrioNormal" onclick="window.setReportPriority('normal')"
-                class="py-3 rounded-2xl font-black text-sm transition-all border"
-                style="background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.12); color:#94a3b8;">✅ عادي</button>
-        </div>
-        <input type="hidden" id="repPrioritySelect" value="high">
-        <input id="repNotes" type="text" placeholder="ملاحظات اختيارية (عدد المصابين، نوع التسرب...)"
-            class="w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-rose-500 transition-all text-right">
-        <button id="btnLiveReport" onclick="window.sendFieldReport()"
-            class="w-full py-4 rounded-2xl font-black text-white text-base border-b-4 active:translate-y-1 transition-all disabled:opacity-60"
-            style="background:linear-gradient(135deg,#b91c1c,#dc2626); border-bottom-color:#7f1d1d; box-shadow:0 6px 25px rgba(220,38,38,0.35);">
-            🚨 إرسال البلاغ
-        </button>
-        <p id="fieldReportLast" class="text-center text-xs text-slate-400 font-bold min-h-[1rem]"></p>
-    </div>
 </div>
 </div>
 
