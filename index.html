@@ -5636,6 +5636,7 @@ window._satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/serv
     };
 
     L.control.layers(baseMaps).addTo(map);
+    window.map = map; window._mapCentered = false; setTimeout(() => map.invalidateSize(), 250);
     window.refreshMapMarkers();
 };
 
@@ -5647,6 +5648,7 @@ window._satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/serv
 window.markersLayer = null; // طبقة التحكم بالعلامات
 
 window.refreshMapMarkers = () => {
+    setTimeout(() => { if (window.refreshPositionMarkers) window.refreshPositionMarkers(); }, 0);
 const myReports = window.userRole === 'master'
         ? window.allReports
         : window.allReports.filter(r => (window._myScopeKeys || [window.activeKey]).includes(r.parentKey));
@@ -5764,12 +5766,12 @@ window.markersLayer.addTo(map);
                 </div>
             `);
 
-            map.setView([lat, lng], 13);
+            if (!window._mapCentered) { map.setView([lat, lng], 13); window._mapCentered = true; }
         } else {
             // تركيز على آخر بلاغ عادي
             const latest = window.allReports[0];
             if (latest && latest.coords) {
-                map.setView([latest.coords.lat, latest.coords.lng], 14);
+                if (!window._mapCentered) { map.setView([latest.coords.lat, latest.coords.lng], 14); window._mapCentered = true; }
             }
         }
     }
@@ -5786,10 +5788,10 @@ window.genAutoKey = (t) => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let k
         window.exportRegistryBackup = async () => { const b = new Blob([JSON.stringify({ registry: window.appData, subscribers: window.subscribers, timestamp: Date.now() }, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `ERG_BACKUP.json`; a.click(); };
         
 
-// ===== البلاغ الميداني المباشر: إرسال الموقع + بلاغ للقائد المسؤول + بث حي (زر موحّد) =====
-window._fieldReportId = null;
-window._fieldReportRef = null;
-window._fieldReportQuick = false;
+// ===== البلاغ الميداني + مشاركة الموقع المباشر (وظيفتان منفصلتان) + علامات الفريق على الرادار =====
+window._fieldReportBusy = false;
+window._posWatch = null;
+window._posRef = null;
 
 window.setReportPriority = (p) => {
     const hid = document.getElementById('repPrioritySelect');
@@ -5802,111 +5804,167 @@ window.setReportPriority = (p) => {
     else { off(hi); on(no, 'rgba(16,185,129,0.85)', '#10b981'); }
 };
 
-window._fieldReportUI = (active) => {
+// هوية المرسِل: العضو → قائده، القائد → نفسه (وتصل لشركته عبر نطاقها)، المدير → MASTER
+window._fieldIdentity = () => {
+    const role = window.userRole;
+    const parentKey = role === 'member' ? (window.activeParentKey || '') : (role === 'leader' ? window.activeKey : 'MASTER');
+    const memberName = role === 'member' ? (window.myMemberName || 'عضو ميداني')
+        : (role === 'leader' ? (window.myLeaderName || 'القائد') : 'الإدارة');
+    return { role, parentKey, memberName };
+};
+
+// ---------- 1) البلاغ: إرسال مرة واحدة مع لقطة لموقعك الحالي ----------
+window.sendFieldReport = async (opts = {}) => {
+    if (window._fieldReportBusy) return;
+    if (!auth.currentUser || !window.activeKey) { window.showNotif('⛔ سجّل الدخول أولاً', 'error'); return; }
+    const { parentKey, memberName } = window._fieldIdentity();
+    if (!parentKey) { window.showNotif('⛔ حسابك غير مرتبط بقائد، تواصل مع الإدارة.', 'error'); return; }
+
+    // الزر العائم: تأكيد واحد لتفادي الضغط بالخطأ، ثم يبدأ بلاغاً عاجلاً + مشاركة الموقع
+    if (opts.quick && !opts.confirmed) {
+        window.showConfirm('🚨 بلاغ ميداني', 'سيُرسل بلاغ عاجل بموقعك الآن لقائدك المسؤول، وتبدأ مشاركة موقعك المباشر. هل تريد المتابعة؟',
+            () => window.sendFieldReport({ quick: true, confirmed: true }));
+        return;
+    }
+
+    window._fieldReportBusy = true;
     const btn = document.getElementById('btnLiveReport');
-    const chip = document.getElementById('fieldReportStatus');
+    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ جاري تحديد الموقع والإرسال...'; }
+    const restore = (ms) => setTimeout(() => {
+        window._fieldReportBusy = false;
+        if (btn) { btn.disabled = false; btn.innerHTML = '🚨 إرسال البلاغ'; }
+    }, ms);
+
+    try {
+        const priority = opts.quick ? 'high' : (document.getElementById('repPrioritySelect')?.value || 'high');
+        const notes = document.getElementById('repNotes')?.value?.trim() || '';
+        const mat = window.activeMaterial;
+        const materialName = mat ? (mat.name || mat.NAME || 'غير محددة') : 'غير محددة';
+        const un = mat ? (mat.un || mat.UN || '—') : '—';
+
+        const pos = navigator.geolocation
+            ? await new Promise(res => navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }))
+            : null;
+        const c = pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null;
+
+        const now = Date.now();
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', `${window.activeKey}_${now}`);
+        await setDoc(ref, {
+            type: 'emergency', status: 'new', priority, notes, materialName, un, memberName,
+            memberKey: window.activeKey, parentKey,
+            coords: c, location: c ? { ...c, acc: pos.coords.accuracy } : null,
+            startedAt: now, timestamp: now
+        });
+
+        const last = document.getElementById('fieldReportLast');
+        if (last) last.textContent = 'آخر بلاغ أُرسل: ' + new Date(now).toLocaleTimeString('ar-SA') + ' ✓' + (c ? '' : ' (بدون موقع)');
+        const notesEl = document.getElementById('repNotes'); if (notesEl) notesEl.value = '';
+        if (btn) btn.innerHTML = '✅ تم إرسال البلاغ';
+        window.showNotif(c ? '🚨 تم إرسال البلاغ مع موقعك لقائدك' : '⚠️ أُرسل البلاغ بدون موقع — فعّل GPS ثم أعد الإرسال', c ? 'success' : 'error');
+        if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+        if (opts.quick && window._posWatch == null) window._startLocationShare(true);
+        restore(3000);
+    } catch (e) {
+        console.error('field report failed:', e);
+        window.showNotif('❌ تعذّر إرسال البلاغ، تحقق من الاتصال وأعد المحاولة', 'error');
+        restore(0);
+    }
+};
+
+// ---------- 2) مشاركة الموقع المباشر: تشغيل/إيقاف مستقل عن البلاغ ----------
+window._locShareUI = (active) => {
+    const btn = document.getElementById('btnLocShare');
+    const chip = document.getElementById('locShareStatus');
     if (btn) {
-        btn.innerHTML = active ? '🛑 إيقاف البلاغ والبث' : '🚨 إرسال البلاغ وبث موقعي';
-        btn.style.background = active ? 'linear-gradient(135deg,#475569,#334155)' : 'linear-gradient(135deg,#b91c1c,#dc2626)';
-        btn.style.borderBottomColor = active ? '#1e293b' : '#7f1d1d';
-        btn.classList.toggle('animate-pulse', !active);
+        btn.textContent = active ? '⏹ إيقاف' : '▶ تشغيل';
+        btn.style.background = active ? 'linear-gradient(135deg,#475569,#334155)' : 'linear-gradient(135deg,#0891b2,#0e7490)';
+        btn.style.borderBottomColor = active ? '#1e293b' : '#164e63';
     }
     if (chip) {
-        chip.textContent = active ? '🟢 البث نشط' : '⚪ غير نشط';
+        chip.textContent = active ? '🟢 نشطة' : '⚪ متوقفة';
         chip.style.background = active ? 'rgba(16,185,129,0.18)' : 'rgba(148,163,184,0.15)';
         chip.style.color = active ? '#34d399' : '#94a3b8';
     }
 };
 
-window.sendFieldReport = async (opts = {}) => {
-    // الضغط أثناء البث = إيقاف
-    if (window._fieldReportId) { await window._stopFieldReport(); return; }
+window._startLocationShare = (silent) => {
+    if (window._posWatch != null) return;
     if (!auth.currentUser || !window.activeKey) { window.showNotif('⛔ سجّل الدخول أولاً', 'error'); return; }
-
-    // القائد المسؤول: العضو → قائده، القائد → نفسه (وتصل لشركته عبر نطاقها)، المدير → MASTER
-    const role = window.userRole;
-    const parentKey = role === 'member' ? (window.activeParentKey || '') : (role === 'leader' ? window.activeKey : 'MASTER');
+    const { parentKey, memberName } = window._fieldIdentity();
     if (!parentKey) { window.showNotif('⛔ حسابك غير مرتبط بقائد، تواصل مع الإدارة.', 'error'); return; }
+    if (!navigator.geolocation) { window.showNotif('⚠️ جهازك لا يدعم تحديد الموقع', 'error'); return; }
 
-    // الزر العائم: تأكيد واحد لتفادي الضغط بالخطأ
-    if (opts.quick && !opts.confirmed) {
-        window.showConfirm('🚨 بلاغ ميداني مباشر', 'سيُرسل موقعك الآن لقائدك المسؤول ويُبثّ حتى تُوقفه. هل تريد المتابعة؟',
-            () => window.sendFieldReport({ quick: true, confirmed: true }));
-        return;
-    }
-
-    window._fieldReportQuick = !!opts.quick;
-    const priority = opts.quick ? 'high' : (document.getElementById('repPrioritySelect')?.value || 'high');
-    const notes = document.getElementById('repNotes')?.value?.trim() || '';
-    const mat = window.activeMaterial;
-    const materialName = mat ? (mat.name || mat.NAME || 'غير محددة') : 'غير محددة';
-    const un = mat ? (mat.un || mat.UN || '—') : '—';
-    const memberName = role === 'member' ? (window.myMemberName || 'عضو ميداني')
-        : (role === 'leader' ? (window.myLeaderName || 'القائد') : 'الإدارة');
-
-    if (!navigator.geolocation) window.showNotif('⚠️ جهازك لا يدعم تحديد الموقع، سيُرسل البلاغ بدونه', 'error');
-    else window.showNotif('📍 جاري تحديد موقعك...', 'info');
-    const first = navigator.geolocation
-        ? await new Promise(res => navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }))
-        : null;
-    const pt = (p) => p ? { lat: p.coords.latitude, lng: p.coords.longitude } : null;
-    const c0 = pt(first);
-
-    const now = Date.now();
-    const id = `${window.activeKey}_${now}`;
-    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', id);
-    try {
-        await setDoc(ref, {
-            type: 'emergency', status: 'new', priority, notes, materialName, un, memberName,
-            memberKey: window.activeKey, parentKey,
-            coords: c0, location: c0 ? { ...c0, acc: first.coords.accuracy } : null,
-            startedAt: now, timestamp: now
-        });
-    } catch (e) {
-        console.error('field report failed:', e);
-        window.showNotif('❌ تعذّر إرسال البلاغ، تحقق من الاتصال وأعد المحاولة', 'error');
-        return;
-    }
-    window._fieldReportId = id;
-    window._fieldReportRef = ref;
-    window._fieldReportUI(true);
-    window.showNotif(c0 ? '🚨 تم إرسال البلاغ وموقعك لقائدك، والبث مستمر' : '⚠️ أُرسل البلاغ بدون موقع — فعّل GPS ثم أعد الإرسال', c0 ? 'success' : 'error');
-    if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
-
-    // البث الحي: تحديث الموقع في نفس البلاغ (بحد أقصى مرة كل 10 ثوانٍ لتوفير الحصة والبطارية)
-    if (c0) {
-        let last = now;
-        window.activeTrackingId = navigator.geolocation.watchPosition(async (pos) => {
-            const t = Date.now();
-            if (t - last < 10000) return;
-            last = t;
-            const c = pt(pos);
-            try {
-                await setDoc(ref, {
-                    coords: c, location: { ...c, acc: pos.coords.accuracy }, timestamp: t,
-                    priority: window._fieldReportQuick ? 'high' : (document.getElementById('repPrioritySelect')?.value || priority),
-                    notes: document.getElementById('repNotes')?.value?.trim() || notes
-                }, { merge: true });
-            } catch (e) { console.warn('field report update failed'); }
-        }, () => {
-            window.showNotif('⚠️ فقدان إشارة GPS — يبقى البلاغ بآخر موقع معروف', 'error');
-        }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
-    }
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', `${window.activeKey}_pos`);
+    window._posRef = ref;
+    let last = 0, first = true;
+    window._posWatch = navigator.geolocation.watchPosition(async (pos) => {
+        const t = Date.now();
+        if (t - last < 10000) return;          // تحديث واحد كل 10 ثوانٍ كحد أقصى
+        last = t;
+        try {
+            await setDoc(ref, {
+                type: 'position', status: 'sharing', priority: 'normal', memberName,
+                memberKey: window.activeKey, parentKey,
+                coords: { lat: pos.coords.latitude, lng: pos.coords.longitude }, acc: pos.coords.accuracy, timestamp: t
+            }, { merge: true });
+            if (first) { first = false; if (!silent) window.showNotif('📍 بدأت مشاركة موقعك مع قائدك', 'success'); }
+        } catch (e) { console.warn('position update failed'); }
+    }, (err) => {
+        if (err && err.code === 1) {
+            window.showNotif('⛔ لم تسمح بتحديد الموقع — فعّله من إعدادات المتصفح ثم أعد التشغيل', 'error');
+            window._stopLocationShare(true);
+        } else {
+            window.showNotif('⚠️ تعذّر الحصول على الموقع حالياً', 'error');
+        }
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+    window._locShareUI(true);
 };
 
-window._stopFieldReport = async () => {
-    if (window.activeTrackingId != null) { try { navigator.geolocation.clearWatch(window.activeTrackingId); } catch (e) {} }
-    window.activeTrackingId = null;
-    const ref = window._fieldReportRef;
-    window._fieldReportId = null;
-    window._fieldReportRef = null;
-    window._fieldReportUI(false);
+window._stopLocationShare = async (silent) => {
+    if (window._posWatch != null) { try { navigator.geolocation.clearWatch(window._posWatch); } catch (e) {} }
+    window._posWatch = null;
+    const ref = window._posRef;
+    window._posRef = null;
+    window._locShareUI(false);
     try { if (ref) await setDoc(ref, { status: 'ended', endedAt: Date.now() }, { merge: true }); } catch (e) {}
-    window.showNotif('تم إيقاف البلاغ والبث الحي', 'info');
+    if (!silent) window.showNotif('تم إيقاف مشاركة الموقع', 'info');
 };
+
+window.toggleLocationShare = () => (window._posWatch != null ? window._stopLocationShare() : window._startLocationShare());
 
 // توافق مع أي استدعاء قديم
 window.sendLiveReport = (...a) => window.sendFieldReport(...a);
+
+// ---------- 3) علامات أعضاء الفريق المباشرة على الرادار ----------
+window.refreshPositionMarkers = () => {
+    if (typeof map === 'undefined' || !map) return;
+    if (window._posLayer) map.removeLayer(window._posLayer);
+    window._posLayer = L.layerGroup();
+    const now = Date.now();
+    (window.livePositions || []).forEach(p => {
+        if (p.status === 'ended' || !p.coords || !p.coords.lat) return;
+        if (now - (p.timestamp || 0) > 5 * 60 * 1000) return;    // توقف البث منذ أكثر من 5 دقائق
+        const icon = L.divIcon({
+            className: '',
+            html: '<div style="width:16px;height:16px;border-radius:50%;background:#22d3ee;border:3px solid #fff;box-shadow:0 0 0 6px rgba(34,211,238,0.25),0 0 14px rgba(34,211,238,0.8);"></div>',
+            iconSize: [16, 16], iconAnchor: [8, 8]
+        });
+        L.marker([p.coords.lat, p.coords.lng], { icon })
+            .bindTooltip(esc(p.memberName), { permanent: true, direction: 'top', offset: [0, -10] })
+            .bindPopup(`<div dir="rtl" style="text-align:right"><b>${esc(p.memberName)}</b><br>آخر تحديث: ${new Date(p.timestamp).toLocaleTimeString('ar-SA')}</div>`)
+            .addTo(window._posLayer);
+    });
+    window._posLayer.addTo(map);
+    window._mapMarkers = [...(window.markersLayer ? window.markersLayer.getLayers() : []), ...window._posLayer.getLayers()];
+    const cnt = document.getElementById('mapMembersCount');
+    if (cnt) cnt.textContent = window._posLayer.getLayers().length + ' عضو على الخريطة';
+    if (!window._mapCentered && window._posLayer.getLayers().length) {
+        map.fitBounds(L.featureGroup(window._posLayer.getLayers()).getBounds().pad(0.3), { maxZoom: 15 });
+        window._mapCentered = true;
+    }
+};
+
+
 
 
 
@@ -6216,7 +6274,8 @@ const filteredReports = window.userRole === 'master'
 
 
 
-    window.allReports = filteredReports.sort((a, b) => b.timestamp - a.timestamp);
+    window.livePositions = filteredReports.filter(r => r.type === 'position');
+    window.allReports = filteredReports.filter(r => r.type !== 'position').sort((a, b) => b.timestamp - a.timestamp);
     window.saveLocalCache?.();
     window.filterReports();
 
@@ -8713,7 +8772,7 @@ window.refreshDashboard = async () => {
                 ? query(reportsColl, where('parentKey', '==', window.activeKey))
                 : reportsColl;
             const snap = await getDocs(reportsQ);
-            window.allReports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+             window.allReports = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.type !== 'position');
         } catch(e) {}
     }
     if (!window.subscribers?.length && window.userRole === 'master') {
@@ -9521,7 +9580,8 @@ window.listenLeaderEmergencies = async (subKey) => {
                     const age = Date.now() - (d.startedAt || d.timestamp || 0);
                     if (d.memberKey && d.memberKey === window.activeKey) return;   // لا تُنبّه صاحب البلاغ نفسه
                     if (age < 30000) { // فقط البلاغات الجديدة خلال 30 ثانية
-                    window.showNotif(`${d.priority === 'high' ? '🚨 بلاغ عاجل' : '📡 بلاغ ميداني'} من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
+                if (d.priority !== 'high') window.showNotif(`📡 بلاغ ميداني من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
+
                         // إضافة شارة على زر البلاغات
                         const badge = document.getElementById('emergencyBadge');
                         if (badge) { badge.classList.remove('hidden'); }
@@ -12438,21 +12498,33 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
         </button>
         <button onclick="window.exportFullIncidentPDF()"
             class="px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
-            style="background:rgba(220,38,38,0.85); border-bottom-color:#7f1d1d;">
+            style="background:rgba(71,85,105,0.9); border-bottom-color:#1e293b;">
             📄 تقرير PDF
         </button>
     </div>
 
-    <!-- البلاغ الميداني المباشر -->
+    <!-- مشاركة الموقع المباشر -->
+    <div id="locShareCard" class="w-full rounded-3xl px-5 py-4 flex items-center justify-between gap-3 text-right"
+         style="background:linear-gradient(135deg,rgba(6,182,212,0.10),rgba(0,0,0,0.40)); border:1px solid rgba(6,182,212,0.30);">
+        <div class="flex items-center gap-3 shrink-0">
+            <button id="btnLocShare" onclick="window.toggleLocationShare()"
+                class="px-5 py-3 rounded-2xl font-black text-sm text-white border-b-4 active:translate-y-1 transition-all"
+                style="background:linear-gradient(135deg,#0891b2,#0e7490); border-bottom-color:#164e63;">▶ تشغيل</button>
+            <span id="locShareStatus" class="text-xs font-black px-3 py-1.5 rounded-full"
+                  style="background:rgba(148,163,184,0.15); color:#94a3b8;">⚪ متوقفة</span>
+        </div>
+        <div class="text-right">
+            <p class="text-white font-black text-base">📍 مشاركة موقعي المباشر</p>
+            <p class="text-cyan-100/70 text-xs font-bold mt-1">يظهر موقعك على رادار قائدك وشركتك، ويتوقف عند الإيقاف.</p>
+        </div>
+    </div>
+
+    <!-- البلاغ الميداني -->
     <div id="fieldReportCard" class="w-full rounded-3xl p-5 flex flex-col gap-4 text-right"
          style="background:linear-gradient(135deg,rgba(220,38,38,0.12),rgba(0,0,0,0.45)); border:1px solid rgba(220,38,38,0.35);">
-        <div class="flex items-start justify-between gap-3">
-            <span id="fieldReportStatus" class="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-full"
-                  style="background:rgba(148,163,184,0.15); color:#94a3b8;">⚪ غير نشط</span>
-            <div class="text-right">
-                <p class="text-white font-black text-base">🚨 بلاغ ميداني مباشر</p>
-                <p class="text-rose-200/60 text-[11px] font-bold mt-1">يُرسل موقعك والمادة لقائدك المسؤول فوراً، ويبثّ حركتك حتى تُوقفه، وتصل نسخة لشركتك.</p>
-            </div>
+        <div class="text-right">
+            <p class="text-white font-black text-base">🚨 بلاغ ميداني</p>
+            <p class="text-rose-100/70 text-xs font-bold mt-1">يُرسل بلاغاً بموقعك الحالي والمادة لقائدك المسؤول فوراً، وتصل نسخة لشركتك.</p>
         </div>
         <div class="grid grid-cols-2 gap-3">
             <button type="button" id="repPrioHigh" onclick="window.setReportPriority('high')"
@@ -12466,13 +12538,15 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
         <input id="repNotes" type="text" placeholder="ملاحظات اختيارية (عدد المصابين، نوع التسرب...)"
             class="w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-rose-500 transition-all text-right">
         <button id="btnLiveReport" onclick="window.sendFieldReport()"
-            class="w-full py-4 rounded-2xl font-black text-white text-base border-b-4 active:translate-y-1 transition-all animate-pulse"
+            class="w-full py-4 rounded-2xl font-black text-white text-base border-b-4 active:translate-y-1 transition-all disabled:opacity-60"
             style="background:linear-gradient(135deg,#b91c1c,#dc2626); border-bottom-color:#7f1d1d; box-shadow:0 6px 25px rgba(220,38,38,0.35);">
-            🚨 إرسال البلاغ وبث موقعي
+            🚨 إرسال البلاغ
         </button>
+        <p id="fieldReportLast" class="text-center text-xs text-slate-400 font-bold min-h-[1rem]"></p>
     </div>
 </div>
 </div>
+
 
                             <div class="text-center bg-black/60 p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner min-w-[280px]">
                                 <span class="text-[12px] text-rose-500 block mb-2 font-black uppercase tracking-widest italic opacity-80">UN Identifier</span>
