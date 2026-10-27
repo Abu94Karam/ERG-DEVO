@@ -2039,7 +2039,7 @@ window.filterPayments = (query) => {
 
 // ===== نافذة المالية والاشتراكات =====
 window.financeTab = (tab) => {
-    ['pending','trials','payments','blocked','pricing'].forEach(t => {
+        ['stats','pending','trials','payments','blocked','pricing'].forEach(t => {
         document.getElementById(`fpanel_${t}`)?.classList.add('hidden');
         document.getElementById(`fpanel_${t}`)?.classList.remove('flex');
         document.getElementById(`ftab_${t}`)?.classList.remove('is-active');
@@ -2048,7 +2048,7 @@ window.financeTab = (tab) => {
     panel?.classList.remove('hidden');
     panel?.classList.add('flex');
     document.getElementById(`ftab_${tab}`)?.classList.add('is-active');
-    const _titles = { pending:'الطلبات المعلقة', trials:'التجارب المجانية', payments:'سجل الدفعات والمشتركون', blocked:'الأرقام المحظورة', pricing:'الأسعار والباقات' };
+    const _titles = { stats:'الإحصائيات', pending:'الطلبات المعلقة', trials:'التجارب المجانية', payments:'سجل الدفعات والمشتركون', blocked:'الأرقام المحظورة', pricing:'الأسعار والباقات' };
     const _ft = document.getElementById('finSectionTitle');
     if (_ft) _ft.textContent = _titles[tab] || '';
     if (tab === 'pending') window.loadFinancePending();
@@ -12489,6 +12489,11 @@ body.light-mode #winFinance.app-window {
 .fin-kpi .k-lbl{margin-top:6px;font-size:11px;font-weight:800;color:var(--fin-muted)}
 .fin-kpi.is-hero{background:linear-gradient(135deg,rgba(56,189,248,.20),rgba(129,140,248,.10));border-color:rgba(56,189,248,.35)}
 .fin-kpi.is-hero .k-val{font-size:36px}
+#fpanel_stats .fin-stats{padding:0;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:14px}
+#fpanel_stats .fin-kpi{padding:20px}
+#fpanel_stats .fin-kpi .k-val{font-size:34px}
+#fpanel_stats .fin-kpi.is-hero{grid-column:1/-1}
+#fpanel_stats .fin-kpi.is-hero .k-val{font-size:48px}
 
 /* ===== توحيد ألوان المحتوى القديم داخل النافذة (مؤقتاً حتى المرحلة 4) ===== */
 #winFinance .text-emerald-400{color:var(--fin-accent)!important}
@@ -15116,6 +15121,9 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
         <div class="fin-brand-txt"><b>المالية والاشتراكات</b><small>FINANCE &amp; SUBSCRIPTIONS</small></div>
       </div>
       <nav class="fin-nav">
+        <button id="ftab_stats" class="fin-nav-item" onclick="window.financeTab('stats')">
+          <span class="fin-ico">📊</span><span class="fin-lbl">الإحصائيات</span>
+        </button>
         <button id="ftab_pending" class="fin-nav-item is-active" onclick="window.financeTab('pending')">
           <span class="fin-ico">⏳</span><span class="fin-lbl">الطلبات المعلقة</span>
           <span id="ftab_pending_badge" class="fin-badge hidden">0</span>
@@ -15147,12 +15155,10 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
         <button class="fin-btn" onclick="window.loadFinanceStats()">🔄 تحديث الأرقام</button>
       </header>
 
-      <div id="financeStats" class="fin-stats"></div>
-
       <div class="fin-content">
-
-        <!-- محتوى التبويبات -->
-        <div class="flex-1 overflow-hidden p-6">
+            <div id="fpanel_stats" class="h-full flex-col gap-4 hidden overflow-y-auto custom-scrollbar">
+                <div id="financeStats" class="fin-stats"></div>
+            </div>
 
             <!-- الطلبات المعلقة -->
             <div id="fpanel_pending" class="h-full flex flex-col gap-4">
