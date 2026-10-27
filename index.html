@@ -250,6 +250,89 @@ function generateRandomTOTPSecret() {
     return secret;
 }
 
+
+
+
+
+// ===== الرمز التعريفي للشركة ومساحة الأسماء (nsId) =====
+// الرمز التعريفي: 12 حرفاً عشوائياً بلا أحرف ملتبسة، يُخزَّن في company_secrets/{nsId}
+// معرّف وثيقة القائد/العضو = SHA-256( nsId | الكود + salt ) فيتكرر الكود بين الشركات بلا تعارض
+const _CA_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+window.normAccessCode = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+window.fmtAccessCode = (s) => (window.normAccessCode(s).match(/.{1,4}/g) || []).join('-');
+window.genAccessCode = () => {
+    const a = new Uint32Array(12); crypto.getRandomValues(a);
+    return Array.from(a, v => _CA_ALPHABET[v % _CA_ALPHABET.length]).join('');
+};
+window.nsDocId = (nsId, key) => hashInput(nsId + '|' + key, MASTER_SALT);
+const _csRef = (nsId) => doc(db, 'artifacts', appId, 'public', 'data', 'company_secrets', nsId);
+const _csCol = () => collection(db, 'artifacts', appId, 'public', 'data', 'company_secrets');
+
+// رمز فريد بين كل الشركات (للإدارة العليا فقط)
+window._newUniqueAccessCode = async () => {
+    for (let i = 0; i < 6; i++) {
+        const code = window.genAccessCode();
+        const dup = await getDocs(query(_csCol(), where('accessCode', '==', code)));
+        if (dup.empty) return code;
+    }
+    throw new Error('تعذر توليد رمز تعريفي فريد');
+};
+
+// ينشئ الرمز إن لم يوجد ويعيده منسّقاً للعرض (للإدارة العليا فقط)
+window.ensureCompanyAccess = async (nsId, name) => {
+    const snap = await getDoc(_csRef(nsId));
+    if (snap.exists() && snap.data().accessCode) return window.fmtAccessCode(snap.data().accessCode);
+    const code = await window._newUniqueAccessCode();
+    await setDoc(_csRef(nsId), { accessCode: code, name: name || '', createdAt: Date.now() }, { merge: true });
+    return window.fmtAccessCode(code);
+};
+
+window.rotateCompanyAccess = async (nsId) => {
+    if (window.userRole !== 'master') return;
+    if (!confirm('سيتوقف الرمز الحالي فوراً ويجب تزويد الشركة بالرمز الجديد. متابعة؟')) return;
+    try {
+        const code = await window._newUniqueAccessCode();
+        await setDoc(_csRef(nsId), { accessCode: code, rotatedAt: Date.now() }, { merge: true });
+        window.logActivity?.('access_rotated', 'تدوير الرمز التعريفي لشركة: ' + nsId);
+        window.showNotif('✅ تم توليد رمز تعريفي جديد', 'success');
+        window.showCompanyAccessModal(nsId);
+    } catch (e) { console.error(e); window.showNotif('⛔ فشل تدوير الرمز', 'error'); }
+};
+
+// نافذة عرض الرمز: المدير يراه ويدوّره، ومالك الشركة يراه فقط
+window.showCompanyAccessModal = async (nsId) => {
+    if (!nsId) return window.showNotif('لا يوجد معرّف شركة', 'error');
+    let code = '';
+    try {
+        if (window.userRole === 'master') code = await window.ensureCompanyAccess(nsId, '');
+        else { const s = await getDoc(_csRef(nsId)); code = s.exists() ? window.fmtAccessCode(s.data().accessCode) : ''; }
+    } catch (e) { console.error(e); return window.showNotif('⛔ تعذّرت قراءة الرمز التعريفي', 'error'); }
+    if (!code) return window.showNotif('لم يُنشأ رمز تعريفي لهذه الشركة بعد، تواصل مع الإدارة', 'error');
+    document.getElementById('accessCodeModal')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'accessCodeModal';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72);padding:16px;';
+    wrap.innerHTML = `
+        <div style="max-width:420px;width:100%;background:#0d1117;border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:22px;text-align:center;color:#fff;">
+            <p style="font-weight:900;font-size:14px;margin-bottom:4px;">🔑 الرمز التعريفي للشركة</p>
+            <p style="font-size:11px;color:#94a3b8;margin-bottom:14px;">سرّي جداً: يُسلَّم لمسؤول الشركة فقط، ولا يُشارَك مع قادتها وأعضائها خارج الإطار اللازم.</p>
+            <div style="font-family:monospace;font-size:22px;font-weight:900;letter-spacing:2px;direction:ltr;padding:14px;border-radius:14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:#fbbf24;user-select:all;">${code}</div>
+            <div style="display:flex;gap:8px;margin-top:14px;">
+                <button id="acmCopy" style="flex:1;padding:10px;border-radius:12px;font-weight:900;font-size:12px;background:rgba(16,185,129,.18);border:1px solid rgba(16,185,129,.4);color:#6ee7b7;">📋 نسخ</button>
+                ${window.userRole === 'master' ? '<button id="acmRotate" style="flex:1;padding:10px;border-radius:12px;font-weight:900;font-size:12px;background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.4);color:#fda4af;">♻️ تدوير</button>' : ''}
+                <button id="acmClose" style="flex:1;padding:10px;border-radius:12px;font-weight:900;font-size:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#cbd5e1;">إغلاق</button>
+            </div>
+        </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#acmClose').onclick = () => wrap.remove();
+    wrap.querySelector('#acmCopy').onclick = () => { navigator.clipboard?.writeText(code); window.showNotif('📋 تم نسخ الرمز', 'success'); };
+    const rot = wrap.querySelector('#acmRotate'); if (rot) rot.onclick = () => window.rotateCompanyAccess(nsId);
+};
+
+
+
+
+
 // --- دالة التشفير المساعدة ---
 async function hashInput(text, salt) {
     if (!salt) {
@@ -788,7 +871,9 @@ window.confirmChangeKey = async () => {
         if (ctx.isLeaderChange) data.leaderKeyChanged = true;   // يُنسخ مع المستند الجديد
         else delete data.leaderKeyChanged;                       // تغيير المدير يعيد الحق للقائد
 
-        const hashedKey = await hashInput(newPlainKey, MASTER_SALT);
+                const _ns = data.nsId || '';
+        if (!_ns) return window.showNotif("⛔ هذا الحساب بلا رمز شركة (nsId)، لا يمكن تغيير شفرته", "error");
+        const hashedKey = await window.nsDocId(_ns, newPlainKey);
         const maskedKey = newPlainKey.substring(0, 4) + "***" + newPlainKey.slice(-2);
 
         if (ctx.type === 'sub') {
@@ -1433,6 +1518,15 @@ const _sv = await window.serverLogin('member', key);
 
                 window.activeKey = memSnap.id; 
                 window.myMemberName = d.memberName || "عضو ميداني";
+                // صلاحيات العضو = باقة قائده ∧ صلاحيات الأعضاء المحددة له ∧ قيوده الفردية
+                window.myFeatures = null; window.myMemberFeatures = null; window.myOwnFeatures = d.features || null;
+                try {
+                    const _ls = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', d.parentKey));
+                    if (_ls.exists()) {
+                        window.myFeatures = _ls.data().features || null;
+                        window.myMemberFeatures = _ls.data().memberFeatures || null;
+                    }
+                } catch (e) { console.warn('تعذر تحميل صلاحيات العضو', e); }
                 window.activeParentKey = d.parentKey; 
                 return window.launchOS('member', memSnap.id, "تم التحقق: دخول العضو الميداني");
             }
@@ -1481,6 +1575,11 @@ window.activateAppByEmail = async () => {
             return;
         }
         const m = memSnap.data();
+        if (window._gateEmail && m.role !== 'leader') {
+            await signOut(auth);
+            window.showNotif('⛔ هذا الدخول مخصص لحسابات الشركات فقط', 'error');
+            return;
+        }
         window._loginGuard.reset();
 
         if (m.role === 'master') {
@@ -2373,7 +2472,7 @@ window.loadPublicPackages = async () => {
         document.getElementById('packagesStepView')?.classList.remove('hidden');
         manualToggle?.classList.remove('hidden');
         manualSection?.classList.add('hidden');
-        window._featLabels = { radar: '📍 رادار المواقع GPS', pdfExport: '📄 تصدير تقارير PDF', cloud: '☁️ الأرشيف الرقمي', dashboard: '📊 لوحة الإحصاء' };
+window._featLabels = Object.fromEntries([['radar', '📍 رادار المواقع GPS'], ['cloud', '☁️ الأرشيف الرقمي'], ['dashboard', '📊 لوحة الإحصاء']].concat(window.FEATURE_REGISTRY.filter(f => f.pub).map(f => [f.key, f.icon + ' ' + f.label])));
         const featLabels = window._featLabels;
         box.innerHTML = packages.map(p => {
             const featuresRows = [
@@ -2820,6 +2919,36 @@ window.renderTeamTable = () => {
     }).join('');
 };
 
+// صلاحيات عضو بعينه: تقييد فقط (لا منح أكثر مما تسمح به باقة قائده)
+window.openMemberPerms = async (docId) => {
+    if (window.userRole !== 'master' && window.userRole !== 'leader') return;
+    const m = (window.teamMembers || []).find(x => x.id === docId);
+    if (!m) return;
+    let leaderDoc = {};
+    try { const ls = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', m.parentKey)); if (ls.exists()) leaderDoc = ls.data(); } catch (e) {}
+    const allowed = window.SIDE_FEATURES.filter(k => window.featChecked(leaderDoc.features, k) && window.featChecked(leaderDoc.memberFeatures, k));
+    const own = m.features || {};
+    document.getElementById('memberPerms_name').textContent = m.memberName || '—';
+    document.getElementById('memberPerms_box').innerHTML = allowed.length ? allowed.map(k => `<label class="flex items-center gap-2 text-sm text-slate-200 font-bold"><input type="checkbox" class="mpFeat" data-k="${k}" ${own[k] === false ? '' : 'checked'}> ${window.FEATURE_ICONS[k] || '⚙️'} ${window.FEATURE_LABELS[k] || k}</label>`).join('') : '<p class="text-slate-400 text-sm font-bold">لا توجد مزايا متاحة لأعضاء هذا القائد لتقييدها.</p>';
+    document.getElementById('memberPerms_save').onclick = () => window.saveMemberPerms(docId);
+    const modal = document.getElementById('memberPermsModal');
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+};
+window.closeMemberPerms = () => {
+    const modal = document.getElementById('memberPermsModal');
+    modal.classList.add('hidden'); modal.classList.remove('flex');
+};
+window.saveMemberPerms = async (docId) => {
+    const restricted = {};
+    document.querySelectorAll('#memberPerms_box .mpFeat').forEach(cb => { if (!cb.checked) restricted[cb.dataset.k] = false; });
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', docId), { features: restricted });
+        window.logActivity('member_perms', 'تعديل صلاحيات عضو');
+        window.showNotif('✅ تم حفظ صلاحيات العضو', 'success');
+        window.closeMemberPerms();
+    } catch (e) { window.showNotif('❌ فشل حفظ الصلاحيات', 'error'); }
+};
+
 window.openMemberDetail = (docId) => {
     const m = (window.teamMembers || []).find(x => x.id === docId);
     if (!m) return;
@@ -2840,6 +2969,7 @@ window.openMemberDetail = (docId) => {
     document.getElementById('memberDetail_btnChangeKey').onclick = () => window.changeUserKey('member', docId);
     document.getElementById('memberDetail_btnEdit').onclick = () => { window.closeMemberDetailModal(); window.startEditMember(docId); };
     document.getElementById('memberDetail_btnReset').onclick = () => window.resetDevice('member', docId);
+    document.getElementById('memberDetail_btnPerms').onclick = () => window.openMemberPerms(docId);
     document.getElementById('memberDetail_btnDelete').onclick = () => { window.closeMemberDetailModal(); window.deleteEntry('member', docId); };
 
     const modal = document.getElementById('memberDetailModal');
@@ -2896,7 +3026,9 @@ window.addNewMember = async () => {
 
         }
 
-        const hashedKey = await hashInput(key, MASTER_SALT);
+                const _nsId = subSnap.exists() ? (subSnap.data().nsId || '') : '';
+        if (!_nsId) return window.showNotif("⛔ حساب هذا القائد غير مرتبط برمز شركة، أعد إنشاءه من الإدارة", "error");
+        const hashedKey = await window.nsDocId(_nsId, key);
         const maskedKey = key.substring(0, 4) + "***" + key.slice(-2);
 
         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', hashedKey);
@@ -2905,7 +3037,8 @@ window.addNewMember = async () => {
         }
         await setDoc(ref, {
             memberName: name,
-            teamKey: maskedKey,
+                        teamKey: maskedKey,
+            nsId: _nsId,
             secretKey: key, 
             isEncrypted: true,
             parentKey: pKey,
@@ -2934,6 +3067,7 @@ window.showNotif(`تم اعتماد العضو ${name} بنجاح`, "success");
 };
 
 window.openAddMemberModal = () => {
+    if (window.featDenied('memberAdd')) return;
     window._editingMemberId = null;
     document.getElementById('new_mn').value = '';
     document.getElementById('new_mk').value = '';
@@ -3170,21 +3304,56 @@ window.FEATURE_APPS = window.radialSections
         label: s.label
     }));
 
-window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(['pdfExport', 'voiceBrief', 'locShare', 'fieldReport', 'waShare']);
+// ===== سجل المزايا الموحَّد — أضف ميزة جديدة بسطر واحد هنا فتظهر في كل النماذج والبطاقات =====
+// key: المفتاح المخزَّن | label: الاسم | icon: الأيقونة | group: المجموعة (tools/field/comms/data/admin)
+// defaultOn: مفعّلة لمن لم تُحفظ له قيمة | side: زر في الشريط الجانبي | pub: تظهر في بطاقات الباقات للزائر
+// (تطبيقات سطح المكتب لا تُضاف هنا: تُشتق تلقائياً من radialSections)
+window.FEATURE_REGISTRY = [
+    { key: 'pdfExport',   label: 'تصدير تقارير PDF',       icon: '📄', group: 'tools', defaultOn: false, side: true, pub: true },
+    { key: 'voiceBrief',  label: 'الموجز الصوتي',           icon: '🔊', group: 'tools', defaultOn: true,  side: true, pub: true },
+    { key: 'waShare',     label: 'مشاركة البيانات واتساب',  icon: '💬', group: 'tools', defaultOn: true,  side: true, pub: true },
+    { key: 'locShare',    label: 'بث الموقع المباشر',       icon: '📡', group: 'field', defaultOn: true,  side: true, pub: true },
+    { key: 'fieldReport', label: 'إرسال بلاغ ميداني',       icon: '🚨', group: 'field', defaultOn: true,  side: true, pub: true }
+];
+// الدفعة الثانية من المزايا. member: تُمنح للأعضاء أيضاً (وتظهر في صف «صلاحيات الأعضاء»)
+window.FEATURE_REGISTRY.forEach(f => { f.member = true; });
+window.FEATURE_REGISTRY.push(
+    { key: 'voiceSearch',  label: 'البحث الصوتي',          icon: '🎤', group: 'tools', defaultOn: true, member: true,  pub: true  },
+    { key: 'qrCode',       label: 'رمز QR للمادة',         icon: '📱', group: 'tools', defaultOn: true, member: true,  pub: false },
+    { key: 'placards',     label: 'ملصقات الخطر',          icon: '🏷️', group: 'tools', defaultOn: true, member: true,  pub: true  },
+    { key: 'internalChat', label: 'القناة الداخلية',       icon: '🗨️', group: 'comms', defaultOn: true, member: true,  pub: true  },
+    { key: 'notifCenter',  label: 'مركز الإشعارات',        icon: '🔔', group: 'comms', defaultOn: true, member: true,  pub: false },
+    { key: 'liveAlerts',   label: 'تنبيه البلاغ العاجل',   icon: '📣', group: 'comms', defaultOn: true, member: true,  pub: false },
+    { key: 'memberAdd',    label: 'إضافة الأعضاء',         icon: '➕', group: 'admin', defaultOn: true, member: false, pub: false }
+);
+window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(window.FEATURE_REGISTRY.map(f => f.key));
 
-window.FEATURE_LABELS = { pdfExport: 'تصدير تقارير PDF', voiceBrief: 'الموجز الصوتي', locShare: 'بث الموقع المباشر', fieldReport: 'إرسال بلاغ ميداني', waShare: 'مشاركة البيانات واتساب' };
+window.FEATURE_LABELS = Object.fromEntries(window.FEATURE_REGISTRY.map(f => [f.key, f.label]));
+window.FEATURE_REGISTRY.forEach(f => { window.FEATURE_ICONS[f.key] = f.icon; });
 
 // ===== أزرار الشريط الجانبي الخاضعة للصلاحيات =====
-window.SIDE_FEATURES = ['pdfExport', 'voiceBrief', 'locShare', 'fieldReport', 'waShare'];
+window.SIDE_FEATURES = window.FEATURE_REGISTRY.filter(f => f.member).map(f => f.key);
 // المفاتيح الجديدة تُعدّ مفعّلة لمن لم تُحفظ له قيمة بعد (حفاظاً على ما يعمل لديهم الآن)
-window.SIDE_DEFAULT_ON = ['voiceBrief', 'locShare', 'fieldReport', 'waShare'];
+window.SIDE_DEFAULT_ON = window.FEATURE_REGISTRY.filter(f => f.defaultOn).map(f => f.key);
+// فحص عام لأي ميزة (يُستعمل لاحقاً عند كل نقطة استخدام): if (!window.featOn('key')) return;
+window.featOn = (key) => window.sideFeatureOn(key);
+// يعيد true (ويعرض رسالة) إذا كانت الميزة غير متاحة: if (window.featDenied('key')) return;
+window.featDenied = (key) => {
+    if (window.featOn(key)) return false;
+    window.showNotif('🔒 هذه الميزة غير متاحة لحسابك. تواصل مع الإدارة.', 'error');
+    return true;
+};
+// يخفي كل عنصر يحمل data-feat إذا كانت ميزته معطّلة
+window.applyFeatureVisibility = () => {
+    document.querySelectorAll('[data-feat]:not(input)').forEach(el => { el.style.display = window.featOn(el.dataset.feat) ? '' : 'none'; });
+};
 window.featChecked = (feats, key) => !feats ? true : (feats[key] === undefined ? window.SIDE_DEFAULT_ON.includes(key) : feats[key] === true);
 // المدير دائماً، القائد/الشركة حسب باقتهم، العضو حسب باقة قائده وصلاحيات الأعضاء المحددة له
 window.sideFeatureOn = (key) => {
     const r = window.userRole;
     if (r === 'master') return true;
     if (r === 'leader') return window.featChecked(window.myFeatures, key);
-    if (r === 'member') return window.featChecked(window.myFeatures, key) && window.featChecked(window.myMemberFeatures, key);
+    if (r === 'member') return window.featChecked(window.myFeatures, key) && window.featChecked(window.myMemberFeatures, key) && !(window.myOwnFeatures && window.myOwnFeatures[key] === false);
     return false;
 };
 window.FEATURE_APPS.forEach(f => { window.FEATURE_LABELS[f.key] = f.label; });
@@ -4285,7 +4454,8 @@ window.renderMyCompanyPanel = async () => {
             </div>`;
         }).join('');
 
-    box.innerHTML = `<div class="mb-3">${addBtn}</div>` + rows;
+        const _accessBtn = `<button onclick="window.showCompanyAccessModal(window.myCompanyId)" class="w-full py-3 rounded-xl font-black text-xs text-amber-300 mb-3" style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);">🔑 الرمز التعريفي للشركة</button>`;
+    box.innerHTML = `<div class="mb-3">${addBtn}</div>` + _accessBtn + rows;
 };
 
 window.openAddLeaderModal = async () => {
@@ -4345,9 +4515,14 @@ window.saveNewLeader = async () => {
         }
         if (!newKey) return window.showNotif('⛔ تعذر توليد كود فريد، أعد المحاولة', 'error');
 
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey), {
+                const _nsId = o.nsId || window.myCompanyId;
+        const _newId = await window.nsDocId(_nsId, newKey);
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', _newId), {
             ownerName: name,
             phone: o.phone || '',
+            secretKey: newKey,
+            isEncrypted: true,
+            nsId: _nsId,
             subKey: newKey,
             isPaid: true,
             status: 'active',
@@ -4470,6 +4645,17 @@ window._editingLeaderId = null;
 window._editingLeaderData = null;
 window._companyMemberPool = 0;
 
+// يقرأ صلاحيات القائد وأعضائه من نافذة التعديل (دائماً ضمن سقف الشركة)
+window._leaderPermsPayload = () => {
+    const feats = {}, mem = {};
+    document.querySelectorAll('#leaderEdit_featBox .leFeat').forEach(cb => { feats[cb.dataset.k] = cb.checked; });
+    document.querySelectorAll('#leaderEdit_memFeatBox .leMemFeat').forEach(cb => { mem[cb.dataset.k] = cb.checked; });
+    // ما لا تملكه الشركة لا يُمنح مطلقاً
+    window.FEATURE_CATALOG.forEach(k => { if (!window.featChecked(window.myFeatures, k)) feats[k] = false; });
+    window.SIDE_FEATURES.forEach(k => { if (!window.featChecked(window.myFeatures, k)) mem[k] = false; });
+    return { features: feats, memberFeatures: mem };
+};
+
 window.openLeaderEditModal = async (leaderId) => {
     let s = {};
     try {
@@ -4493,6 +4679,12 @@ window.openLeaderEditModal = async (leaderId) => {
     document.getElementById('leaderEdit_remaining').textContent = `السقف الكلي للشركة: ${totalPool} — المتاح لهذا القائد الآن: ${Math.max(0, totalPool - usedByOthers)} (لرفع السقف الكلي تواصل مع الإدارة)`;
     document.getElementById('leaderEdit_usedByOthers').value = usedByOthers;
     document.getElementById('leaderEdit_name').value = s.ownerName || '';
+    {
+        const lab = (k, cls, on) => `<label class="flex items-center gap-1.5 text-[11px] text-slate-300 font-bold"><input type="checkbox" class="${cls}" data-k="${k}" ${on ? 'checked' : ''}> ${window.FEATURE_ICONS[k] || '⚙️'} ${window.FEATURE_LABELS[k] || k}</label>`;
+        const allowed = window.FEATURE_CATALOG.filter(k => window.featChecked(window.myFeatures, k));
+        document.getElementById('leaderEdit_featBox').innerHTML = allowed.map(k => lab(k, 'leFeat', window.featChecked(s.features, k))).join('');
+        document.getElementById('leaderEdit_memFeatBox').innerHTML = window.SIDE_FEATURES.filter(k => allowed.includes(k)).map(k => lab(k, 'leMemFeat', window.featChecked(s.memberFeatures, k))).join('');
+    }
     document.getElementById('leaderEdit_members').value = s.maxMembers || 0;
     document.getElementById('leaderEdit_code').value = leaderId;
     document.getElementById('leaderEdit_newCode').value = '';
@@ -4542,7 +4734,7 @@ const currentCount = (window.teamMembers || []).filter(m => m.parentKey === lead
 
             const batch = writeBatch(db);
             batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newId), {
-                ...s, ownerName: newName, maxMembers: newMembers, codeResetUsed: true, deviceIds: []
+                ...s, ownerName: newName, maxMembers: newMembers, codeResetUsed: true, deviceIds: [], ...window._leaderPermsPayload()
             });
             batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId));
 
@@ -4553,7 +4745,7 @@ const currentCount = (window.teamMembers || []).filter(m => m.parentKey === lead
             window.showNotif('✅ تم تحديث القائد وتغيير كوده بنجاح', 'success');
         } else {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', leaderId), {
-                ownerName: newName, maxMembers: newMembers
+                ownerName: newName, maxMembers: newMembers, ...window._leaderPermsPayload()
             });
             window.showNotif('✅ تم تحديث بيانات القائد', 'success');
         }
@@ -4886,12 +5078,16 @@ window.addNewSub = async () => {
         const companyExpiry = linkedCompanyId
             ? ((window._companiesIndex || {})[linkedCompanyId]?.leaders || []).map(l => l.expiryDate).filter(Boolean).sort().pop() || ''
             : '';
-        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hashedKey);
+                const _nsId = linkedCompanyId || ('NS-' + window.genAccessCode().slice(0, 8));
+        const _accessCode = await window.ensureCompanyAccess(_nsId, linkedCompany ? linkedCompany.name : (companyNameInput || n));
+        const _hk = await window.nsDocId(_nsId, plainKey);
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', _hk);
         if ((await getDoc(ref)).exists()) return window.showNotif("⛔ كود القائد مستخدم مسبقاً، ولّد كوداً جديداً", "error");
         await setDoc(ref, { 
             ownerName: n, 
             subKey: maskedKey, 
-            secretKey: plainKey, 
+               secretKey: plainKey,
+            nsId: _nsId, 
             isEncrypted: true, 
             isPaid: payStatus === 'paid' || payStatus === 'comp',
             paymentStatus: payStatus,
@@ -4901,7 +5097,7 @@ window.addNewSub = async () => {
              expiryDate: (companyExpiry && new Date(companyExpiry) > new Date()) ? companyExpiry : ex, 
             maxMembers: isCompanyAccount ? 0 : members, 
             features: features,
-            companyId: linkedCompanyId || hashedKey,
+            companyId: linkedCompanyId || _hk,
             companyName: linkedCompany ? linkedCompany.name : (companyNameInput || n),
             isCompanyOwner: isCompanyAccount ? true : isFirstLeaderInCompany,
             isLeader: !isCompanyAccount,
@@ -4913,7 +5109,7 @@ window.addNewSub = async () => {
         window.logActivity('subscription_payment', `اعتماد قائد جديد: ${n} — ${members} أعضاء — ${price}$ (${payMethod}) — الحالة: ${payStatus}`);
 
         window.showNotif("تم تشفير وحفظ بيانات القائد سحابياً", "success");
-        window.showKeyAlert(`✅ تم إنشاء كود القائد: ${n}`, isCompanyAccount ? (plainKey + '   |   مفتاح المصادقة: ' + window._newTotp) : plainKey);
+        window.showKeyAlert(`✅ تم إنشاء كود القائد: ${n}`, (isCompanyAccount ? (plainKey + '   |   مفتاح المصادقة: ' + window._newTotp) : plainKey) + '   |   رمز الشركة: ' + _accessCode);
 
         ['new_ln', 'new_lk', 'new_lexp', 'new_lmax_custom'].forEach(id => {
             const el = document.getElementById(id);
@@ -5349,6 +5545,7 @@ if (window.userRole === 'master') {
 
 
 window.applyOSUI = () => {
+    window.applyFeatureVisibility?.();
     const b = document.getElementById('roleBadge');
     const desktop = document.getElementById('os_desktop');
     const statusDot = document.getElementById('statusDot');
@@ -5979,6 +6176,24 @@ window._locShareUI = (active) => {
     btn.title = active ? 'إيقاف بث موقعي' : 'بث موقعي';
 };
 
+// الشريط الجانبي يظهر فقط داخل نظام الاستجابة وعند عرض مادة، ويختفي مع أي نافذة أخرى
+window.syncSideNav = () => {
+    const nav = document.getElementById('sideQuickNav');
+    if (!nav) return;
+    const erg = document.getElementById('winERG');
+    const rv = document.getElementById('resView');
+    const show = !!(erg && !erg.classList.contains('hidden') && rv && !rv.classList.contains('hidden'));
+    nav.classList.toggle('hidden', !show);
+};
+(function () {
+    const obs = new MutationObserver(() => window.syncSideNav());
+    const hook = () => {
+        document.querySelectorAll('.app-window, #resView').forEach(el => obs.observe(el, { attributes: true, attributeFilter: ['class'] }));
+        window.syncSideNav();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook); else hook();
+})();
+
 window.applySideFeatures = () => {
     const map = { sideBtnLoc: 'locShare', sideBtnReport: 'fieldReport', sideBtnPdf: 'pdfExport', sideBtnWa: 'waShare', sideBtnVoice: 'voiceBrief' };
     Object.entries(map).forEach(([id, key]) => {
@@ -6339,7 +6554,7 @@ window._reportsUnsub = onSnapshot(reportsListenerQuery, window._reportsHandler =
             // --- التعديل الجوهري: التحقق من التبعية ---
             // القائد لا يسمع الإنذار إلا إذا كان العضو يتبع له (parentKey)
             // المدير (Master) يسمع كافة الإنذارات
-            const shouldAlert = (window.userRole === 'master') || (window._myScopeKeys || [window.activeKey]).includes(data.parentKey);
+            const shouldAlert = ((window.userRole === 'master') || (window._myScopeKeys || [window.activeKey]).includes(data.parentKey)) && window.featOn('liveAlerts');
             
             if (shouldAlert && data.priority === "high" && (Date.now() - data.timestamp) < 10000) {
                          window.playAlertSiren();
@@ -6958,6 +7173,7 @@ window.exportFullIncidentPDF = async () => {
 
 
 window.startVoiceRec = () => {
+    if (window.featDenied('voiceSearch')) return;
     const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
     if (!SR) return window.showNotif("المتصفح لا يدعم البحث الصوتي", "error");
     const r = new SR(); r.lang = 'ar-SA'; r.start();
@@ -7481,6 +7697,7 @@ window.renderNotifCenter = () => {
 };
 
 window.toggleNotifCenter = () => {
+    if (window.featDenied('notifCenter')) return;
     const panel = document.getElementById('notifCenterPanel');
     if (!panel) return;
     const willOpen = !panel.classList.contains('active');
@@ -8075,6 +8292,8 @@ window.approveRequest = async (reqId, name, phone) => {
                     memberPool: leadersData.reduce((s, l) => s + (Number(l.members) || 0), 0) || Number(reqData.plan) || (numLeaders * 5)
                 });
 
+                const _accessCode = await window.ensureCompanyAccess(companyId, companyName);
+
                 // توليد كود لكل قائد وحفظه
                 const generatedKeys = [];
                 // حصة "المالك" الأصلية (كانت هتروح له) تُضاف لأول قائد ميداني حقيقي بدل ما تضيع، والمالك يصير بدون أعضاء (كيان إداري بحت)
@@ -8092,10 +8311,13 @@ window.approveRequest = async (reqId, name, phone) => {
                     }
 
                     await setDoc(
-                        doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', newKey),
+                                               doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', await window.nsDocId(companyId, newKey)),
                         {
                             ownerName: isOwner ? `${name} — حساب الشركة` : `${name} — قائد ${i}`,
                             phone: phone,
+                            secretKey: newKey,
+                            isEncrypted: true,
+                            nsId: companyId,
                             subKey: newKey,
                             isPaid: true,
                             status: 'active',
@@ -8132,7 +8354,7 @@ window.approveRequest = async (reqId, name, phone) => {
 
                 // إرسال جميع الأكواد في إيميل واحد
                 if (reqEmail) {
-                    const codesText = generatedKeys.map(g =>
+                    const codesText = 'الرمز التعريفي للشركة: ' + _accessCode + '\n\n' + generatedKeys.map(g =>
                         g.isOwner ? `حساب الشركة (إداري): ${g.key}\nمفتاح Google Authenticator (أضفه بـ«إدخال مفتاح الإعداد»، نوع: قائم على الوقت): ${g.totp}` : `قائد ${g.leaderNum}: ${g.key} (${g.members} عضو)`
                     ).join('\n');
 
@@ -8149,6 +8371,7 @@ window.approveRequest = async (reqId, name, phone) => {
                     window.showNotif(`⚠️ لا يوجد بريد إلكتروني — الأكواد محفوظة في النظام`, "error");
                 }
 
+                window.showKeyAlert('🔑 الرمز التعريفي للشركة: ' + companyName, _accessCode);
                 window.logActivity('approve', `تم اعتماد طلب: ${name} — حساب شركة بسعة ${numLeaders} قائد`);
                 window.showNotif(`✅ تم اعتماد ${name} وتوليد كود حساب الشركة (سعة ${numLeaders} قائد)`, "success");
                 window.loadPendingRequests();
@@ -8397,6 +8620,7 @@ window.showPublicHazmatCard = (mat, un) => {
 
 // ===== QR Code للمواد =====
 window.generateMaterialQR = (un, name) => {
+    if (window.featDenied('qrCode')) return;
     const modal = document.createElement('div');
     modal.id = 'qrModal';
         modal.className = 'lux-modal-cyan';
@@ -8537,6 +8761,7 @@ window.populateChatLeaders = () => {
 };
 
 window.toggleChat = () => {
+    if (window.featDenied('internalChat')) return;
     const win = document.getElementById('winChat');
     if (win && !win.classList.contains('hidden')) {
         window.closeChat();
@@ -8548,6 +8773,7 @@ window.toggleChat = () => {
 
 // ===== المحادثة الداخلية =====
 window.openChat = () => {
+    if (!window.featOn('internalChat')) return;
     const win = document.getElementById('winChat');
     if (win) {
         win.classList.remove('hidden');
@@ -10716,6 +10942,206 @@ window.loadDesktopStats = async () => {
     } catch(e) { console.warn('Desktop stats failed', e); }
 };
 
+
+// ===== بوابة الشركات: الرمز التعريفي ← قائد/عضو ← الكود =====
+// الرمز التعريفي يبقى في الذاكرة فقط (لا يُحفظ في المتصفح) ويُرسل للخادم مع كل محاولة.
+window._gate = { company: '', type: '' };
+
+window.gateFormatCode = (el) => {
+    const raw = String(el.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    el.value = (raw.match(/.{1,4}/g) || []).join('-');
+};
+
+window.gateStep = (n) => {
+    [1, 2, 3].forEach(i => document.getElementById('gateStep' + i)?.classList.toggle('hidden', i !== n));
+    const sub = document.getElementById('gateSub');
+    if (sub) sub.textContent = n === 1 ? 'أدخل الرمز التعريفي لشركتك' : (n === 2 ? 'اختر نوع الحساب' : (window._gate.type === 'leader' ? 'أدخل كود القائد' : 'أدخل كود العضو'));
+    const m = document.getElementById('gateMsg'); if (m) m.innerText = '';
+};
+
+window.showCompanyGate = () => {
+    document.getElementById('entryOptions')?.classList.add('hidden');
+    ['loginFields', 'subFields', 'trialFields'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+    document.getElementById('companyGate')?.classList.remove('hidden');
+    document.getElementById('gateEmailBox')?.classList.add('hidden');
+    window._gate = { company: '', type: '' };
+    const c = document.getElementById('gateCompanyCode'); if (c) c.value = '';
+    window.gateStep(1);
+    setTimeout(() => c?.focus(), 50);
+};
+
+window.gateNext1 = () => {
+    const code = String(document.getElementById('gateCompanyCode').value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length < 6) { const m = document.getElementById('gateMsg'); if (m) m.innerText = 'أدخل الرمز التعريفي كاملاً'; return; }
+    window._gate.company = code;
+    window.gateStep(2);
+};
+
+window.gatePickType = (t) => {
+    window._gate.type = t;
+    window.gateStep(3);
+    const k = document.getElementById('gateKeySuffix'); if (k) { k.value = ''; setTimeout(() => k.focus(), 50); }
+};
+
+window.gateBack = () => {
+    const s3 = !document.getElementById('gateStep3')?.classList.contains('hidden');
+    const s2 = !document.getElementById('gateStep2')?.classList.contains('hidden');
+    if (s3) { window.gateStep(2); }
+    else if (s2) { window._gate.type = ''; window.gateStep(1); }
+    else { window.resetEntryUI(); }
+};
+
+// عند الرجوع للشاشة الرئيسية نخفي البوابة ونمسح ما أُدخل
+const _resetEntryBeforeGate = window.resetEntryUI;
+window.resetEntryUI = () => {
+    document.getElementById('companyGate')?.classList.add('hidden');
+    window._gate = { company: '', type: '' };
+    ['gateCompanyCode', 'gateKeySuffix', 'gateEmail', 'gatePass'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    _resetEntryBeforeGate();
+};
+
+window.gateToggleEmail = () => document.getElementById('gateEmailBox')?.classList.toggle('hidden');
+
+// دخول الإدارة: يفتح النموذج القديم نفسه (بلا أي تغيير في منطقه) مع تحديد «الإدارة» مباشرة
+window.showAdminLogin = () => {
+    document.getElementById('companyGate')?.classList.add('hidden');
+    window.showLoginFields();
+    window.selectLoginType('admin');
+};
+
+// ---- الدخول عبر الخادم v2 (لا رجوع للطريقة القديمة نهائياً) ----
+window.serverLoginV2 = async (type, companyCode, key) => {
+    window._serverVerified = false;
+    const callApi = async (otp) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10000);
+        try {
+            const r = await fetch('/api/login-v2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type, companyCode, key, deviceId: getDeviceId(), otp }),
+                signal: ctrl.signal
+            });
+            let j = {};
+            try { j = await r.json(); } catch (e) {}
+            return { status: r.status, body: j };
+        } finally { clearTimeout(timer); }
+    };
+    try {
+        let res = await callApi();
+        if (res.status === 200 && res.body && res.body.needOtp) {
+            const code = await window.askCompanyOtpCode();
+            if (!code) return { ok: false, msg: '' };
+            res = await callApi(code);
+        }
+        if (res.status === 200 && res.body && res.body.ok && res.body.token) {
+            await signInWithCustomToken(auth, res.body.token);
+            window._serverVerified = true;
+            return { ok: true, id: res.body.id };
+        }
+        const e = (res.body && res.body.error) || '';
+        const msgs = {
+            invalid: '⛔ بيانات الدخول غير صحيحة',
+            bad_request: '⛔ أكمل البيانات المطلوبة',
+            inactive: '⛔ الاشتراك غير مفعل أو منتهي',
+            expired: '⛔ الاشتراك غير مفعل أو منتهي',
+            device_limit: '⛔ تم الوصول للحد الأقصى من الأجهزة (2). تواصل مع الإدارة.',
+            device_locked: '⛔ الكود مقفل على جهاز آخر. تواصل مع الإدارة.',
+            bad_otp: '⛔ رمز المصادقة غير صحيح',
+            no_totp: '⛔ لم يُفعَّل مفتاح المصادقة لهذه الشركة. تواصل مع الإدارة.',
+            not_configured: '⛔ الخدمة غير مهيأة، تواصل مع الإدارة.',
+            too_many_attempts: '⛔ محاولات خاطئة كثيرة. أعد المحاولة بعد ' + Math.ceil(((res.body && res.body.retryAfter) || 900) / 60) + ' دقيقة'
+        };
+        if (e === 'invalid' || e === 'bad_otp') window._loginGuard.fail();
+        return { ok: false, msg: msgs[e] || '⛔ تعذّر الدخول' };
+    } catch (err) {
+        console.warn('serverLoginV2:', err && err.message);
+        return { ok: false, msg: '⛔ تعذّر الاتصال بالخادم، تحقق من الإنترنت وأعد المحاولة' };
+    }
+};
+
+window.gateLogin = async () => {
+    const msg = document.getElementById('gateMsg');
+    const btn = document.getElementById('gateLoginBtn');
+    const type = window._gate.type, company = window._gate.company;
+    const input = document.getElementById('gateKeySuffix');
+    const suffix = (input ? input.value : '').trim();
+    if (!company || !type || !suffix) return;
+    const lock = window._loginGuard.remaining();
+    if (lock > 0) { window.showNotif('⛔ محاولات خاطئة كثيرة. أعد المحاولة بعد ' + lock + ' ثانية', 'error'); return; }
+
+    const key = (type === 'leader' ? 'LDR-' : 'MEM-') + suffix;
+    if (btn) { btn.textContent = '⏳ جاري التحقق...'; btn.setAttribute('disabled', ''); }
+    if (msg) { msg.innerText = 'جاري فحص بروتوكول الوصول...'; msg.style.color = '#06b6d4'; }
+    try {
+        const r = await window.serverLoginV2(type, company, key);
+        if (!r.ok) {
+            if (msg) { msg.style.color = ''; msg.innerText = r.msg || ''; }
+            if (r.msg) window.showNotif(r.msg, 'error');
+            return;
+        }
+        if (type === 'leader') {
+            const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', r.id));
+            if (!subSnap.exists()) throw new Error('subscriber doc missing');
+            const subData = subSnap.data();
+            window.activeKey = subSnap.id;
+            window.myLeaderName = subData.ownerName || 'قائد ميداني';
+            window.myFeatures = subData.features || null;
+           window.myMemberFeatures = null;
+            window._leaderSubKey = subSnap.id;
+            window.myCompanyId = subData.companyId || subSnap.id;
+            window.myNsId = subData.nsId || '';
+            window.isCompanyOwner = subData.isCompanyOwner === true;
+            window.myCompanyName = subData.companyName || subData.ownerName || '';
+            window.isCompanyAccountOnly = (subData.isCompanyOwner === true && subData.isLeader === false);
+            window.listenLeaderEmergencies(subSnap.id);
+            return window.launchOS('leader', subSnap.id, 'تم التحقق: أهلاً بك أيها القائد');
+        }
+        const memSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'team_keys', r.id));
+        if (!memSnap.exists()) throw new Error('member doc missing');
+        const d = memSnap.data();
+        window.activeKey = memSnap.id;
+        window.myMemberName = d.memberName || 'عضو ميداني';
+        window.activeParentKey = d.parentKey;
+        window.myNsId = d.nsId || '';
+        window.myFeatures = null; window.myMemberFeatures = null; window.myOwnFeatures = d.features || null;
+        try {
+            const _ls = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', d.parentKey));
+            if (_ls.exists()) {
+                window.myFeatures = _ls.data().features || null;
+                window.myMemberFeatures = _ls.data().memberFeatures || null;
+            }
+        } catch (e) { console.warn('تعذر تحميل صلاحيات العضو', e); }
+        return window.launchOS('member', memSnap.id, 'تم التحقق: دخول العضو الميداني');
+    } catch (e) {
+        console.error('gateLogin error:', e);
+        if (msg) { msg.style.color = ''; msg.innerText = 'حدث خطأ في النظام، حاول مجدداً'; }
+        window.showNotif('خطأ في الاتصال أو التحقق', 'error');
+    } finally {
+        if (btn) { btn.textContent = 'دخول ←'; btn.removeAttribute('disabled'); }
+        if (input) input.value = '';
+    }
+};
+
+// دخول الشركة بالبريد (للحسابات التي فعّلتها الإدارة فقط): يعيد استخدام مسار البريد الحالي مع قيد «حسابات الشركات فقط»
+window.gateEmailLogin = async () => {
+    const e = (document.getElementById('gateEmail').value || '').trim();
+    const p = document.getElementById('gatePass').value || '';
+    if (!e || !p) { window.showNotif('أدخل البريد وكلمة المرور', 'error'); return; }
+    document.getElementById('loginEmailInput').value = e;
+    document.getElementById('activationInput').value = p;
+    window._gateEmail = true;
+    try { await window.activateAppByEmail(); }
+    finally {
+        window._gateEmail = false;
+        document.getElementById('gatePass').value = '';
+        document.getElementById('activationInput').value = '';
+        document.getElementById('loginEmailInput').value = '';
+    }
+};
+
+
+
 </script>
 
 
@@ -12579,7 +13005,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                 enterkeyhint="search" inputmode="search"
                 class="w-full border border-white/10 rounded-2xl py-3.5 pr-5 pl-14 text-white text-sm font-bold outline-none transition-all text-right"
                 style="background:rgba(0,0,0,0.5); font-size:16px;">
-            <button onclick="window.startVoiceRec()"
+            <button data-feat="voiceSearch" onclick="window.startVoiceRec()"
                 class="absolute left-4 top-1/2 -translate-y-1/2 text-xl hover:scale-125 transition-all">🎤</button>
         </div>
         <button onclick="window.clearSearch()"
@@ -12616,7 +13042,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             style="background:linear-gradient(135deg,#2563eb,#1d4ed8); border-bottom-color:#1e3a8a;">
             📖 إجراءات الدليل (GUIDE <span id="resGuideNum">--</span>)
         </button>
-                <button onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
+                <button data-feat="qrCode" onclick="window.generateMaterialQR(document.getElementById('resU').textContent, document.getElementById('resN').textContent)"
             class="col-span-2 px-4 py-5 rounded-2xl font-black text-sm text-white shadow-xl border-b-4 active:translate-y-1 transition-all hover:brightness-110"
             style="background:rgba(139,92,246,0.85); border-bottom-color:#4c1d95;">
             📱 QR Code
@@ -12634,7 +13060,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                             <div class="text-center bg-black/60 p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner min-w-[280px]">
                                 <span class="text-[12px] text-rose-500 block mb-2 font-black uppercase tracking-widest italic opacity-80">UN Identifier</span>
                                 <span id="resU" class="text-7xl md:text-9xl font-black text-white italic tracking-tighter block mb-6">0000</span>
-                                <div id="placardContainer" class="flex justify-center scale-125"></div>
+                                <div id="placardContainer" data-feat="placards" class="flex justify-center scale-125"></div>
                             </div>
                         </div>
                     </div>
@@ -12806,7 +13232,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
 
     <div id="notif" class="hidden"></div>
 
-    <button id="notifBellFab" onclick="window.toggleNotifCenter()" aria-label="الإشعارات">
+    <button id="notifBellFab" data-feat="notifCenter" onclick="window.toggleNotifCenter()" aria-label="الإشعارات">
         🔔
         <span id="notifBellBadge" class="hidden">0</span>
     </button>
@@ -12942,7 +13368,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             </button>
 
             <!-- بطاقة تسجيل الدخول — الوسط (مرتفعة افتراضيًا) -->
-            <button onclick="window.showLoginFields()"
+            <button onclick="window.showCompanyGate()"
                     class="entry-card card-login glass p-10 rounded-[2.5rem] transition-all group relative overflow-hidden flex flex-col items-center text-center gap-5"
                     style="border:1px solid rgba(59,130,246,0.25);
                            border-bottom:5px solid #2563eb;
@@ -12980,6 +13406,123 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             </button>
 
         </div>
+
+
+        <!-- ============ بوابة الشركات: الرمز التعريفي ← قائد/عضو ← الكود ============ -->
+        <style>
+            /* نموذج الدخول القديم (loginFields) يبقى للإدارة فقط، دون أي تغيير في منطقه */
+            #loginTypeBtn_leader, #loginTypeBtn_member { display:none !important; }
+            #loginTypeSelector { grid-template-columns: 1fr !important; max-width: 280px; margin-inline: auto; }
+        </style>
+
+        <div id="companyGate" class="hidden space-y-5"
+             style="background:linear-gradient(145deg,rgba(255,255,255,0.04) 0%,rgba(255,255,255,0.02) 100%);
+                    border:1px solid rgba(255,255,255,0.08);
+                    border-radius:2.2rem;
+                    padding:2.2rem;
+                    box-shadow:0 25px 80px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);">
+
+            <div class="text-center space-y-1 pb-5" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+                <div class="relative w-16 h-16 mx-auto mb-3">
+                    <div class="relative w-16 h-16 rounded-2xl flex items-center justify-center"
+                         style="background:linear-gradient(145deg,#2563eb,#1e3a8a);border:1px solid rgba(59,130,246,0.4);box-shadow:0 8px 25px rgba(37,99,235,0.35);">
+                        <span class="text-3xl">🏢</span>
+                    </div>
+                </div>
+                <h3 class="text-white font-black text-xl italic">دخول الشركات</h3>
+                <p id="gateSub" class="text-slate-500 text-xs font-bold">أدخل الرمز التعريفي لشركتك</p>
+            </div>
+
+            <!-- الخطوة 1: الرمز التعريفي -->
+            <div id="gateStep1" class="space-y-3">
+                <input type="text" id="gateCompanyCode" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20"
+                       placeholder="XXXX-XXXX-XXXX"
+                       oninput="window.gateFormatCode(this)"
+                       onkeydown="if(event.key==='Enter') window.gateNext1()"
+                       class="w-full p-6 rounded-[1.5rem] text-center text-white text-2xl font-mono outline-none uppercase"
+                       style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); letter-spacing:0.15em; caret-color:#3b82f6; direction:ltr;">
+                <button onclick="window.gateNext1()"
+                        class="w-full py-5 rounded-[var(--radius-lg)] font-black text-white transition-all active:scale-95"
+                        style="background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%); box-shadow:0 8px 25px rgba(37,99,235,0.35); border-bottom:3px solid #1e3a8a;">
+                    متابعة ←
+                </button>
+                <div class="text-center pt-1">
+                    <button type="button" onclick="window.gateToggleEmail()"
+                            class="text-[11px] font-black text-slate-500 hover:text-slate-300 underline underline-offset-4">
+                        دخول الشركة بالبريد الإلكتروني
+                    </button>
+                </div>
+                <div id="gateEmailBox" class="hidden space-y-3">
+                    <input type="email" id="gateEmail" placeholder="name@company.com" autocomplete="username"
+                           onkeydown="if(event.key==='Enter') document.getElementById('gatePass').focus()"
+                           class="w-full p-5 rounded-[1.5rem] text-center text-white text-lg font-mono outline-none"
+                           style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); caret-color:#3b82f6;">
+                    <input type="password" id="gatePass" placeholder="كلمة المرور" autocomplete="current-password"
+                           onkeydown="if(event.key==='Enter') window.gateEmailLogin()"
+                           class="w-full p-5 rounded-[1.5rem] text-center text-white text-lg font-mono outline-none"
+                           style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); caret-color:#3b82f6;">
+                    <button onclick="window.gateEmailLogin()"
+                            class="w-full py-4 rounded-[var(--radius-lg)] font-black text-white text-sm transition-all active:scale-95"
+                            style="background:rgba(99,102,241,0.25); border:1px solid rgba(99,102,241,0.5);">
+                        دخول بالبريد
+                    </button>
+                </div>
+            </div>
+
+            <!-- الخطوة 2: قائد أم عضو -->
+            <div id="gateStep2" class="hidden grid grid-cols-2 gap-3">
+                <button onclick="window.gatePickType('leader')"
+                        class="py-6 px-2 rounded-3xl text-center transition-all border flex flex-col items-center gap-2"
+                        style="background:linear-gradient(160deg,rgba(99,102,241,0.12),rgba(99,102,241,0.03)); border-color:rgba(99,102,241,0.28);">
+                    <span class="flex items-center justify-center w-14 h-14 rounded-2xl text-2xl" style="background:rgba(99,102,241,0.18); border:1px solid rgba(99,102,241,0.35);">🎖️</span>
+                    <span class="text-sm font-black text-indigo-300">قائد</span>
+                </button>
+                <button onclick="window.gatePickType('member')"
+                        class="py-6 px-2 rounded-3xl text-center transition-all border flex flex-col items-center gap-2"
+                        style="background:linear-gradient(160deg,rgba(16,185,129,0.12),rgba(16,185,129,0.03)); border-color:rgba(16,185,129,0.28);">
+                    <span class="flex items-center justify-center w-14 h-14 rounded-2xl text-2xl" style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.35);">👤</span>
+                    <span class="text-sm font-black text-emerald-300">عضو ميداني</span>
+                </button>
+            </div>
+
+            <!-- الخطوة 3: كود الدخول -->
+            <div id="gateStep3" class="hidden space-y-3">
+                <div class="flex items-center rounded-[1.5rem] overflow-hidden"
+                     style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); box-shadow:inset 0 2px 8px rgba(0,0,0,0.35);">
+                    <span class="px-4 text-slate-400 font-mono text-xl font-black select-none">•••</span>
+                    <input type="text" id="gateKeySuffix" placeholder="XXXXXXX" autocomplete="off" spellcheck="false"
+                           onkeydown="if(event.key==='Enter') window.gateLogin()"
+                           class="flex-1 p-6 text-center text-white text-2xl font-mono outline-none bg-transparent uppercase"
+                           style="letter-spacing:0.2em; caret-color:#3b82f6;">
+                </div>
+                <button id="gateLoginBtn" onclick="window.gateLogin()"
+                        class="w-full py-5 rounded-[var(--radius-lg)] font-black text-white uppercase italic transition-all active:scale-95"
+                        style="background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%); box-shadow:0 8px 25px rgba(37,99,235,0.35); border-bottom:3px solid #1e3a8a;">
+                    دخول ←
+                </button>
+            </div>
+            <div class="text-center">
+                <button type="button" onclick="window.showAdminLogin()" class="text-[11px] font-black text-slate-600 hover:text-slate-400 underline underline-offset-4">دخول الإدارة</button>
+            </div>
+
+            <p id="gateMsg" class="text-center text-sm font-bold italic text-rose-400 min-h-[20px]"></p>
+
+            <div class="flex justify-center gap-3 pt-1">
+                <button onclick="window.gateBack()" title="رجوع"
+                        class="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-all hover:scale-110"
+                        style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);">
+                    <span class="text-base">←</span>
+                </button>
+                <button onclick="window.resetEntryUI()" title="الشاشة الرئيسية"
+                        class="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-all hover:scale-110"
+                        style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);">
+                    <span class="text-sm">✕</span>
+                </button>
+            </div>
+        </div>
+        <!-- ============ نهاية بوابة الشركات ============ -->
+
+
 
 
         <div id="loginFields" class="hidden space-y-5"
@@ -13666,7 +14209,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
 
     <!-- القناة الداخلية -->
     <div class="relative z-10 flex justify-center mt-5 pb-4">
-        <button id="chatToggleBtn" onclick="window.toggleChat()"
+        <button id="chatToggleBtn" data-feat="internalChat" onclick="window.toggleChat()"
             class="flex items-center gap-2 px-5 py-2 rounded-full text-xs font-black text-white/50 hover:text-white transition-all"
             style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
             💬 القناة الداخلية
@@ -14294,6 +14837,15 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                 <input id="leaderEdit_usedByOthers" type="hidden">
                 <p id="leaderEdit_remaining" class="text-[11px] text-emerald-400 font-black mt-1">—</p>
             </div>
+            <div id="leaderEdit_permsWrap">
+                <p class="lux-field-label">🎛️ صلاحيات هذا القائد (ضمن باقة شركتك)</p>
+                <div id="leaderEdit_featBox" class="flex flex-wrap gap-x-3 gap-y-1.5"></div>
+                <p class="lux-field-label mt-3">👥 صلاحيات أعضاء هذا القائد</p>
+                <div id="leaderEdit_memFeatBox" class="flex flex-wrap gap-x-3 gap-y-1.5"></div>
+                <p class="text-[10px] text-slate-500 font-bold mt-2">لا تظهر هنا إلا المزايا المشمولة في باقة شركتك. لإضافة غيرها تواصل مع الإدارة.</p>
+            </div>
+            <div>
+            </div>
         </div>
         <button onclick="window.saveLeaderEdit()" class="w-full mt-4 py-3 rounded-xl font-black text-xs text-emerald-300" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">
             💾 حفظ التعديلات
@@ -14837,6 +15389,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                             <input type="date" id="companyBilling_expiry" class="erg-input lux-field-input text-right w-full">
                             <button onclick="window.saveCompanyBilling()" class="cd-btn cd-btn-teal cd-block">حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)</button>
                         </div>
+<button onclick="window.showCompanyAccessModal(window._activeCompanyId)" class="cd-btn cd-btn-teal cd-block">🔑 الرمز التعريفي للشركة</button>
                         <button onclick="window.toggleCompanyQuota()" class="cd-btn cd-btn-teal cd-block">🔢 سقوف القادة والأعضاء</button>
                         <div id="companyQuotaWrap" class="hidden cd-form">
                             <p id="companyQuota_usage" class="text-[11px] font-black text-right" style="color:var(--cd-mute);">—</p>
@@ -15033,7 +15586,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                         <option value="name" style="background:#0f1420;">حسب الاسم</option>
                     </select>
                 </div>
-                <button onclick="window.openAddMemberModal()"
+                <button data-feat="memberAdd" onclick="window.openAddMemberModal()"
                     class="flex items-center gap-1.5 border border-indigo-400/30 rounded-2xl px-4 py-3 text-indigo-300 text-xs font-black transition-all hover:bg-indigo-500/15 hover:border-indigo-400/50 active:scale-95 shrink-0"
                     style="background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(99,102,241,0.04)); box-shadow:0 4px 14px rgba(99,102,241,0.1);">
                     ➕ إضافة عضو
@@ -15140,13 +15693,30 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                         <button id="memberDetail_btnReset" class="member-detail-action-btn" style="background:rgba(59,130,246,0.1); border-color:rgba(59,130,246,0.3); color:#60a5fa;">
                             <span class="member-detail-action-icon">🔄</span>تصفير الجهاز
                         </button>
-                        <button id="memberDetail_btnDelete" class="member-detail-action-btn member-detail-action-danger" style="background:rgba(244,63,94,0.1); border-color:rgba(244,63,94,0.3); color:#fb7185;">
+<button id="memberDetail_btnPerms" class="member-detail-action-btn" style="background:rgba(251,191,36,0.1); border-color:rgba(251,191,36,0.3); color:#fbbf24;">
+                            <span class="member-detail-action-icon">🎛️</span>الصلاحيات
+                        </button>
+                        <button id="memberDetail_btnDelete"
                             <span class="member-detail-action-icon">🗑️</span>حذف نهائي
                         </button>
                     </div>
                 </div>
             </div>
 
+
+<!-- نافذة صلاحيات عضو بعينه -->
+<div id="memberPermsModal" class="hidden fixed inset-0 z-[256600] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberPerms()">
+    <div class="w-full max-w-md rounded-[28px] p-5 relative member-detail-card flex flex-col gap-4 text-right" onclick="event.stopPropagation()">
+        <button onclick="window.closeMemberPerms()" class="member-detail-close">✕</button>
+        <div style="padding-left:56px;">
+            <p class="text-white font-black text-base">🎛️ صلاحيات العضو</p>
+            <p id="memberPerms_name" class="text-amber-300 text-xs font-black mt-1">—</p>
+            <p class="text-slate-400 text-xs font-bold mt-1">ألغِ علامة الميزة لمنعها عن هذا العضو وحده. المزايا غير المعروضة غير متاحة أصلاً لأعضاء قائده.</p>
+        </div>
+        <div id="memberPerms_box" class="flex flex-col gap-2.5"></div>
+        <button id="memberPerms_save" class="w-full py-3 rounded-2xl font-black text-white text-sm border-b-4 active:translate-y-1 transition-all" style="background:linear-gradient(135deg,#d97706,#f59e0b); border-bottom-color:#78350f;">💾 حفظ</button>
+    </div>
+</div>
 
 <!-- نافذة أعضاء القائد السريعة (مستقلة - تفتح فوق أي نافذة) -->
 <div id="leaderQuickRosterModal" class="hidden fixed inset-0 z-[256200] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeLeaderQuickRosterModal()">
@@ -15162,7 +15732,7 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
         </div>
         <div class="flex items-center justify-between gap-2" style="padding:14px 28px 0 28px;">
             <span id="leaderQuickRosterCount" class="text-xs bg-indigo-500/25 text-indigo-300 px-3 py-1.5 rounded-full font-black border border-indigo-400/30 shrink-0">0 عضو</span>
-            <button onclick="window.openAddMemberModal()" class="shrink-0 text-xs font-black px-3 py-1.5 rounded-full transition-all hover:brightness-110" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); color:#34d399;">➕ إضافة عضو</button>
+            <button data-feat="memberAdd" onclick="window.openAddMemberModal()" class="shrink-0 text-xs font-black px-3 py-1.5 rounded-full transition-all hover:brightness-110" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); color:#34d399;">➕ إضافة عضو</button>
         </div>
 
         <div class="p-6">
