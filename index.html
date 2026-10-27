@@ -518,21 +518,33 @@ window.renderAdminPackagesList = () => {
     const box = document.getElementById('adminPackagesList');
     if (!box) return;
     const list = window._adminPackagesCache || [];
-    if (!list.length) { box.innerHTML = `<p class="text-center text-slate-600 text-xs py-8">لا توجد باقات مضافة بعد</p>`; return; }
-    box.innerHTML = list.map(p => `
-        <div class="flex items-center justify-between rounded-xl p-3" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06);">
-            <div class="flex items-center gap-2">
-                <button onclick="window.editPackageStart('${p.id}')" class="text-amber-400 text-sm p-1.5">✏️</button>
-                <button onclick="window.deletePackageEntry('${p.id}')" class="text-red-400 text-sm p-1.5">🗑️</button>
-                <button onclick="window.togglePackageActive('${p.id}', ${p.active !== false})" class="text-[10px] font-black px-2 py-1 rounded-full" style="background:${p.active !== false ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.15)'}; color:${p.active !== false ? '#10b981' : '#64748b'};">${p.active !== false ? 'نشطة' : 'موقوفة'}</button>
+        if (!list.length) { box.innerHTML = `<div class="fin-empty"><div class="fe-ico">📦</div><p class="fe-t">لا توجد باقات مضافة بعد</p></div>`; return; }
+    box.innerHTML = list.map(p => {
+        const on = p.active !== false;
+        const icons = window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ');
+        return `
+        <div class="fin-card ${p.featured ? 'is-featured' : ''} ${on ? '' : 'is-off'}">
+            <div class="fc-top">
+                <div class="fc-av">${p.featured ? '⭐' : '📦'}</div>
+                <div class="fc-info">
+                    <p class="fc-name">${esc(p.title)}</p>
+                    <p class="fc-co">${p.badge ? esc(p.badge) : 'باقة اشتراك'}</p>
+                </div>
+                <span class="fin-pill ${on ? 'ok' : 'mute'}">${on ? 'نشطة' : 'موقوفة'}</span>
             </div>
-            <div class="text-right">
-                <p class="text-white font-black text-sm">${esc(p.title)} ${p.featured ? '⭐' : ''}</p>
-                <p class="text-slate-500 text-[10px]">${p.leadersCount} قائد × ${p.membersPerLeader} أعضاء · ${p.leaderCodeChanges ?? 0} تغيير كود — <span class="text-emerald-400 font-black">${p.price}$</span></p>
-                <p class="text-slate-600 text-[9px] mt-1">${window.FEATURE_CATALOG.filter(f => p.features && p.features[f]).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ') || 'مزايا أساسية فقط'}</p>
+            <div class="fc-stats">
+                <div class="fc-stat" style="--k:#34d399"><b>${esc(p.price)} $</b><small>السعر</small></div>
+                <div class="fc-stat" style="--k:#818cf8"><b>${esc(p.leadersCount)} × ${esc(p.membersPerLeader)}</b><small>قادة × أعضاء</small></div>
+                <div class="fc-stat" style="--k:#fbbf24"><b>${esc(p.leaderCodeChanges ?? 0)}</b><small>تغيير كود</small></div>
             </div>
-        </div>
-    `).join('');
+            <div class="fc-meta"><span class="fc-chip">${icons || 'مزايا أساسية فقط'}</span></div>
+            <div class="fc-actions">
+                <button class="fa fa-warn" onclick="window.editPackageStart('${p.id}')">✏️ تعديل</button>
+                <button class="fa" onclick="window.togglePackageActive('${p.id}', ${on})">${on ? '⏸ إيقاف' : '▶ تفعيل'}</button>
+                <button class="fa fa-bad" onclick="window.deletePackageEntry('${p.id}')">🗑️ حذف</button>
+            </div>
+        </div>`;
+    }).join('');
 };
 
 // 2. دالة انتقال المشترك لشاشة الدفع
@@ -2114,47 +2126,30 @@ window.loadFinancePending = async () => {
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'pending_requests'));
         const pending = snap.docs.map(d => ({id: d.id, ...d.data()})).filter(r => r.status === 'Pending Payment Verification');
-        if (pending.length === 0) { list.innerHTML = `<div class="flex flex-col items-center justify-center py-16 gap-3">
-                <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07);">✅</div>
-                <p class="text-slate-500 font-black text-sm">لا توجد طلبات معلقة</p>
-                <p class="text-slate-700 text-xs">جميع الطلبات تمت معالجتها</p>
-            </div>`; return; }
+                if (pending.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">✅</div><p class="fe-t">لا توجد طلبات معلقة</p><p class="fe-s">جميع الطلبات تمت معالجتها</p></div>`; return; }
         list.innerHTML = pending.map(r => `
-            <div class="rounded-2xl p-4 text-right transition-all" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07);">
-                <div class="flex items-start justify-between gap-4">
-                    <div class="flex gap-2 shrink-0 mt-1">
-                        <button onclick="window.approveRequest('${escJs(r.id)}','${escJs(r.name)}','${escJs(r.phone)}')"
-                            class="px-4 py-2 rounded-xl text-[11px] font-black text-white transition-all"
-                            style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.4);">✅ اعتماد</button>
-                        <button onclick="window.rejectRequest('${escJs(r.id)}','${escJs(r.name)}')"
-                            class="px-4 py-2 rounded-xl text-[11px] font-black text-white transition-all"
-                            style="background:rgba(220,38,38,0.15); border:1px solid rgba(220,38,38,0.3);">❌ رفض</button>
+            <div class="fin-card">
+                <div class="fc-top">
+                    <div class="fc-av">${esc(String(r.name || '?').trim().charAt(0))}</div>
+                    <div class="fc-info">
+                        <p class="fc-name">${esc(r.name)}</p>
+                        <p class="fc-co">🏢 ${esc(r.companyName || r.name)}</p>
                     </div>
-                    <div class="flex-1">
-                        <div class="flex items-center justify-end gap-3 mb-2">
-                            <span class="text-[10px] font-black px-2 py-0.5 rounded-full" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">⏳ بانتظار المراجعة</span>
-                            <p class="text-white font-black text-sm">${esc(r.name)}</p>
-                            <p class="text-indigo-300 text-[10px] font-black">🏢 ${esc(r.companyName || r.name)}</p>
-                        </div>
-                        <div class="grid grid-cols-3 gap-2">
-                            <div class="rounded-xl p-2 text-center" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.15);">
-                                <p class="text-indigo-400 font-black text-xs">${esc(r.payMethod || 'CliQ')}</p>
-                                <p class="text-slate-600 text-[9px] uppercase">طريقة الدفع</p>
-                            </div>
-                            <div class="rounded-xl p-2 text-center" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.15);">
-                                <p class="text-emerald-400 font-black text-xs">${esc(r.price || 0)} $</p>
-                                <p class="text-slate-600 text-[9px] uppercase">المبلغ</p>
-                            </div>
-                            <div class="rounded-xl p-2 text-center" style="background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.15);">
-                                <p class="text-purple-400 font-black text-xs">${esc(r.totalLeaders || 1)} قائد</p>
-                                <p class="text-slate-600 text-[9px] uppercase">عدد القادة</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center justify-between mt-2">
-                            <p class="text-slate-600 text-[10px]">${new Date(r.timestamp).toLocaleString('ar-SA')}</p>
-                            <p class="text-slate-500 text-[10px]">📞 ${esc(r.phone)} &nbsp;|&nbsp; 🔑 ${esc(r.transferRef || '—')}</p>
-                        </div>
-                    </div>
+                    <span class="fin-pill warn">⏳ بانتظار المراجعة</span>
+                </div>
+                <div class="fc-stats">
+                    <div class="fc-stat" style="--k:#818cf8"><b>${esc(r.payMethod || 'CliQ')}</b><small>طريقة الدفع</small></div>
+                    <div class="fc-stat" style="--k:#34d399"><b>${esc(r.price || 0)} $</b><small>المبلغ</small></div>
+                    <div class="fc-stat" style="--k:#c084fc"><b>${esc(r.totalLeaders || 1)} قائد</b><small>عدد القادة</small></div>
+                </div>
+                <div class="fc-meta">
+                    <span class="fc-chip">🕒 ${new Date(r.timestamp).toLocaleString('ar-SA')}</span>
+                    <span class="fc-chip" dir="ltr">📞 ${esc(r.phone)}</span>
+                    <span class="fc-chip" dir="ltr">🔑 ${esc(r.transferRef || '—')}</span>
+                </div>
+                <div class="fc-actions">
+                    <button class="fa fa-ok" onclick="window.approveRequest('${escJs(r.id)}','${escJs(r.name)}','${escJs(r.phone)}')">✅ اعتماد</button>
+                    <button class="fa fa-bad" onclick="window.rejectRequest('${escJs(r.id)}','${escJs(r.name)}')">❌ رفض</button>
                 </div>
             </div>`).join('');
     } catch(e) { list.innerHTML = '<p class="text-center text-rose-500 text-xs py-10">خطأ في التحميل</p>'; }
@@ -2166,42 +2161,34 @@ window.loadTrials = async () => {
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'trials'));
         const trials = snap.docs.map(d => ({id: d.id, ...d.data()}));
-        if (trials.length === 0) { list.innerHTML = '<p class="text-center text-slate-600 text-xs py-10">لا توجد طلبات تجربة</p>'; return; }
+        if (trials.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">📭</div><p class="fe-t">لا توجد طلبات تجربة</p></div>`; return; }
         list.innerHTML = trials.map(t => {
             const isPending = t.status === 'pending';
             const isRejected = t.status === 'rejected';
             const isActive = t.status === 'active' && t.expiryDate > Date.now();
-            const isExpired = t.status === 'active' && t.expiryDate < Date.now();
             const daysLeft = t.expiryDate ? Math.ceil((t.expiryDate - Date.now()) / (1000*60*60*24)) : 0;
-
-            const statusBadge = isPending
-                ? `<span class="text-[10px] px-2 py-0.5 rounded-full font-black bg-amber-500/20 text-amber-400">⏳ بانتظار الموافقة</span>`
-                : isRejected
-                ? `<span class="text-[10px] px-2 py-0.5 rounded-full font-black bg-rose-500/20 text-rose-400">❌ مرفوض</span>`
-                : isActive
-                ? `<span class="text-[10px] px-2 py-0.5 rounded-full font-black bg-emerald-500/20 text-emerald-400">✅ نشط — ${daysLeft} أيام</span>`
-                : `<span class="text-[10px] px-2 py-0.5 rounded-full font-black bg-slate-500/20 text-slate-400">⛔ منتهي</span>`;
-
+            const pill = isPending ? ['warn', '⏳ بانتظار الموافقة']
+                : isRejected ? ['bad', '❌ مرفوض']
+                : isActive ? ['ok', `✅ نشط — ${daysLeft} أيام`]
+                : ['mute', '⛔ منتهي'];
             const actions = isPending ? `
-                <button onclick="window.activateTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}','${escJs(t.phone)}','${escJs(t.email||'')}')"
-                    class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-emerald-600/30">✅ موافقة</button>
-                <button onclick="window.rejectTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}')"
-                    class="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-rose-600/30">❌ رفض</button>
+                <button class="fa fa-ok" onclick="window.activateTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}','${escJs(t.phone)}','${escJs(t.email||'')}')">✅ موافقة</button>
+                <button class="fa fa-bad" onclick="window.rejectTrialByAdmin('${escJs(t.id)}','${escJs(t.name)}')">❌ رفض</button>
             ` : `
-                <button onclick="window.blockTrial('${escJs(t.id)}','${escJs(t.name)}')"
-                    class="px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600 text-orange-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-orange-600/30">🚫 حظر</button>
-                <button onclick="window.deleteTrial('${escJs(t.id)}')"
-                    class="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-400 rounded-lg text-[10px] font-black transition-all">🗑️ حذف</button>
+                <button class="fa fa-warn" onclick="window.blockTrial('${escJs(t.id)}','${escJs(t.name)}')">🚫 حظر</button>
+                <button class="fa" onclick="window.deleteTrial('${escJs(t.id)}')">🗑️ حذف</button>
             `;
-
             return `
-            <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-xl px-4 py-3">
-                <div class="text-right space-y-1">
-                    <p class="text-white text-xs font-black">${esc(t.name)}</p>
-                    <p class="text-slate-500 text-[10px]">${esc(t.phone)}</p>
-                    ${statusBadge}
+            <div class="fin-card">
+                <div class="fc-top">
+                    <div class="fc-av">${esc(String(t.name || '?').trim().charAt(0))}</div>
+                    <div class="fc-info">
+                        <p class="fc-name">${esc(t.name)}</p>
+                        <p class="fc-co fc-ltr">${esc(t.phone)}</p>
+                    </div>
+                    <span class="fin-pill ${pill[0]}">${pill[1]}</span>
                 </div>
-                <div class="flex gap-2">${actions}</div>
+                <div class="fc-actions">${actions}</div>
             </div>`;
         }).join('');
     } catch(e) { list.innerHTML = '<p class="text-center text-rose-500 text-xs py-10">خطأ في التحميل</p>'; }
@@ -2211,52 +2198,121 @@ window.loadPayments = async () => {
     const list = document.getElementById('finPaymentsList');
     if (!list) return;
     const subs = [...(window.subscribers || [])].sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ar'));
-    if (subs.length === 0) { list.innerHTML = '<p class="text-center text-slate-600 text-xs py-10">لا يوجد مشتركون</p>'; return; }
+        if (subs.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">📭</div><p class="fe-t">لا يوجد مشتركون</p></div>`; return; }
     list.innerHTML = subs.map(s => {
-        const feats = s.features || null; // null = بدون قيود (كل المزايا متاحة — اشتراك يدوي)
-        const checksHtml = window.FEATURE_CATALOG.map(f => `
-            <label class="flex items-center gap-1.5 text-[10px] text-slate-300 font-bold">
-                <input type="checkbox" class="subFeatCheck" data-feat="${f}" ${window.featChecked(feats, f) ? 'checked' : ''}>
-                ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
-            </label>
-        `).join('');
+        const live = s.status === 'active';
         return `
-        <div class="rounded-xl border border-white/5 bg-white/3 overflow-hidden">
-            <div class="flex items-center justify-between px-4 py-3">
-                <div class="text-right">
-                    <p class="text-white text-xs font-black">${esc(s.ownerName)}</p>
-<p class="text-indigo-300 text-[10px] font-black">🏢 ${esc(s.companyName || '')}${s.isCompanyOwner === true ? ' 👑' : ''}</p>
-                    <p class="text-slate-500 text-[10px] font-mono">${esc(s.subKey)}</p>
-                    <p class="text-slate-600 text-[10px]">ينتهي: ${esc(s.expiryDate || 'غير محدد')}</p>
+        <div class="fin-card payment-item">
+            <div class="fc-top">
+                <div class="fc-av">${esc(String(s.companyName || s.ownerName || '?').trim().charAt(0))}</div>
+                <div class="fc-info">
+                    <p class="fc-name">${esc(s.ownerName)}${s.isCompanyOwner === true ? ' 👑' : ''}</p>
+                    <p class="fc-co">🏢 ${esc(s.companyName || '')}</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${s.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}">
-                        ${s.status === 'active' ? '✅ نشط' : '⛔ منتهي'}
-                    </span>
-                    <button onclick="window.toggleSubFeaturesPanel('${s.id}')" class="text-[10px] px-2 py-1 rounded-lg font-black text-indigo-300" style="background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);">✏️ المزايا</button>
-                </div>
+                <span class="fin-pill ${live ? 'ok' : 'bad'}">${live ? '✅ نشط' : '⛔ منتهي'}</span>
             </div>
-            <div id="subFeatPanel_${s.id}" class="hidden px-4 pb-3 pt-2 flex items-center flex-wrap gap-3" style="border-top:1px solid rgba(255,255,255,0.06);">
-                ${checksHtml}
-                <div class="w-full text-[10px] font-black text-amber-300 pt-2" style="border-top:1px dashed rgba(255,255,255,0.08);">👥 صلاحيات الأعضاء التابعين (أزرار الشريط الجانبي)</div>
-                ${window.SIDE_FEATURES.map(f => `
-                <label class="flex items-center gap-1.5 text-[10px] text-slate-300 font-bold">
-                    <input type="checkbox" class="subMemFeatCheck" data-feat="${f}" ${window.featChecked(s.memberFeatures, f) ? 'checked' : ''}>
-                    ${window.FEATURE_ICONS[f] || '⚙️'} ${window.FEATURE_LABELS[f] || f}
-                </label>`).join('')}
-                <button onclick="window.saveSubscriberFeatures('${s.id}')" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-emerald-300 mr-auto" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);">💾 حفظ</button>
-<button onclick="window.saveSubscriberFeatures('${s.id}', true)" class="text-[10px] px-3 py-1.5 rounded-lg font-black text-amber-300" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3);">🏢 حفظ لكل الشركة</button>
+            <div class="fc-meta">
+                <span class="fc-chip" dir="ltr">🔑 ${esc(s.subKey)}</span>
+                <span class="fc-chip">📅 ينتهي: ${esc(s.expiryDate || 'غير محدد')}</span>
+            </div>
+            <div class="fc-actions">
+                <button class="fa fa-main" onclick="window.openFeaturesModal('${s.id}')">🧩 المزايا</button>
             </div>
         </div>`;
     }).join('');
 };
 
-window.toggleSubFeaturesPanel = (id) => {
-    document.getElementById('subFeatPanel_' + id)?.classList.toggle('hidden');
+window._FEAT_GROUPS = { tools:'🛠️ الأدوات', field:'📡 الميدان', comms:'💬 التواصل', data:'🗂️ البيانات', admin:'⚙️ الإدارة' };
+
+window.openFeaturesModal = (id) => {
+    const s = (window.subscribers || []).find(x => x.id === id);
+    if (!s) return;
+    document.getElementById('featModal')?.remove();
+    const feats = s.features || null; // null = بدون قيود (كل المزايا متاحة)
+    const label = (f) => window.FEATURE_LABELS[f] || (window.FEATURE_APPS.find(a => a.key === f) || {}).label || f;
+    const card = (cls, f, checked) => `
+        <label class="fm-card">
+            <input type="checkbox" class="${cls}" data-feat="${f}" ${checked ? 'checked' : ''}>
+            <span class="fm-card-body">
+                <span class="fm-card-ico">${window.FEATURE_ICONS[f] || '⚙️'}</span>
+                <span class="fm-card-lbl">${label(f)}</span>
+                <span class="fm-switch"></span>
+            </span>
+        </label>`;
+    const group = (title, keys, cls, isOn) => keys.length ? `
+        <div class="fm-group">
+            <div class="fm-group-h">${title}</div>
+            <div class="fm-grid">${keys.map(k => card(cls, k, isOn(k))).join('')}</div>
+        </div>` : '';
+    const reg = window.FEATURE_REGISTRY;
+    const leaderPane =
+        group('🖥️ تطبيقات سطح المكتب', window.FEATURE_APPS.map(a => a.key), 'subFeatCheck', k => window.featChecked(feats, k)) +
+        Object.keys(window._FEAT_GROUPS).map(g =>
+            group(window._FEAT_GROUPS[g], reg.filter(f => f.group === g).map(f => f.key), 'subFeatCheck', k => window.featChecked(feats, k))
+        ).join('');
+    const memberPane = Object.keys(window._FEAT_GROUPS).map(g =>
+        group(window._FEAT_GROUPS[g], reg.filter(f => f.group === g && f.member).map(f => f.key), 'subMemFeatCheck', k => window.featChecked(s.memberFeatures, k))
+    ).join('');
+
+    const m = document.createElement('div');
+    m.id = 'featModal';
+    m.className = 'fm-overlay';
+    m.innerHTML = `
+        <div class="fm-box" role="dialog" aria-modal="true">
+            <div class="fm-head">
+                <div class="fm-head-ico">🧩</div>
+                <div class="fm-head-txt">
+                    <b>${esc(s.companyName || '')}${s.isCompanyOwner === true ? ' 👑' : ''}</b>
+                    <small>${esc(s.ownerName || '')} · <span dir="ltr">${esc(s.subKey || '')}</span></small>
+                </div>
+                <button class="fm-x" onclick="window.closeFeaturesModal()">✕</button>
+            </div>
+            <div class="fm-tabs">
+                <button class="fm-tab is-active" data-t="leader" onclick="window.fmTab('leader')">👤 مزايا القائد</button>
+                <button class="fm-tab" data-t="members" onclick="window.fmTab('members')">👥 صلاحيات الأعضاء التابعين</button>
+                <span class="fm-count" id="fmCount"></span>
+            </div>
+            <div class="fm-body">
+                <div class="fm-pane" data-pane="leader">${leaderPane}</div>
+                <div class="fm-pane hidden" data-pane="members">${memberPane}</div>
+            </div>
+            <div class="fm-foot">
+                <div class="fm-foot-l">
+                    <button class="fm-ghost" onclick="window.fmAll(true)">✔ تحديد الكل</button>
+                    <button class="fm-ghost" onclick="window.fmAll(false)">✖ إلغاء الكل</button>
+                </div>
+                <div class="fm-foot-r">
+                    <button class="fm-ghost" onclick="window.closeFeaturesModal()">إلغاء</button>
+                    <button class="fm-warn" onclick="window.saveSubscriberFeatures('${id}', true)">🏢 حفظ لكل الشركة</button>
+                    <button class="fm-main" onclick="window.saveSubscriberFeatures('${id}')">💾 حفظ</button>
+                </div>
+            </div>
+        </div>`;
+    m.addEventListener('click', e => { if (e.target === m) window.closeFeaturesModal(); });
+    m.addEventListener('change', () => window.fmUpdateCount());
+    document.body.appendChild(m);
+    window.fmUpdateCount();
 };
 
+window._fmActive = () => document.querySelector('#featModal .fm-tab.is-active')?.dataset.t || 'leader';
+window.fmTab = (t) => {
+    document.querySelectorAll('#featModal .fm-tab').forEach(b => b.classList.toggle('is-active', b.dataset.t === t));
+    document.querySelectorAll('#featModal .fm-pane').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== t));
+    window.fmUpdateCount();
+};
+window.fmAll = (v) => {
+    document.querySelectorAll(`#featModal .fm-pane[data-pane="${window._fmActive()}"] input[type=checkbox]`).forEach(cb => { cb.checked = v; });
+    window.fmUpdateCount();
+};
+window.fmUpdateCount = () => {
+    const all = [...document.querySelectorAll(`#featModal .fm-pane[data-pane="${window._fmActive()}"] input[type=checkbox]`)];
+    const el = document.getElementById('fmCount');
+    if (el) el.innerHTML = `<span dir="ltr">${all.filter(c => c.checked).length} / ${all.length}</span> مفعّلة`;
+};
+window.closeFeaturesModal = () => document.getElementById('featModal')?.remove();
+
 window.saveSubscriberFeatures = async (id, applyAll = false) => {
-    const panel = document.getElementById('subFeatPanel_' + id);
+    const panel = document.getElementById('featModal');
     if (!panel) return;
     const features = {};
     panel.querySelectorAll('.subFeatCheck').forEach(cb => { features[cb.dataset.feat] = cb.checked; });
@@ -2273,7 +2329,7 @@ window.saveSubscriberFeatures = async (id, applyAll = false) => {
         targets.forEach(t => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', t.id), upd));
         await batch.commit();
         window.showNotif(applyAll ? `✅ تم تحديث مزايا ${targets.length} قائد في الشركة` : '✅ تم تحديث مزايا هذا المشترك', 'success');
-        panel.classList.add('hidden');
+        window.closeFeaturesModal();
     } catch(e) {
         window.showNotif('فشل الحفظ', 'error');
     }
@@ -2331,15 +2387,20 @@ window.loadBlocked = async () => {
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'blocked_trials'));
         const blocked = snap.docs.map(d => ({id: d.id, ...d.data()}));
-        if (blocked.length === 0) { list.innerHTML = '<p class="text-center text-slate-600 text-xs py-10">لا يوجد أرقام محظورة</p>'; return; }
+                if (blocked.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">🛡️</div><p class="fe-t">لا يوجد أرقام محظورة</p></div>`; return; }
         list.innerHTML = blocked.map(b => `
-            <div class="flex items-center justify-between bg-white/3 border border-rose-500/10 rounded-xl px-4 py-3">
-                <div class="text-right">
-                    <p class="text-white text-xs font-black">${esc(b.name)}</p>
-                    <p class="text-slate-500 text-[10px]">${esc(b.phone)}</p>
+            <div class="fin-card is-bad">
+                <div class="fc-top">
+                    <div class="fc-av">🚫</div>
+                    <div class="fc-info">
+                        <p class="fc-name">${esc(b.name)}</p>
+                        <p class="fc-co fc-ltr">${esc(b.phone)}</p>
+                    </div>
+                    <span class="fin-pill bad">محظور</span>
                 </div>
-                <button onclick="window.unblockTrial('${escJs(b.id)}')"
-                    class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-[10px] font-black transition-all border border-emerald-600/30">✅ رفع الحظر</button>
+                <div class="fc-actions">
+                    <button class="fa fa-ok" onclick="window.unblockTrial('${escJs(b.id)}')">✅ رفع الحظر</button>
+                </div>
             </div>`).join('');
     } catch(e) {}
 };
@@ -12388,7 +12449,11 @@ body.light-mode #winFinance.app-window {
 /* ===== الهيكل ===== */
 .fin-shell{width:100%;height:100%;display:grid;grid-template-columns:248px minmax(0,1fr);direction:rtl}
 .fin-main{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%}
-.fin-content{flex:1;min-height:0;padding:16px 24px 22px;overflow:hidden}
+.fin-shell{grid-template-rows:minmax(0,1fr)}
+.fin-main{overflow:hidden}
+.fin-content{flex:1;min-height:0;padding:16px 24px 22px;overflow:hidden;display:flex;flex-direction:column}
+.fin-content > [id^="fpanel_"]{flex:1 1 0;min-height:0;height:auto !important}
+#winFinance *{scrollbar-width:thin;scrollbar-color:rgba(129,140,248,.45) transparent}
 
 /* ===== القائمة الجانبية ===== */
 .fin-side{background:var(--fin-side);border-inline-end:1px solid var(--fin-line);display:flex;flex-direction:column;gap:18px;padding:calc(20px + var(--safe-top,0px)) 14px 20px;min-height:0}
@@ -12455,6 +12520,126 @@ body.light-mode #winFinance.app-window {
   .fin-top,.fin-stats,.fin-content{padding-inline:14px}
   .fin-stats{grid-template-columns:repeat(2,1fr)}
 }
+
+/* ===== نافذة المزايا ===== */
+.fm-overlay{--fm-bg:#0d1430;--fm-surface:#131c3d;--fm-surface-2:#1a2550;--fm-line:rgba(129,140,248,.18);--fm-text:#e8ecff;--fm-muted:#8b95b8;--fm-accent:#38bdf8;--fm-accent-2:#818cf8;
+  position:fixed;inset:0;z-index:10050;box-sizing:border-box;background:rgba(3,6,18,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:calc(var(--fm-nav,64px) + 14px + env(safe-area-inset-top,0px)) 16px 16px;direction:rtl}
+body.light-mode .fm-overlay{--fm-bg:#ffffff;--fm-surface:#f5f7ff;--fm-surface-2:#e8edff;--fm-line:rgba(79,70,229,.16);--fm-text:#0f172a;--fm-muted:#64748b;--fm-accent:#0284c7;--fm-accent-2:#4f46e5;background:rgba(15,23,42,.45)}
+.fm-box{width:min(1280px,100%);max-height:100%;display:flex;flex-direction:column;background:var(--fm-bg);border:1px solid var(--fm-line);border-radius:22px;box-shadow:0 30px 80px rgba(0,0,0,.55);overflow:hidden;color:var(--fm-text)}
+.fm-head{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--fm-line);background:linear-gradient(270deg,rgba(56,189,248,.12),transparent)}
+.fm-head-ico{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;background:linear-gradient(135deg,var(--fm-accent),var(--fm-accent-2));flex:none}
+.fm-head-txt{flex:1;min-width:0}
+.fm-head-txt b{display:block;font-size:15px;font-weight:900}
+.fm-head-txt small{display:block;color:var(--fm-muted);font-size:11px;margin-top:2px}
+.fm-x{width:34px;height:34px;border-radius:10px;border:1px solid var(--fm-line);background:var(--fm-surface);color:var(--fm-muted);cursor:pointer}
+.fm-x:hover{color:#fb7185;border-color:#fb7185}
+.fm-tabs{display:flex;align-items:center;gap:8px;padding:12px 20px 0}
+.fm-tab{padding:9px 14px;border-radius:12px 12px 0 0;border:1px solid transparent;background:transparent;color:var(--fm-muted);font-size:12px;font-weight:900;cursor:pointer}
+.fm-tab.is-active{color:var(--fm-text);background:var(--fm-surface);border-color:var(--fm-line);border-bottom-color:transparent}
+.fm-count{margin-inline-start:auto;font-size:11px;font-weight:900;color:var(--fm-accent)}
+.fm-body{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;background:var(--fm-surface);border-top:1px solid var(--fm-line);scrollbar-width:thin}
+.fm-pane.hidden{display:none}
+.fm-group{margin-bottom:18px}
+.fm-group-h{font-size:12px;font-weight:900;color:var(--fm-accent-2);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.fm-group-h::after{content:'';flex:1;height:1px;background:var(--fm-line)}
+.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.fm-card{position:relative;display:block;cursor:pointer}
+.fm-card input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.fm-card-body{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--fm-bg);border:1px solid var(--fm-line);transition:.15s}
+.fm-card:hover .fm-card-body{border-color:var(--fm-accent)}
+.fm-card input:focus-visible + .fm-card-body{outline:2px solid var(--fm-accent)}
+.fm-card-ico{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--fm-surface-2);font-size:16px;flex:none}
+.fm-card-lbl{flex:1;font-size:12px;font-weight:800;line-height:1.3}
+.fm-switch{width:36px;height:20px;border-radius:999px;background:var(--fm-surface-2);border:1px solid var(--fm-line);position:relative;flex:none;transition:.15s}
+.fm-switch::after{content:'';position:absolute;top:2px;inset-inline-start:2px;width:14px;height:14px;border-radius:50%;background:var(--fm-muted);transition:.15s}
+.fm-card input:checked + .fm-card-body{border-color:rgba(56,189,248,.5);background:linear-gradient(270deg,rgba(56,189,248,.12),transparent)}
+.fm-card input:checked + .fm-card-body .fm-switch{background:var(--fm-accent);border-color:var(--fm-accent)}
+.fm-card input:checked + .fm-card-body .fm-switch::after{background:#04101f;inset-inline-start:calc(100% - 16px)}
+.fm-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--fm-line);background:var(--fm-bg)}
+.fm-foot-l,.fm-foot-r{display:flex;gap:8px;flex-wrap:wrap}
+.fm-ghost,.fm-warn,.fm-main{padding:9px 14px;border-radius:12px;font-size:12px;font-weight:900;cursor:pointer;border:1px solid var(--fm-line);background:var(--fm-surface);color:var(--fm-muted)}
+.fm-ghost:hover{color:var(--fm-text)}
+.fm-warn{color:#fbbf24;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+.fm-main{color:#04101f;border:0;background:linear-gradient(135deg,var(--fm-accent),var(--fm-accent-2))}
+@media(min-width:1500px){
+  .fm-box{width:min(1440px,100%)}
+  .fm-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+}
+@media(max-width:1024px){
+  .fm-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+}
+@media(max-width:700px){
+  .fm-overlay{padding:calc(var(--fm-nav,64px) + 8px + env(safe-area-inset-top,0px)) 0 0;align-items:flex-end}
+  .fm-box{width:100%;border-radius:22px 22px 0 0;border-bottom:0}
+  .fm-head{padding:12px 14px}
+  .fm-tabs{padding:10px 14px 0}
+  .fm-tab{white-space:nowrap;padding:9px 12px}
+  .fm-count{white-space:nowrap}
+  .fm-body{padding:14px}
+  .fm-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .fm-card-body{padding:9px 10px;gap:8px}
+  .fm-card-ico{width:28px;height:28px;font-size:14px}
+  .fm-card-lbl{font-size:11px}
+  .fm-foot{padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px))}
+  .fm-foot-r{order:-1;width:100%}
+  .fm-foot-l{width:100%}
+  .fm-foot-r button,.fm-foot-l button{flex:1}
+}
+@media(max-width:380px){
+  .fm-grid{grid-template-columns:1fr}
+}
+@media(max-height:520px) and (orientation:landscape){
+  .fm-overlay{padding-top:calc(var(--fm-nav,64px) + 4px)}
+  .fm-head{padding:8px 16px}
+  .fm-head-ico{width:34px;height:34px;font-size:18px}
+  .fm-body{padding:10px 16px}
+}
+@media(pointer:coarse){
+  .fm-card-body{min-height:48px}
+  .fm-ghost,.fm-warn,.fm-main{min-height:44px}
+}
+
+/* ===== بطاقات القوائم ===== */
+#finPendingList,#finTrialsList,#finPaymentsList,#finBlockedList,#adminPackagesList{display:grid;gap:12px;align-content:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));padding:2px 4px 18px 2px}
+#finPendingList{grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}
+#winFinance #finPendingList>*,#winFinance #finTrialsList>*,#winFinance #finPaymentsList>*,#winFinance #finBlockedList>*,#winFinance #adminPackagesList>*{margin:0!important}
+.fin-empty,#winFinance [id^="fin"][id$="List"]>p,#adminPackagesList>p{grid-column:1/-1}
+
+.fin-card{display:flex;flex-direction:column;gap:12px;padding:14px 16px;border-radius:18px;background:var(--fin-surface);border:1px solid var(--fin-line);transition:.18s}
+.fin-card:hover{border-color:rgba(56,189,248,.45);transform:translateY(-1px)}
+.fin-card.is-bad{border-color:rgba(251,113,133,.28)}
+.fin-card.is-featured{border-color:rgba(251,191,36,.5);box-shadow:0 0 0 1px rgba(251,191,36,.15)}
+.fin-card.is-off{opacity:.6}
+.fc-top{display:flex;align-items:center;gap:12px}
+.fc-av{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-size:17px;font-weight:900;color:#04101f;background:linear-gradient(135deg,var(--fin-accent),var(--fin-accent-2));flex:none}
+.fin-card.is-bad .fc-av{background:rgba(251,113,133,.16);color:var(--fin-bad)}
+.fc-info{flex:1;min-width:0}
+.fc-name{margin:0;color:var(--fin-text);font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-co{margin:3px 0 0;color:var(--fin-accent-2);font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-ltr{direction:ltr;text-align:right}
+.fc-meta{display:flex;flex-wrap:wrap;gap:6px}
+.fc-chip{padding:4px 9px;border-radius:999px;background:var(--fin-surface-2);color:var(--fin-muted);font-size:10px;font-weight:800}
+.fc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fc-stat{padding:9px 6px;border-radius:12px;text-align:center;background:var(--fin-surface-2);border-top:2px solid var(--k)}
+.fc-stat b{display:block;color:var(--k);font-size:13px;font-weight:900}
+.fc-stat small{display:block;margin-top:3px;color:var(--fin-muted);font-size:9px;font-weight:800}
+.fc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+.fa{flex:1;min-width:92px;padding:9px 12px;border-radius:12px;border:1px solid var(--fin-line);background:var(--fin-surface-2);color:var(--fin-text);font-size:11px;font-weight:900;cursor:pointer;transition:.15s}
+.fa:hover{filter:brightness(1.15)}
+.fa-main{border:0;color:#04101f;background:linear-gradient(135deg,var(--fin-accent),var(--fin-accent-2))}
+.fa-ok{color:var(--fin-ok);border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.10)}
+.fa-bad{color:var(--fin-bad);border-color:rgba(251,113,133,.4);background:rgba(251,113,133,.10)}
+.fa-warn{color:var(--fin-warn);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.10)}
+.fin-pill{padding:4px 10px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap;flex:none}
+.fin-pill.ok{color:var(--fin-ok);background:rgba(52,211,153,.14)}
+.fin-pill.warn{color:var(--fin-warn);background:rgba(251,191,36,.14)}
+.fin-pill.bad{color:var(--fin-bad);background:rgba(251,113,133,.14)}
+.fin-pill.mute{color:var(--fin-muted);background:rgba(139,149,184,.14)}
+.fin-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:56px 12px;text-align:center}
+.fe-ico{width:64px;height:64px;border-radius:20px;display:grid;place-items:center;font-size:30px;background:var(--fin-surface);border:1px solid var(--fin-line)}
+.fe-t{margin:0;color:var(--fin-text);font-size:14px;font-weight:900}
+.fe-s{margin:0;color:var(--fin-muted);font-size:11px;font-weight:700}
+
 #winSubs.app-window {
     background:
         radial-gradient(ellipse at 15% 0%,  rgba(139, 92, 246, 0.20) 0%, transparent 45%),
