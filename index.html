@@ -479,6 +479,7 @@ window.savePackageForm = async () => {
             window.showNotif('✅ تم إضافة الباقة', 'success');
         }
         window.resetPackageForm();
+        window.closePackageEditor();
         window.loadPricingSettings();
     } catch(e) { window.showNotif('فشل حفظ الباقة', 'error'); }
 };
@@ -498,13 +499,14 @@ window.editPackageStart = (id) => {
     window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = !!(p.features && window.featChecked(p.features, f)); });
 };
 
-window.deletePackageEntry = async (id) => {
-    if (!confirm('هل أنت متأكد من حذف هذي الباقة؟')) return;
-    try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'packages', id));
-        window.showNotif('🗑️ تم حذف الباقة', 'success');
-        window.loadPricingSettings();
-    } catch(e) { window.showNotif('فشل الحذف', 'error'); }
+window.deletePackageEntry = (id) => {
+    window.showConfirm('حذف الباقة', 'هل أنت متأكد من حذف هذي الباقة؟', async () => {
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'packages', id));
+            window.showNotif('🗑️ تم حذف الباقة', 'success');
+            window.loadPricingSettings();
+        } catch(e) { window.showNotif('فشل الحذف', 'error'); }
+    });
 };
 
 window.togglePackageActive = async (id, current) => {
@@ -546,6 +548,139 @@ window.renderAdminPackagesList = () => {
         </div>`;
     }).join('');
 };
+
+
+
+window.renderPkgFeatCheckboxes = () => {
+    const box = document.getElementById('pkgFeatContainer');
+    if (!box) return;
+    const label = (f) => window.FEATURE_LABELS[f] || (window.FEATURE_APPS.find(a => a.key === f) || {}).label || f;
+    const shown = new Set();
+    const card = (f) => { shown.add(f); return `
+        <label class="fm-card">
+            <input type="checkbox" id="pkgFeat_${f}">
+            <span class="fm-card-body">
+                <span class="fm-card-ico">${window.FEATURE_ICONS[f] || '⚙️'}</span>
+                <span class="fm-card-lbl">${label(f)}</span>
+                <span class="fm-switch"></span>
+            </span>
+        </label>`; };
+    const group = (title, keys) => keys.length ? `
+        <div class="fm-group">
+            <div class="fm-group-h">${title}</div>
+            <div class="fm-grid">${keys.map(card).join('')}</div>
+        </div>` : '';
+    const reg = window.FEATURE_REGISTRY;
+    let html = group('🖥️ تطبيقات سطح المكتب', window.FEATURE_APPS.map(a => a.key));
+    Object.keys(window._FEAT_GROUPS).forEach(g => { html += group(window._FEAT_GROUPS[g], reg.filter(f => f.group === g).map(f => f.key)); });
+    html += group('✨ أخرى', window.FEATURE_CATALOG.filter(f => !shown.has(f)));
+    box.innerHTML = html;
+};
+
+window.resetPackageForm = () => {
+    window.renderPkgFeatCheckboxes();
+    document.getElementById('pkgEditId').value = '';
+    document.getElementById('pkgTitle').value = '';
+    document.getElementById('pkgBadge').value = '';
+    document.getElementById('pkgLeaders').value = 1;
+    document.getElementById('pkgMembers').value = 5;
+    document.getElementById('pkgPrice').value = '';
+    document.getElementById('pkgCodeChanges').value = 1;
+    document.getElementById('pkgFeatured').checked = false;
+    window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = false; });
+    const t = document.getElementById('pkgEditorTitle'); if (t) t.textContent = 'باقة جديدة';
+    window.pkgUpdate();
+};
+
+window.openPackageEditor = () => {
+    window.resetPackageForm();
+    document.getElementById('pkgEditor')?.classList.add('is-open');
+};
+window.closePackageEditor = () => document.getElementById('pkgEditor')?.classList.remove('is-open');
+
+window.editPackageStart = (id, asCopy) => {
+    const p = (window._adminPackagesCache || []).find(x => x.id === id);
+    if (!p) return;
+    window.renderPkgFeatCheckboxes();
+    document.getElementById('pkgEditId').value = asCopy ? '' : p.id;
+    document.getElementById('pkgTitle').value = asCopy ? (p.title || '') + ' (نسخة)' : (p.title || '');
+    document.getElementById('pkgBadge').value = p.badge || '';
+    document.getElementById('pkgLeaders').value = p.leadersCount || 1;
+    document.getElementById('pkgMembers').value = p.membersPerLeader || 5;
+    document.getElementById('pkgPrice').value = p.price || '';
+    document.getElementById('pkgCodeChanges').value = p.leaderCodeChanges ?? 0;
+    document.getElementById('pkgFeatured').checked = asCopy ? false : !!p.featured;
+    window.FEATURE_CATALOG.forEach(f => { const el = document.getElementById('pkgFeat_' + f); if (el) el.checked = !!(p.features && window.featChecked(p.features, f)); });
+    const t = document.getElementById('pkgEditorTitle'); if (t) t.textContent = asCopy ? 'نسخ باقة: ' + (p.title || '') : 'تعديل: ' + (p.title || '');
+    window.pkgUpdate();
+    document.getElementById('pkgEditor')?.classList.add('is-open');
+};
+
+window.pkgAll = (v) => {
+    document.querySelectorAll('#pkgFeatContainer input[type=checkbox]').forEach(cb => { cb.checked = v; });
+    window.pkgUpdate();
+};
+
+// عدّاد المزايا + مقارنة السعر بالتسعير الأساسي
+window.pkgUpdate = () => {
+    const all = [...document.querySelectorAll('#pkgFeatContainer input[type=checkbox]')];
+    const c = document.getElementById('pkgCount');
+    if (c) c.innerHTML = all.length ? `<span dir="ltr">${all.filter(x => x.checked).length} / ${all.length}</span> مفعّلة` : '';
+    const h = document.getElementById('pkgHint');
+    if (!h) return;
+    const L = parseInt(document.getElementById('pkgLeaders')?.value) || 0;
+    const M = parseInt(document.getElementById('pkgMembers')?.value) || 0;
+    const P = parseFloat(document.getElementById('pkgPrice')?.value) || 0;
+    const pl = (window.pricingConfig && window.pricingConfig.pricePerLeader) || 300;
+    const pm = (window.pricingConfig && window.pricingConfig.pricePerMember) || 30;
+    const base = L * pl + L * M * pm;
+    let diff = '';
+    if (P && base) {
+        const d = Math.round((1 - P / base) * 100);
+        diff = d > 0 ? ` · خصم ${d}% عن الأساسي` : d < 0 ? ` · أعلى من الأساسي بـ ${-d}%` : ' · مطابق للأساسي';
+    }
+    h.textContent = `👥 إجمالي الأعضاء: ${L * M} · 💲 بالتسعير الأساسي: ${base} $${diff}`;
+};
+
+window.renderAdminPackagesList = () => {
+    const box = document.getElementById('adminPackagesList');
+    if (!box) return;
+    const list = [...(window._adminPackagesCache || [])]
+        .sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || (Number(a.price) || 0) - (Number(b.price) || 0));
+    const cnt = document.getElementById('pkgListCount'); if (cnt) cnt.textContent = list.length;
+    if (!list.length) { box.innerHTML = `<div class="fin-empty"><div class="fe-ico">📦</div><p class="fe-t">لا توجد باقات مضافة بعد</p></div>`; return; }
+    box.innerHTML = list.map(p => {
+        const on = p.active !== false;
+        const keys = window.FEATURE_CATALOG.filter(f => p.features && p.features[f]);
+        const icons = keys.slice(0, 10).map(f => window.FEATURE_ICONS[f] || '⚙️').join(' ');
+        const more = keys.length > 10 ? `<em>+${keys.length - 10}</em>` : '';
+        return `
+        <div class="fin-card pk-card ${p.featured ? 'is-featured' : ''} ${on ? '' : 'is-off'}">
+            <div class="fc-top">
+                <div class="fc-av">${p.featured ? '⭐' : '📦'}</div>
+                <div class="fc-info">
+                    <p class="fc-name">${esc(p.title)}</p>
+                    <p class="fc-co">${p.badge ? esc(p.badge) : 'باقة اشتراك'}</p>
+                </div>
+                <span class="fin-pill ${on ? 'ok' : 'mute'}">${on ? 'نشطة' : 'موقوفة'}</span>
+            </div>
+            <div class="pk-price"><b>${esc(p.price)}</b><small>$</small></div>
+            <div class="fc-stats">
+                <div class="fc-stat" style="--k:#818cf8"><b>${esc(p.leadersCount)}</b><small>قائد</small></div>
+                <div class="fc-stat" style="--k:#34d399"><b>${esc(p.membersPerLeader)}</b><small>عضو / قائد</small></div>
+                <div class="fc-stat" style="--k:#fbbf24"><b>${esc(p.leaderCodeChanges ?? 0)}</b><small>تغيير كود</small></div>
+            </div>
+            <div class="pk-feats">${icons ? icons + more : '<em>مزايا أساسية فقط</em>'}<span class="pk-fcount">🧩 ${keys.length}</span></div>
+            <div class="fc-actions">
+                <button class="fa fa-warn" onclick="window.editPackageStart('${escJs(p.id)}')">✏️ تعديل</button>
+                <button class="fa" onclick="window.editPackageStart('${escJs(p.id)}', true)">📋 نسخ</button>
+                <button class="fa" onclick="window.togglePackageActive('${escJs(p.id)}', ${on})">${on ? '⏸ إيقاف' : '▶ تفعيل'}</button>
+                <button class="fa fa-bad" onclick="window.deletePackageEntry('${escJs(p.id)}')">🗑️ حذف</button>
+            </div>
+        </div>`;
+    }).join('');
+};
+
 
 // 2. دالة انتقال المشترك لشاشة الدفع
 window.startPublicPayment = () => {
@@ -2030,7 +2165,7 @@ window.filterPayments = (query) => {
     if (!list) return;
     const q = query.toLowerCase().trim();
     list.querySelectorAll('.payment-item').forEach(item => {
-        const text = item.textContent.toLowerCase();
+        const text = (item.dataset.search || item.textContent).toLowerCase();
         item.style.display = !q || text.includes(q) ? '' : 'none';
     });
 };
@@ -2197,26 +2332,34 @@ window.loadTrials = async () => {
 window.loadPayments = async () => {
     const list = document.getElementById('finPaymentsList');
     if (!list) return;
-    const subs = [...(window.subscribers || [])].sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ar'));
-        if (subs.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">📭</div><p class="fe-t">لا يوجد مشتركون</p></div>`; return; }
-    list.innerHTML = subs.map(s => {
-        const live = s.status === 'active';
+    // تجميع المشتركين حسب الشركة: بطاقة واحدة لكل شركة
+    const groups = {};
+    (window.subscribers || []).forEach(s => { const k = s.companyId || s.id; (groups[k] = groups[k] || []).push(s); });
+    const rows = Object.keys(groups).map(cid => ({ cid, arr: groups[cid], name: window._hubName(cid) }))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+    if (rows.length === 0) { list.innerHTML = `<div class="fin-empty"><div class="fe-ico">📭</div><p class="fe-t">لا يوجد مشتركون</p></div>`; return; }
+    list.innerHTML = rows.map(r => {
+        const leaders = r.arr.filter(s => s.isCompanyOwner !== true);
+        const live = r.arr.some(s => s.status === 'active');
+        const ids = new Set(leaders.map(s => s.id));
+        const membersCount = (window.teamMembers || []).filter(m => ids.has(m.parentKey)).length;
+        const nearest = r.arr.map(s => s.expiryDate).filter(Boolean).sort()[0];
+        const search = (r.name + ' ' + r.arr.map(s => (s.ownerName || '') + ' ' + (s.subKey || '')).join(' ')).toLowerCase();
         return `
-        <div class="fin-card payment-item">
+        <div class="fin-card payment-item" data-search="${esc(search)}">
             <div class="fc-top">
-                <div class="fc-av">${esc(String(s.companyName || s.ownerName || '?').trim().charAt(0))}</div>
+                <div class="fc-av">${esc(String(r.name).trim().charAt(0))}</div>
                 <div class="fc-info">
-                    <p class="fc-name">${esc(s.ownerName)}${s.isCompanyOwner === true ? ' 👑' : ''}</p>
-                    <p class="fc-co">🏢 ${esc(s.companyName || '')}</p>
+                    <p class="fc-name">🏢 ${esc(r.name)}</p>
+                    <p class="fc-co">🎖️ ${leaders.length} قائد · 👥 ${membersCount} عضو</p>
                 </div>
                 <span class="fin-pill ${live ? 'ok' : 'bad'}">${live ? '✅ نشط' : '⛔ منتهي'}</span>
             </div>
             <div class="fc-meta">
-                <span class="fc-chip" dir="ltr">🔑 ${esc(s.subKey)}</span>
-                <span class="fc-chip">📅 ينتهي: ${esc(s.expiryDate || 'غير محدد')}</span>
+                <span class="fc-chip">📅 أقرب انتهاء: ${esc(nearest || 'غير محدد')}</span>
             </div>
             <div class="fc-actions">
-                <button class="fa fa-main" onclick="window.openFeaturesModal('${s.id}')">🧩 المزايا</button>
+                <button class="fa fa-main" onclick="window.openCompanyHub('${escJs(r.cid)}')">🏢 فتح الشركة</button>
             </div>
         </div>`;
     }).join('');
@@ -2331,6 +2474,174 @@ window.saveSubscriberFeatures = async (id, applyAll = false) => {
         window.showNotif(applyAll ? `✅ تم تحديث مزايا ${targets.length} قائد في الشركة` : '✅ تم تحديث مزايا هذا المشترك', 'success');
         window.closeFeaturesModal();
     } catch(e) {
+        window.showNotif('فشل الحفظ', 'error');
+    }
+};
+
+
+
+// ===== هرم الشركات: شركة ← قادة ← أعضاء (نافذة واحدة بزر رجوع وشريط مسار) =====
+window._hub = { cid: null, lid: null, tab: 'leaders' };
+window._hubSubs = (cid) => (window.subscribers || []).filter(s => (s.companyId || s.id) === cid);
+window._hubName = (cid) => {
+    const c = (window._companiesIndex || {})[cid];
+    const a = window._hubSubs(cid)[0];
+    return (c && c.name) || (a && (a.companyName || a.ownerName)) || cid;
+};
+
+// لوحتا المزايا (مزايا + صلاحيات الأعضاء) بنفس منطق النافذة القديمة
+window._hubPanes = (feats, memFeats) => {
+    const label = (f) => window.FEATURE_LABELS[f] || (window.FEATURE_APPS.find(a => a.key === f) || {}).label || f;
+    const card = (cls, f, checked) => `
+        <label class="fm-card">
+            <input type="checkbox" class="${cls}" data-feat="${f}" ${checked ? 'checked' : ''}>
+            <span class="fm-card-body">
+                <span class="fm-card-ico">${window.FEATURE_ICONS[f] || '⚙️'}</span>
+                <span class="fm-card-lbl">${label(f)}</span>
+                <span class="fm-switch"></span>
+            </span>
+        </label>`;
+    const group = (title, keys, cls, isOn) => keys.length ? `
+        <div class="fm-group">
+            <div class="fm-group-h">${title}</div>
+            <div class="fm-grid">${keys.map(k => card(cls, k, isOn(k))).join('')}</div>
+        </div>` : '';
+    const reg = window.FEATURE_REGISTRY;
+    const leaderPart =
+        group('🖥️ تطبيقات سطح المكتب', window.FEATURE_APPS.map(a => a.key), 'subFeatCheck', k => window.featChecked(feats, k)) +
+        Object.keys(window._FEAT_GROUPS).map(g =>
+            group(window._FEAT_GROUPS[g], reg.filter(f => f.group === g).map(f => f.key), 'subFeatCheck', k => window.featChecked(feats, k))
+        ).join('');
+    const memberPart = Object.keys(window._FEAT_GROUPS).map(g =>
+        group(window._FEAT_GROUPS[g], reg.filter(f => f.group === g && f.member).map(f => f.key), 'subMemFeatCheck', k => window.featChecked(memFeats, k))
+    ).join('');
+    return `<div class="hub-sec">🧩 المزايا</div>${leaderPart}<div class="hub-sec">👥 صلاحيات الأعضاء التابعين</div>${memberPart}`;
+};
+
+window.openCompanyHub = (cid) => {
+    document.getElementById('coHub')?.remove();
+    window._hub = { cid, lid: null, tab: 'leaders' };
+    const m = document.createElement('div');
+    m.id = 'coHub';
+    m.className = 'fm-overlay';
+    m.innerHTML = '<div class="fm-box" id="coHubBox" role="dialog" aria-modal="true"></div>';
+    m.addEventListener('click', e => { if (e.target === m) window.closeCompanyHub(); });
+    m.addEventListener('change', () => window.hubCount());
+    document.body.appendChild(m);
+    window.hubRender();
+};
+window.closeCompanyHub = () => document.getElementById('coHub')?.remove();
+window.hubGoCompany = (tab) => { window._hub.lid = null; window._hub.tab = tab || 'leaders'; window.hubRender(); };
+window.hubGoLeader = (lid) => { window._hub.lid = lid; window._hub.tab = 'lfeat'; window.hubRender(); };
+window.hubTab = (t) => { window._hub.tab = t; window.hubRender(); };
+
+window.hubCount = () => {
+    const all = [...document.querySelectorAll('#coHub .fm-body input[type=checkbox]')];
+    const el = document.getElementById('hubCount');
+    if (el) el.innerHTML = all.length ? `<span dir="ltr">${all.filter(c => c.checked).length} / ${all.length}</span> مفعّلة` : '';
+};
+window.hubAll = (v) => {
+    document.querySelectorAll('#coHub .fm-body input[type=checkbox]').forEach(cb => { cb.checked = v; });
+    window.hubCount();
+};
+
+window.hubRender = () => {
+    const box = document.getElementById('coHubBox');
+    if (!box) return;
+    const h = window._hub;
+    const subs = window._hubSubs(h.cid);
+    if (!subs.length) { window.closeCompanyHub(); return; }
+    const leaders = subs.filter(s => s.isCompanyOwner !== true)
+        .sort((a, b) => String(a.ownerName || '').localeCompare(String(b.ownerName || ''), 'ar'));
+    const owner = subs.find(s => s.isCompanyOwner === true);
+    let leader = h.lid ? subs.find(s => s.id === h.lid) : null;
+    if (h.lid && !leader) { h.lid = null; h.tab = 'leaders'; }
+    const name = window._hubName(h.cid);
+    const members = leader ? (window.teamMembers || []).filter(m => m.parentKey === leader.id) : [];
+
+    const crumb = `<nav class="hub-crumb">
+        <a onclick="window.closeCompanyHub()">الشركات</a><i>‹</i>
+        ${leader ? `<a onclick="window.hubGoCompany()">${esc(name)}</a><i>‹</i><span>${esc(leader.ownerName || '')}</span>` : `<span>${esc(name)}</span>`}
+    </nav>`;
+
+    const tabs = leader
+        ? [['lfeat', '🧩 مزايا القائد'], ['members', `👥 الأعضاء (${members.length})`]]
+        : [['cofeat', '🧩 مزايا الشركة'], ['leaders', `🎖️ القادة (${leaders.length})`]];
+
+    let body = '', foot = '';
+    if (h.tab === 'leaders' && !leader) {
+        body = leaders.length ? `<div class="hub-list">${leaders.map(l => {
+            const cnt = (window.teamMembers || []).filter(m => m.parentKey === l.id).length;
+            const live = l.status === 'active';
+            return `<div class="hub-row" onclick="window.hubGoLeader('${escJs(l.id)}')">
+                <div class="hub-av">${esc(String(l.ownerName || '?').trim().charAt(0))}</div>
+                <div class="hub-info">
+                    <b>${esc(l.ownerName || '')}</b>
+                    <span><i dir="ltr">🔑 ${esc(l.subKey || '')}</i> · 📅 ${esc(l.expiryDate || 'غير محدد')} · 👥 ${cnt}/${l.maxMembers || 5}</span>
+                </div>
+                <span class="hub-pill ${live ? 'ok' : 'bad'}">${live ? '✅ نشط' : '⛔ منتهي'}</span>
+                <span class="hub-go">‹</span>
+            </div>`; }).join('')}</div>`
+            : `<div class="hub-empty">لا يوجد قادة في هذه الشركة بعد</div>`;
+    } else if (h.tab === 'cofeat' && !leader) {
+        const base = owner || leaders[0] || {};
+        body = `<p class="hub-note">تُطبَّق هذه الإعدادات دفعة واحدة على جميع قادة الشركة (${subs.length}) وتستبدل ما عُيّن لكل قائد على حدة. للتخصيص لقائد واحد افتح القائد من تبويب القادة.</p>` + window._hubPanes(base.features || null, base.memberFeatures || null);
+        foot = `<div class="fm-foot-l"><button class="fm-ghost" onclick="window.hubAll(true)">✔ تحديد الكل</button><button class="fm-ghost" onclick="window.hubAll(false)">✖ إلغاء الكل</button></div>
+                <div class="fm-foot-r"><button class="fm-warn" onclick="window.hubSaveCompany()">🏢 تطبيق على كل القادة (${subs.length})</button></div>`;
+    } else if (h.tab === 'lfeat' && leader) {
+        body = window._hubPanes(leader.features || null, leader.memberFeatures || null);
+        foot = `<div class="fm-foot-l"><button class="fm-ghost" onclick="window.hubAll(true)">✔ تحديد الكل</button><button class="fm-ghost" onclick="window.hubAll(false)">✖ إلغاء الكل</button></div>
+                <div class="fm-foot-r"><button class="fm-main" onclick="window.hubSaveFeatures('leader')">💾 حفظ</button></div>`;
+    } else if (h.tab === 'members' && leader) {
+        body = members.length ? `<div class="hub-list">${members.map((m, i) => `
+            <div class="hub-row" onclick="window.openMemberDetail('${escJs(m.id)}')">
+                <div class="hub-av">${i + 1}</div>
+                <div class="hub-info"><b>${esc(m.memberName || '')}</b><span>👤 عضو فريق</span></div>
+                <button class="fm-ghost" onclick="event.stopPropagation();window.openMemberPerms('${escJs(m.id)}')">🎛️ الصلاحيات</button>
+            </div>`).join('')}</div>`
+            : `<div class="hub-empty">لا يوجد أعضاء لهذا القائد</div>`;
+    }
+
+    box.innerHTML = `
+        <div class="fm-head">
+            <div class="fm-head-ico">${leader ? '🎖️' : '🏢'}</div>
+            <div class="fm-head-txt">${crumb}<small>${leader ? esc(name) + ' · ' : ''}${subs.some(s => s.status === 'active') ? 'اشتراك نشط' : 'منتهي'}</small></div>
+            ${leader ? `<button class="fm-ghost" onclick="window.hubGoCompany()">‹ رجوع</button>` : ''}
+            <button class="fm-x" onclick="window.closeCompanyHub()">✕</button>
+        </div>
+        <div class="fm-tabs">
+            ${tabs.map(t => `<button class="fm-tab ${h.tab === t[0] ? 'is-active' : ''}" onclick="window.hubTab('${t[0]}')">${t[1]}</button>`).join('')}
+            <span class="fm-count" id="hubCount"></span>
+        </div>
+        <div class="fm-body">${body}</div>
+        ${foot ? `<div class="fm-foot">${foot}</div>` : ''}`;
+    window.hubCount();
+};
+
+window.hubSaveCompany = () => {
+    const n = window._hubSubs(window._hub.cid).length;
+    window.showConfirm('تطبيق على كل الشركة', `ستُستبدل مزايا ${n} حساب في هذه الشركة بما حددته هنا. متابعة؟`, () => window.hubSaveFeatures('company'));
+};
+
+window.hubSaveFeatures = async (scope) => {
+    const box = document.getElementById('coHubBox');
+    if (!box) return;
+    const features = {}, memberFeatures = {};
+    box.querySelectorAll('.subFeatCheck').forEach(cb => { features[cb.dataset.feat] = cb.checked; });
+    box.querySelectorAll('.subMemFeatCheck').forEach(cb => { memberFeatures[cb.dataset.feat] = cb.checked; });
+    const upd = { features };
+    if (box.querySelector('.subMemFeatCheck')) upd.memberFeatures = memberFeatures;
+    const h = window._hub;
+    const targets = scope === 'company' ? window._hubSubs(h.cid) : (window.subscribers || []).filter(s => s.id === h.lid);
+    if (!targets.length) return;
+    try {
+        const batch = writeBatch(db);
+        targets.forEach(t => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', t.id), upd));
+        await batch.commit();
+        targets.forEach(t => Object.assign(t, upd));
+        window.showNotif(scope === 'company' ? `✅ تم تحديث مزايا ${targets.length} حساب في الشركة` : '✅ تم تحديث مزايا القائد', 'success');
+        window.hubRender();
+    } catch (e) {
         window.showNotif('فشل الحفظ', 'error');
     }
 };
@@ -5562,6 +5873,67 @@ if (window.userRole === 'master') {
 
 };
 
+
+// ===== ملء الشاشة (زر دائم في الشريط العلوي + دخول تلقائي بعد تسجيل الدخول) =====
+window.fsSupported = () => !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+window.fsActive = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+window._fsStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+
+window.fsEnter = () => {
+    const el = document.documentElement;
+    try {
+        const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        return (p && p.then) ? p.then(() => true).catch(() => false) : Promise.resolve(true);
+    } catch (e) { return Promise.resolve(false); }
+};
+window.fsExit = () => {
+    try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
+};
+window.toggleFullscreen = () => {
+    window._fsDisarm();
+    if (window.fsActive()) window.fsExit(); else window.fsEnter();
+};
+
+// تحديث شكل الزر حسب الحالة
+window.fsSync = () => {
+    const on = window.fsActive();
+    document.getElementById('fsIconEnter')?.classList.toggle('hidden', on);
+    document.getElementById('fsIconExit')?.classList.toggle('hidden', !on);
+    const b = document.getElementById('fsBtn');
+    if (b) { b.title = on ? 'إنهاء ملء الشاشة' : 'ملء الشاشة'; b.setAttribute('aria-label', b.title); }
+};
+document.addEventListener('fullscreenchange', window.fsSync);
+document.addEventListener('webkitfullscreenchange', window.fsSync);
+// الأجهزة التي لا تدعم الميزة (مثل متصفح iPhone) لا يظهر فيها الزر
+if (!window.fsSupported()) document.getElementById('fsBtn')?.classList.add('hidden');
+
+// المتصفحات تشترط لمسة حديثة من المستخدم: إن رُفض الطلب نكرره عند أول نقرة/لمسة/مفتاح
+window._fsDisarm = () => {
+    if (!window._fsHandler) return;
+    ['click', 'touchend', 'keydown'].forEach(t => document.removeEventListener(t, window._fsHandler, true));
+    window._fsHandler = null;
+};
+window._fsArm = () => {
+    window._fsDisarm();
+    window._fsHandler = (e) => {
+        window._fsDisarm();
+        if (e.target && e.target.closest && e.target.closest('#fsBtn')) return; // الزر نفسه يتولى الأمر
+        if (!window.fsActive()) window.fsEnter();
+    };
+    ['click', 'touchend', 'keydown'].forEach(t => document.addEventListener(t, window._fsHandler, true));
+};
+window.autoFullscreen = async () => {
+    if (!window.fsSupported() || window.fsActive() || window._fsStandalone()) return;
+    if (await window.fsEnter()) return;
+    window._fsArm();
+};
+
+// كل مسارات الدخول (مدير، قائد، شركة، عضو) تمر عبر launchOS: نلفّها لطلب ملء الشاشة في أول لحظة
+const _origLaunchOS = window.launchOS;
+window.launchOS = (role, key, msg) => {
+    window.autoFullscreen();
+    return _origLaunchOS(role, key, msg);
+};
 
 
 
@@ -12604,6 +12976,79 @@ body.light-mode .fm-overlay{--fm-bg:#ffffff;--fm-surface:#f5f7ff;--fm-surface-2:
   .fm-ghost,.fm-warn,.fm-main{min-height:44px}
 }
 
+
+
+/* ===== هرم الشركات (شركة ← قادة ← أعضاء) ===== */
+.hub-crumb{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:15px;font-weight:900}
+.hub-crumb a{color:var(--fm-accent);cursor:pointer}
+.hub-crumb a:hover{text-decoration:underline}
+.hub-crumb i{font-style:normal;color:var(--fm-muted)}
+.hub-sec{font-size:13px;font-weight:900;color:var(--fm-accent);margin:4px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--fm-line)}
+.hub-sec:not(:first-child){margin-top:22px}
+.hub-note{font-size:11px;font-weight:800;color:var(--fm-muted);background:var(--fm-bg);border:1px solid var(--fm-line);border-radius:12px;padding:10px 12px;margin-bottom:14px;line-height:1.7}
+.hub-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.hub-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;background:var(--fm-bg);border:1px solid var(--fm-line);cursor:pointer;transition:.15s}
+.hub-row:hover{border-color:var(--fm-accent);transform:translateY(-1px)}
+.hub-av{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;flex:none;font-weight:900;color:#04101f;background:linear-gradient(135deg,var(--fm-accent),var(--fm-accent-2))}
+.hub-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.hub-info b{font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hub-info span{font-size:10px;font-weight:800;color:var(--fm-muted)}
+.hub-info i{font-style:normal}
+.hub-pill{font-size:10px;font-weight:900;padding:4px 10px;border-radius:999px;flex:none}
+.hub-pill.ok{color:#34d399;background:rgba(52,211,153,.14)}
+.hub-pill.bad{color:#fb7185;background:rgba(251,113,133,.14)}
+.hub-go{color:var(--fm-muted);font-size:20px;flex:none}
+.hub-empty{text-align:center;color:var(--fm-muted);font-size:12px;font-weight:900;padding:40px 0}
+@media(max-width:640px){.hub-list{grid-template-columns:1fr}.hub-crumb{font-size:13px}}
+
+
+/* ===== شاشة الأسعار والباقات ===== */
+.pk-in{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:12px;font-size:13px;font-weight:800;text-align:right;outline:none;background:var(--pk-bg);border:1px solid var(--pk-line);color:var(--pk-text);transition:.15s}
+.pk-in:focus{border-color:var(--pk-focus)}
+.pk-in::placeholder{opacity:.5}
+.pk-base,#winFinance{--pk-bg:var(--fin-surface-2);--pk-line:var(--fin-line);--pk-text:var(--fin-text);--pk-focus:var(--fin-accent)}
+#pkgEditor{--pk-bg:var(--fm-bg);--pk-line:var(--fm-line);--pk-text:var(--fm-text);--pk-focus:var(--fm-accent);display:none}
+#pkgEditor.is-open{display:flex}
+.pk-f{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pk-f>span{font-size:10px;font-weight:900;color:var(--fin-muted)}
+#pkgEditor .pk-f>span{color:var(--fm-muted)}
+.pk-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pk-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.pk-btn{padding:11px 18px;border:0;border-radius:12px;font-size:12px;font-weight:900;color:#04101f;cursor:pointer;transition:.15s}
+.pk-btn:active{transform:scale(.96)}
+.pk-btn-ok{background:linear-gradient(135deg,#34d399,#10b981)}
+.pk-btn-main{background:linear-gradient(135deg,var(--fin-accent),var(--fin-accent-2))}
+.pk-base{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:14px 16px;border-radius:18px;background:var(--fin-surface);border:1px solid var(--fin-line)}
+.pk-base-t{flex:1 1 220px;font-size:13px;font-weight:900;color:var(--fin-ok)}
+.pk-base-t small{display:block;margin-top:4px;font-size:10px;font-weight:800;color:var(--fin-muted)}
+.pk-base .pk-f{flex:0 1 170px}
+.pk-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pk-bar-t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:900;color:var(--fin-text)}
+.pk-count{font-size:11px;font-weight:900;padding:2px 10px;border-radius:999px;color:var(--fin-accent);background:rgba(56,189,248,.14)}
+.pk-price{display:flex;align-items:baseline;gap:5px}
+.pk-price b{font-size:30px;font-weight:900;line-height:1;color:var(--fin-ok)}
+.pk-price small{font-size:13px;font-weight:900;color:var(--fin-muted)}
+.pk-feats{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:15px;min-height:24px}
+.pk-feats em{font-style:normal;font-size:10px;font-weight:900;color:var(--fin-muted)}
+.pk-fcount{margin-inline-start:auto;font-size:10px;font-weight:900;color:var(--fin-accent-2)}
+@media(max-width:640px){.pk-grid2{grid-template-columns:1fr}.pk-grid4{grid-template-columns:1fr 1fr}.pk-base .pk-f{flex:1 1 140px}}
+
+/* ===== نافذة الباقة: عرض متجاوب ===== */
+#pkgEditor .fm-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+#pkgEditor .pk-grid2{grid-template-columns:1fr 1fr}
+#pkgEditor .pk-grid4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:900px){
+  #pkgEditor .pk-grid4{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+  #pkgEditor{padding-inline:8px}
+  #pkgEditor .pk-grid2,#pkgEditor .pk-grid4{grid-template-columns:1fr}
+  #pkgEditor .fm-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  #pkgEditor .fm-card-body{padding:8px 10px}
+  #pkgEditor .fm-foot-r{flex:1}
+  #pkgEditor .fm-foot-r .fm-main{flex:1}
+}
+
 /* ===== بطاقات القوائم ===== */
 #finPendingList,#finTrialsList,#finPaymentsList,#finBlockedList,#adminPackagesList{display:grid;gap:12px;align-content:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));padding:2px 4px 18px 2px}
 #finPendingList{grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}
@@ -14232,6 +14677,18 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             </svg>
         </button>
 
+
+        <button id="fsBtn" onclick="window.toggleFullscreen()" title="ملء الشاشة" aria-label="ملء الشاشة"
+            class="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 hover:scale-110 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300">
+            <svg id="fsIconEnter" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/>
+            </svg>
+            <svg id="fsIconExit" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"/>
+            </svg>
+        </button>
+
+
         <button id="themeBtn" onclick="window.toggleTheme()" title="تبديل الوضع"
             class="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 hover:scale-110 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -15212,67 +15669,21 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
             </div>
 
             <!-- الأسعار والباقات -->
-            <div id="fpanel_pricing" class="h-full flex-col gap-4 hidden overflow-y-auto custom-scrollbar">
-                <div class="rounded-2xl p-5" style="background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.2);">
-                    <p class="text-emerald-400 text-xs font-black uppercase tracking-widest mb-4">💲 السعر الأساسي (للتخصيص اليدوي)</p>
-                    <div class="grid grid-cols-2 gap-3 mb-4">
-                        <div>
-                            <p class="text-[10px] text-slate-500 mb-1.5 font-black uppercase">سعر كل قائد ($)</p>
-                            <input type="number" id="priceLeaderInput" min="0" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        </div>
-                        <div>
-                            <p class="text-[10px] text-slate-500 mb-1.5 font-black uppercase">سعر كل عضو/سنة ($)</p>
-                            <input type="number" id="priceMemberInput" min="0" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        </div>
-                    </div>
-                    <button onclick="window.saveBasePricing()" class="py-3 px-6 rounded-xl text-white text-xs font-black transition-all active:scale-95" style="background:rgba(16,185,129,0.8);">💾 حفظ السعر الأساسي</button>
+                        <div id="fpanel_pricing" class="h-full flex-col gap-4 hidden overflow-y-auto custom-scrollbar">
+                <!-- السعر الأساسي: شريط مضغوط واحد -->
+                <div class="pk-base">
+                    <div class="pk-base-t">💲 السعر الأساسي<small>للتخصيص اليدوي (قائد × سعر + أعضاء × سعر)</small></div>
+                    <label class="pk-f"><span>سعر كل قائد ($)</span><input type="number" id="priceLeaderInput" min="0" class="pk-in"></label>
+                    <label class="pk-f"><span>سعر كل عضو/سنة ($)</span><input type="number" id="priceMemberInput" min="0" class="pk-in"></label>
+                    <button class="pk-btn pk-btn-ok" onclick="window.saveBasePricing()">💾 حفظ</button>
                 </div>
 
-                <div class="rounded-2xl p-5" style="background:rgba(99,102,241,0.06); border:1px solid rgba(99,102,241,0.2);">
-                    <p class="text-indigo-300 text-xs font-black uppercase tracking-widest mb-4">➕ إضافة / تعديل باقة جاهزة</p>
-                    <input type="hidden" id="pkgEditId" value="">
-                    <div class="grid grid-cols-2 gap-3 mb-3">
-                        <input type="text" id="pkgTitle" placeholder="اسم الباقة (مثال: فريق صغير)" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        <input type="text" id="pkgBadge" placeholder="شارة اختيارية (مثال: عرض محدود)" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
-                    </div>
-                    <div class="grid grid-cols-3 gap-3 mb-3">
-                        <div>
-                            <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">عدد القادة</p>
-                            <input type="number" id="pkgLeaders" min="1" value="1" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        </div>
-                        <div>
-                            <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">أعضاء لكل قائد</p>
-                            <input type="number" id="pkgMembers" min="5" value="5" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        </div>
-                        <div>
-                            <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">السعر النهائي ($)</p>
-                            <input type="number" id="pkgPrice" min="0" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4);">
-                        </div>
-                    </div>
-   <div class="mb-3">
-       <p class="text-[9px] text-slate-500 mb-1 font-black uppercase">تغييرات أكواد القادة المسموحة للشركة (0 = غير مسموح)</p>
-       <input type="number" id="pkgCodeChanges" min="0" value="1" class="w-full border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 text-right" style="background:rgba(0,0,0,0.4)">
-   </div>
-                    <div class="mb-3">
-                        <p class="text-[9px] text-slate-500 mb-2 font-black uppercase">المزايا المتاحة بهذي الباقة (تشمل تلقائيًا كل تطبيقات سطح المكتب، بما فيها أي تطبيق يُستحدث مستقبلاً)</p>
-                        <div class="grid grid-cols-2 gap-2" id="pkgFeatContainer"></div>
-                    </div>
-
-                    <div class="flex items-center justify-between gap-3">
-                        <label class="flex items-center gap-2 text-xs text-slate-400 font-bold">
-                            <input type="checkbox" id="pkgFeatured" class="w-4 h-4"> تمييز كـ "الأكثر طلباً"
-                        </label>
-                        <div class="flex gap-2">
-                            <button onclick="window.resetPackageForm()" class="py-2.5 px-4 rounded-xl text-slate-400 text-xs font-black border border-white/10 hover:bg-white/5 transition-all">إلغاء</button>
-                            <button onclick="window.savePackageForm()" class="py-2.5 px-6 rounded-xl text-white text-xs font-black transition-all active:scale-95" style="background:rgba(99,102,241,0.8);">💾 حفظ الباقة</button>
-                        </div>
-                    </div>
+                <!-- شريط الباقات -->
+                <div class="pk-bar">
+                    <div class="pk-bar-t">📦 الباقات الجاهزة <span id="pkgListCount" class="pk-count">0</span></div>
+                    <button class="pk-btn pk-btn-main" onclick="window.openPackageEditor()">➕ باقة جديدة</button>
                 </div>
-
-                <div class="flex-1">
-                    <p class="text-slate-500 text-xs font-black uppercase mb-3">📦 الباقات الحالية</p>
-                    <div id="adminPackagesList" class="space-y-2"></div>
-                </div>
+                <div id="adminPackagesList"></div>
             </div>
 
       </div>   <!-- fin-content -->
@@ -15280,6 +15691,55 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
   </div>       <!-- fin-shell -->
 </div>         <!-- winFinance -->
 
+
+
+
+
+<!-- نافذة إضافة / تعديل باقة -->
+<div id="pkgEditor" class="fm-overlay" onclick="if(event.target===this)window.closePackageEditor()">
+    <div class="fm-box" role="dialog" aria-modal="true">
+        <div class="fm-head">
+            <div class="fm-head-ico">📦</div>
+            <div class="fm-head-txt"><b id="pkgEditorTitle">باقة جديدة</b><small>المعلومات ثم السعة والسعر ثم المزايا</small></div>
+            <button class="fm-x" onclick="window.closePackageEditor()">✕</button>
+        </div>
+        <div class="fm-body" oninput="window.pkgUpdate()" onchange="window.pkgUpdate()">
+            <input type="hidden" id="pkgEditId" value="">
+            <div class="hub-sec">📝 المعلومات</div>
+            <div class="pk-grid2">
+                <label class="pk-f"><span>اسم الباقة</span><input type="text" id="pkgTitle" class="pk-in" placeholder="مثال: فريق صغير"></label>
+                <label class="pk-f"><span>شارة اختيارية</span><input type="text" id="pkgBadge" class="pk-in" placeholder="مثال: عرض محدود"></label>
+            </div>
+            <label class="fm-card" style="margin-top:10px">
+                <input type="checkbox" id="pkgFeatured">
+                <span class="fm-card-body"><span class="fm-card-ico">⭐</span><span class="fm-card-lbl">تمييز كـ «الأكثر طلباً»</span><span class="fm-switch"></span></span>
+            </label>
+
+            <div class="hub-sec">📊 السعة والسعر</div>
+            <div class="pk-grid4">
+                <label class="pk-f"><span>عدد القادة</span><input type="number" id="pkgLeaders" min="1" value="1" class="pk-in"></label>
+                <label class="pk-f"><span>أعضاء لكل قائد</span><input type="number" id="pkgMembers" min="5" value="5" class="pk-in"></label>
+                <label class="pk-f"><span>تغييرات أكواد القادة (0 = غير مسموح)</span><input type="number" id="pkgCodeChanges" min="0" value="1" class="pk-in"></label>
+                <label class="pk-f"><span>السعر النهائي ($)</span><input type="number" id="pkgPrice" min="0" class="pk-in"></label>
+            </div>
+            <p id="pkgHint" class="hub-note" style="margin-top:10px"></p>
+
+            <div class="hub-sec">🧩 المزايا <span id="pkgCount" class="fm-count" style="margin-inline-start:auto"></span></div>
+            <p class="hub-note">تشمل الباقة تلقائياً كل تطبيقات سطح المكتب المتاحة، بما فيها أي تطبيق يُستحدث مستقبلاً.</p>
+            <div id="pkgFeatContainer"></div>
+        </div>
+        <div class="fm-foot">
+            <div class="fm-foot-l">
+                <button class="fm-ghost" onclick="window.pkgAll(true)">✔ تحديد الكل</button>
+                <button class="fm-ghost" onclick="window.pkgAll(false)">✖ إلغاء الكل</button>
+            </div>
+            <div class="fm-foot-r">
+                <button class="fm-ghost" onclick="window.closePackageEditor()">إلغاء</button>
+                <button class="fm-main" onclick="window.savePackageForm()">💾 حفظ الباقة</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
