@@ -201,7 +201,7 @@ let MASTER_HASH = "";
 let MASTER_SALT = ""; 
 window.AUTH_APP_ENABLED = true;
 window._adminOtpPhase = 0; 
-let MASTER_TOTP_SECRET = "MZXW6YTBHJSG65DS";
+let MASTER_TOTP_SECRET = "";
 
 let _totpTimeOffsetMs = 0;
 async function syncServerTime() {
@@ -1345,30 +1345,6 @@ window.requestTrial = async () => {
     }
 };
 
-// تفعيل التجربة من المدير
-window.activateTrialByAdmin = async (phoneHash, name, phone, email) => {
-    const expiryDate = Date.now() + 3*24*60*60*1000;
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'trials', phoneHash), {
-        status: 'active',
-        expiryDate,
-        activatedAt: Date.now(),
-        maxMembers: 2
-    });
-
-    // إشعار المشترك
-    if (email) {
-        const startDate = new Date().toLocaleDateString('ar-SA');
-        const expiryDateStr = new Date(expiryDate).toLocaleDateString('ar-SA');
-        window.sendEmail('template_6stfptk', email, name, {
-            start_date: startDate,
-            expiry_date: expiryDateStr
-        });
-    }
-
-    window.showNotif(`✅ تم تفعيل تجربة ${name}`, 'success');
-    window.loadTrials();
-};
-
 // رفض التجربة من المدير
 window.rejectTrialByAdmin = async (phoneHash, name) => {
     window.showConfirm('رفض الطلب', `رفض طلب تجربة ${name}؟`, async () => {
@@ -1380,9 +1356,77 @@ window.rejectTrialByAdmin = async (phoneHash, name) => {
         window.loadTrials();
     });
 };
+// تفعيل التجربة من المدير — ينشئ حساباً حقيقياً مؤقتاً (مساحة أسماء مستقلة + قائد واحد) بدل جلسة مجهولة
+window.activateTrialByAdmin = async (phoneHash, name, phone, email) => {
+    try {
+        const trialRef = doc(db, 'artifacts', appId, 'public', 'data', 'trials', phoneHash);
+        const tSnap = await getDoc(trialRef);
+        if (tSnap.exists() && tSnap.data().status === 'active') {
+            return window.showNotif('ℹ️ هذه التجربة مفعّلة مسبقاً', 'error');
+        }
+        const expiryMs = Date.now() + 3 * 24 * 60 * 60 * 1000;
+        const expiryStr = new Date(expiryMs).toISOString().split('T')[0];
 
+        // حساب حقيقي مؤقت: رمز تعريفي خاص + قائد واحد (يضيف حتى عضوين)
+        const nsId = 'NS-' + window.genAccessCode().slice(0, 8);
+        const accessCode = await window.ensureCompanyAccess(nsId, 'تجربة: ' + name);
+        const plainKey = 'LDR-' + window.genAccessCode().slice(0, 8);
+        const maskedKey = plainKey.substring(0, 4) + '***' + plainKey.slice(-2);
+        const hk = await window.nsDocId(nsId, plainKey);
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', hk), {
+            ownerName: name,
+            phone: phone || '',
+            subKey: maskedKey,
+            secretKey: plainKey,
+            nsId,
+            isEncrypted: true,
+            isPaid: true,
+            paymentStatus: 'comp',
+            paymentMethod: 'trial',
+            pricePaid: 0,
+            status: 'active',
+            expiryDate: expiryStr,
+            maxMembers: 2,
+            features: null,
+            companyId: nsId,
+            companyName: 'تجربة: ' + name,
+            isCompanyOwner: true,
+            isLeader: true,
+            isTrial: true,
+            trialPhoneHash: phoneHash,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        });
 
+        await updateDoc(trialRef, {
+            status: 'active',
+            expiryDate: expiryMs,
+            activatedAt: Date.now(),
+            maxMembers: 2
+        });
 
+        const codesText = 'تجربتك المجانية مفعّلة لمدة 3 أيام (حتى ' + expiryStr + ')\n\n' +
+            'للدخول: افتح «تسجيل الدخول» ثم أدخل:\n' +
+            '1) الرمز التعريفي: ' + accessCode + '\n' +
+            '2) اختر «قائد»\n' +
+            '3) الكود: ' + plainKey.replace(/^LDR-/, '');
+
+        // إشعار المشترك: موعد التجربة + بيانات الدخول (إن وُجد بريده)
+        if (email) {
+            const startDate = new Date().toLocaleDateString('ar-SA');
+            const expiryDateStr = new Date(expiryMs).toLocaleDateString('ar-SA');
+            window.sendEmail('template_6stfptk', email, name, { start_date: startDate, expiry_date: expiryDateStr });
+            window.sendEmail('template_mf871pf', email, name, { activation_code: codesText });
+        }
+
+        window.showKeyAlert('✅ تجربة ' + name + ' — أرسل له هذه البيانات', codesText.replace(/\n/g, '   |   '));
+        window.logActivity?.('trial_activate', 'تفعيل تجربة مجانية: ' + name);
+        window.loadTrials();
+    } catch (e) {
+        console.error('activateTrialByAdmin error:', e);
+        window.showNotif('⛔ فشل تفعيل التجربة', 'error');
+    }
+};
 
 // ===== الدخول عبر بوابة الخادم (Vercel) للقائد والعضو =====
 // مرحلة انتقالية: يعمل فقط إذا فُعّل للتجربة (localStorage.erg_srv_login = '1') أو إذا صارت القيمة الافتراضية true.
@@ -1722,7 +1766,7 @@ window.activateAppByEmail = async () => {
             return;
         }
         const m = memSnap.data();
-        if (window._gateEmail && m.role !== 'leader') {
+        if (window._gateEmail === true ? m.role !== 'leader' : m.role !== 'master') {
             await signOut(auth);
             window.showNotif('⛔ هذا الدخول مخصص لحسابات الشركات فقط', 'error');
             return;
@@ -1736,9 +1780,19 @@ window.activateAppByEmail = async () => {
         if (m.role === 'leader') {
             const subSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscribers', m.docId));
             const subData = subSnap.exists() ? subSnap.data() : {};
+            if (window._gateEmail === true && subData.isCompanyOwner !== true) {
+                await signOut(auth);
+                window.showNotif('⛔ الدخول بالبريد متاح لحسابات الشركات فقط', 'error');
+                return;
+            }
             if (!subData.isPaid || subData.status !== 'active') {
                 await signOut(auth);
                 window.showNotif('⛔ الاشتراك غير مفعل', 'error');
+                return;
+            }
+            if (subData.expiryDate && Math.ceil((new Date(subData.expiryDate) - new Date()) / 86400000) < 0) {
+                await signOut(auth);
+                window.showNotif('⛔ الاشتراك منتهي. تواصل مع الإدارة للتجديد.', 'error');
                 return;
             }
             // فحص بصمة الجهاز — حد أقصى جهازين لكل قائد (نفس منطق الدخول بالمفتاح)
@@ -4081,8 +4135,9 @@ window.manageLeaderTeam = (leaderId, leaderName) => {
 const _openWinBase = window.openWin;
 window.openWin = (id) => {
     if (id === 'winTeam') {
-        const subsEl = document.getElementById('winSubs');
-        window._teamReturnTo = (subsEl && !subsEl.classList.contains('hidden')) ? 'winSubs' : null;
+                const subsEl = document.getElementById('winSubs');
+        const coEl = document.getElementById('winCo');
+        window._teamReturnTo = ((subsEl && !subsEl.classList.contains('hidden')) || (coEl && !coEl.classList.contains('hidden'))) ? 'winSubs' : null;
     }
     _openWinBase(id);
 };
@@ -8068,7 +8123,7 @@ html += leaders.map(s => `<div class="cmd-result-item" onclick="window.cmdGoLead
 
 window.cmdGoMember = (id) => { window.closeCommandPalette(); window.openWin('winTeam'); setTimeout(() => window.openMemberDetail?.(id), 300); };
 window.cmdGoLeader = (id) => { window.closeCommandPalette(); window.openWin('winSubs'); setTimeout(() => window.openSubDetail?.(id), 300); };
-window.cmdGoCompany = (id) => { window.closeCommandPalette(); window.openWin('winSubs'); setTimeout(() => window.openCompanyDetail?.(id), 300); };
+window.cmdGoCompany = (id) => { window.closeCommandPalette(); window.coOpen(); window.coSelect(id); };
 window.cmdGoMaterial = (name) => { window.closeCommandPalette(); window.openWin('winERG'); setTimeout(() => { const inp = document.getElementById('sInput'); if (inp) { inp.value = name; window.handleSearch?.(); } }, 300); };
 window.cmdGoReport = () => { window.closeCommandPalette(); window.openWin('winReports'); };
 
@@ -11484,6 +11539,8 @@ window.gateLogin = async () => {
             window._leaderSubKey = subSnap.id;
             window.myCompanyId = subData.companyId || subSnap.id;
             window.myNsId = subData.nsId || '';
+            window.isTrial = subData.isTrial === true;
+            window.trialDaysLeft = subData.expiryDate ? Math.max(0, Math.ceil((new Date(subData.expiryDate) - new Date()) / 86400000)) : 0;
             window.isCompanyOwner = subData.isCompanyOwner === true;
             window.myCompanyName = subData.companyName || subData.ownerName || '';
             window.isCompanyAccountOnly = (subData.isCompanyOwner === true && subData.isLeader === false);
@@ -11534,6 +11591,397 @@ window.gateEmailLogin = async () => {
 };
 
 
+
+// ===== إدارة الشركات — التصميم الجديد (المرحلة 1: الهيكل) =====
+window._coFilter = 'all';
+window._coSelected = null;
+
+// التجربة: حساب مؤقت (isTrial) له قائد واحد، يُفصل عن الاشتراكات
+window.coIsTrial = (c) => (c.leaders || []).some(l => l.isTrial === true);
+window.coStatusOf = (c) => {
+    if (window.coIsTrial(c)) {
+        const o = (c.leaders || []).find(l => l.isTrial === true);
+        if (!o || !o.expiryDate) return 'active';
+        const d = (new Date(o.expiryDate) - new Date()) / 86400000;
+        return d < 0 ? 'expired' : d <= 1 ? 'soon' : 'active';
+    }
+    return window._coStatusBase(c);
+};
+window._coStatusBase = (c) => {
+    const now = new Date();
+    const active = (c.leaders || []).filter(l => !(l.expiryDate && new Date(l.expiryDate) < now));
+    if (!active.length) return 'expired';
+    const last = active.map(l => l.expiryDate).filter(Boolean).sort().pop();
+    if (last && (new Date(last) - now) / 86400000 <= 30) return 'soon';
+    return 'active';
+};
+
+window.coRender = () => {
+    const listEl = document.getElementById('coList');
+    if (!listEl) return;
+    const index = window._companiesIndex || {};
+    if (window._coSelected && !index[window._coSelected]) {
+        window._coSelected = null;
+        document.getElementById('coWrap').dataset.view = 'list';
+    }
+    const everyone = Object.values(index).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+    const trialN = everyone.filter(window.coIsTrial).length;
+    const subsN = everyone.length - trialN;
+    const kind = window._coKind === 'trials' ? 'trials' : 'subs';
+    const all = everyone.filter(c => kind === 'trials' ? window.coIsTrial(c) : !window.coIsTrial(c));
+    const kindEl = document.getElementById('coKind');
+    if (kindEl) kindEl.innerHTML =
+        `<button data-k="subs" class="${kind === 'subs' ? 'on' : ''}" onclick="window.coSetKind('subs')">🏢 الاشتراكات <b>${subsN}</b></button>` +
+        `<button data-k="trials" class="${kind === 'trials' ? 'on' : ''}" onclick="window.coSetKind('trials')">🎯 التجارب <b>${trialN}</b></button>`;
+    const rows = all.map(c => ({ c, st: window.coStatusOf(c) }));
+    const counts = { all: rows.length, soon: 0, expired: 0 };
+    rows.forEach(r => { if (r.st !== 'active') counts[r.st]++; });
+    counts.active = rows.length - counts.expired;
+
+    const chips = kind === 'trials'
+        ? [['all', 'الكل'], ['active', 'نشطة'], ['soon', 'تنتهي غداً'], ['expired', 'منتهية']]
+        : [['all', 'الكل'], ['active', 'نشطة'], ['soon', 'تنتهي قريباً'], ['expired', 'منتهية']];
+    document.getElementById('coChips').innerHTML = chips.map(([k, label]) =>
+        `<button class="co-chip ${window._coFilter === k ? 'on' : ''}" onclick="window.coSetFilter('${k}')">${label} ${counts[k]}</button>`).join('');
+
+    const q = (document.getElementById('coSearch')?.value || '').trim().toLowerCase();
+    const shown = rows.filter(({ c, st }) => {
+        const f = window._coFilter;
+        const okF = f === 'all' || (f === 'active' ? st !== 'expired' : st === f);
+        const hay = ((c.name || '') + ' ' + (c.leaders || []).map(l => l.ownerName || '').join(' ')).toLowerCase();
+        return okF && (!q || hay.includes(q));
+    });
+    listEl.innerHTML = shown.length ? shown.map(({ c, st }) => window.coItemHtml(c, st)).join('') : '<div class="co-empty">لا توجد نتائج</div>';
+
+    document.getElementById('coCount').textContent = `${subsN} اشتراك · ${trialN} تجربة`;
+    window.coRenderDetail();
+};
+
+window.coRenderDetail = () => {
+    const el = document.getElementById('coDetail');
+    if (!el) return;
+    const _a = document.activeElement;
+    if (window._coTab === 'settings' && _a && _a.tagName === 'INPUT' && _a.closest && _a.closest('#coSettings')) return;
+    const c = (window._companiesIndex || {})[window._coSelected];
+    if (!c) { el.innerHTML = '<div class="co-empty">اختر شركة من القائمة</div>'; return; }
+    const s = window.coStats(c);
+    const st = window.coStatusOf(c);
+    const stTxt = (window.coIsTrial(c) ? { active: '🎯 تجربة مجانية نشطة', soon: '🎯 تجربة تنتهي غداً', expired: '🎯 التجربة منتهية' } : { active: 'الاشتراك نشط', soon: 'ينتهي قريباً', expired: 'الاشتراك منتهٍ' })[st];
+    const card = (label, big, small, bar) => `<div class="co-card"><span class="co-k">${label}</span><b class="co-v">${big} <span class="co-s">${small}</span></b>${bar || ''}</div>`;
+    const barOf = (val, lim) => lim === null ? '' : `<span class="co-bar"><i class="${window.coTone(val, lim)}" style="width:${window.coPct(val, lim)}%"></i></span>`;
+    const dayTxt = s.daysLeft === null ? 'لا يوجد تاريخ انتهاء' : s.daysLeft < 0 ? `انتهى منذ ${Math.abs(s.daysLeft)} يوماً` : `متبقٍ ${s.daysLeft} يوماً`;
+    const o = s.owner;
+    const strip = o ? `<div class="co-gold">
+        <span class="co-gtag">حساب الشركة</span>
+        <b>${esc(o.ownerName || '—')}</b>
+        <span class="co-s">${o.isLeader === false ? 'حساب إداري' : 'مالك الشركة وقائد'}</span>
+        <span class="co-spacer"></span>
+        ${o.isLeader === false ? `<button class="co-btn co-sm" onclick="window.showCompanyTotp('${o.id}')">🔑 مصادقة الحساب (TOTP)</button>` : ''}
+        <button class="co-btn co-sm" onclick="window.showCompanyAccessModal('${c.id}')">🧾 الرمز التعريفي للشركة</button>
+    </div>` : '';
+    el.innerHTML = `<div class="co-dwrap" data-tab="${window._coTab || 'leaders'}">
+        <div class="co-dh">
+            <span class="co-av co-av-lg">${esc((c.name || '?').trim().charAt(0))}</span>
+            <div class="co-dh-main"><h2 class="co-dname">${esc(c.name)}</h2><span class="co-status ${st}">${stTxt}</span></div>
+            <span class="co-spacer"></span>
+            <button class="co-btn" onclick="window.coOpenSettings('${c.id}')">⚙️ إعدادات الشركة</button>
+            <button class="co-btn co-primary" onclick="window.coAddLeader('${c.id}')">+ قائد</button>
+        </div>
+        <div class="co-cards">
+            ${card('القادة', s.total, s.maxL !== null ? `من ${s.maxL}` : 'بلا سقف مسجّل', barOf(s.total, s.maxL))}
+            ${card('حصة الأعضاء', s.allocated, (s.pool !== null ? `من ${s.pool}` : 'بلا سقف مسجّل') + ` · مستخدم فعلياً ${s.used}`, barOf(s.allocated, s.pool))}
+            ${card('ينتهي الاشتراك', `<span dir="ltr">${esc(s.expiry || '—')}</span>`, dayTxt, '')}
+        </div>
+        ${strip}
+        ${window.coTabsHtml()}
+        <div class="co-table">
+            <div class="co-tools">
+                <b>القادة</b><span class="co-pill" id="coLeadersCount"></span><span class="co-spacer"></span>
+                <input class="co-search co-search-sm" type="search" placeholder="ابحث عن قائد…" value="${esc(window._coLeaderQ || '')}" oninput="window._coLeaderQ = this.value; window.coRenderLeaders(true)">
+            </div>
+            <div class="co-row co-th"><span>القائد</span><span>الحالة</span><span class="co-c-exp">ينتهي</span><span class="co-c-mem">الأعضاء</span><span></span></div>
+            <div id="coLeadersRows"></div>
+            <button id="coLeadersMore" class="co-btn co-showmore" style="display:none" onclick="window.coLeadersMore()"></button>
+        </div>
+       ${window.coSettingsHtml(c)}
+    </div>`;
+
+    window.coMenuClose();
+    window.coRenderLeaders(true);
+    if (window._coTab === 'settings') window.coLoadPayments(c.id);
+};
+
+window.coSetFilter = (k) => { window._coFilter = k; window.coRender(); };
+window.coSetKind = (k) => {
+    window._coKind = k === 'trials' ? 'trials' : 'subs';
+    window._coFilter = 'all';
+    window._coSelected = null;
+    const w = document.getElementById('coWrap'); if (w) w.dataset.view = 'list';
+    const q = document.getElementById('coSearch'); if (q) q.value = '';
+    window.coRender();
+};
+window.coOpen = () => {
+    window.coEnsureFormOutside();
+    window.openWin('winCo');
+    if (window.renderSubTable) window.renderSubTable(); else window.coRender();
+};
+window.coBack = () => { document.getElementById('coWrap').dataset.view = 'list'; };
+
+// إلغاء الشكل القديم: أي طلب لفتح winSubs (للمدير) يفتح الشاشة الجديدة
+if (!window._coRedirected) {
+    window._coRedirected = true;
+    const _openWinBeforeCo = window.openWin;
+    window.openWin = (id) => {
+        if (id === 'winSubs' && window.userRole === 'master') return window.coOpen();
+        return _openWinBeforeCo(id);
+    };
+}
+window.coSelect = (id) => {
+    window._coSelected = id;
+    window._coLeaderQ = '';
+    window._coTab = 'leaders';
+    window._coPayCache = {};
+    document.getElementById('coWrap').dataset.view = 'detail';
+    window.coRender();
+};
+
+// إعادة الرسم تلقائياً كلما تحدثت بيانات الشركات
+if (!window._coWrapped) {
+    window._coWrapped = true;
+    const _coOrigRenderSubTable = window.renderSubTable;
+    window.renderSubTable = (...a) => {
+        const r = _coOrigRenderSubTable(...a);
+        try { window.coRender(); } catch (e) { console.warn('coRender', e); }
+        return r;
+    };
+}
+
+
+
+
+
+window.coStats = (c) => {
+    const now = new Date();
+    const isExp = l => !!(l.expiryDate && new Date(l.expiryDate) < now);
+    const num = v => (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v);
+    const counts = {};
+    (window.teamMembers || []).forEach(m => { counts[m.parentKey] = (counts[m.parentKey] || 0) + 1; });
+    const fieldLeaders = (c.leaders || []).filter(l => l.isLeader !== false);
+    let used = 0, allocated = 0;
+    fieldLeaders.forEach(l => { used += counts[l.id] || 0; allocated += parseInt(l.maxMembers) || 0; });
+    const owner = (c.leaders || []).find(l => l.isCompanyOwner === true) || fieldLeaders[0] || null;
+    const expiry = owner?.expiryDate || '';
+    const daysLeft = expiry ? Math.ceil((new Date(expiry) - now) / 86400000) : null;
+    return { total: fieldLeaders.length, expired: fieldLeaders.filter(isExp).length, used, allocated,
+             maxL: num(c.maxLeaders), pool: num(c.memberPool), owner, expiry, daysLeft };
+};
+
+// لون الشريط: عادي / warn عند 80% فأكثر / bad عند التجاوز
+window.coTone = (val, lim) => (lim === null || isNaN(lim)) ? '' : val > lim ? 'bad' : (lim > 0 && val / lim >= 0.8) ? 'warn' : '';
+window.coPct = (val, lim) => (lim === null || isNaN(lim)) ? 0 : lim > 0 ? Math.min(100, Math.round(val / lim * 100)) : (val > 0 ? 100 : 0);
+
+window.coItemHtml = (c, st) => {
+    const s = window.coStats(c);
+    const sub = window.coIsTrial(c)
+        ? `🎯 تجربة · ${st === 'expired' ? 'منتهية' : s.daysLeft === null ? 'بلا تاريخ' : s.daysLeft <= 0 ? 'تنتهي اليوم' : 'متبقٍ ' + s.daysLeft + ' يوم'} · ${s.allocated} عضواً`
+        : (s.pool !== null ? `${s.total} قائد · ${s.allocated} من ${s.pool} عضواً` : `${s.total} قائد · ${s.allocated} عضواً`);
+    const bar = s.pool !== null ? `<span class="co-bar"><i class="${window.coTone(s.allocated, s.pool)}" style="width:${window.coPct(s.allocated, s.pool)}%"></i></span>` : '';
+    return `<button class="co-item ${c.id === window._coSelected ? 'on' : ''} ${window.coIsTrial(c) ? 'trial' : ''}" onclick="window.coSelect('${c.id}')">
+        <span class="co-av">${esc((c.name || '?').trim().charAt(0))}</span>
+        <span class="co-item-txt"><span class="co-item-name">${esc(c.name)}</span><span class="co-item-sub">${sub}</span>${bar}</span>
+        <span class="co-dot ${st}"></span>
+    </button>`;
+};
+
+window.coOpenSettings = (id) => { window.openCompanyDetail(id); window.showCompanyPane('settings'); };
+
+
+
+
+window._coLeaderQ = '';
+window._coLeaderLimit = 30;
+
+// نموذج القائد داخل winSubs المخفية: ننقله إلى body ليظهر من الشاشة الجديدة
+window.coEnsureFormOutside = () => {
+    ['subFormModal', 'subDetailModal'].forEach(id => {
+        const f = document.getElementById(id);
+        if (f && f.parentElement !== document.body) document.body.appendChild(f);
+    });
+};
+// ننقلهما مبكراً (قبل أن يطلبهما أي مدخل)
+if (document.readyState !== 'loading') window.coEnsureFormOutside();
+else document.addEventListener('DOMContentLoaded', () => window.coEnsureFormOutside());
+window.coAddLeader = (id) => {
+    window.coEnsureFormOutside();
+    window.openAddLeaderForCompany(id);
+    window._subFormReturnToCompany = null; // نبقى في الشاشة الجديدة بعد الحفظ
+};
+
+window.coRenderLeaders = (reset) => {
+    const rowsEl = document.getElementById('coLeadersRows');
+    const c = (window._companiesIndex || {})[window._coSelected];
+    if (!rowsEl || !c) return;
+    if (reset) window._coLeaderLimit = 30;
+    const now = new Date();
+    const isExp = l => !!(l.expiryDate && new Date(l.expiryDate) < now);
+    const counts = {};
+    (window.teamMembers || []).forEach(m => { counts[m.parentKey] = (counts[m.parentKey] || 0) + 1; });
+    const q = (window._coLeaderQ || '').trim().toLowerCase();
+    let leaders = (c.leaders || [])
+        .filter(l => !(l.isCompanyOwner === true && l.isLeader === false)) // حساب الشركة في الشريط الذهبي
+        .sort((a, b) => (b.isCompanyOwner === true) - (a.isCompanyOwner === true) ||
+            String(a.ownerName || '').localeCompare(String(b.ownerName || ''), 'ar'));
+    const totalAll = leaders.length;
+    if (q) leaders = leaders.filter(l => String(l.ownerName || '').toLowerCase().includes(q));
+    const shown = leaders.slice(0, window._coLeaderLimit);
+    const cnt = document.getElementById('coLeadersCount');
+    if (cnt) cnt.textContent = q ? `${leaders.length} من ${totalAll}` : `${totalAll}`;
+    rowsEl.innerHTML = shown.length ? shown.map(l => {
+        const exp = isExp(l);
+        const n = counts[l.id] || 0;
+        const max = parseInt(l.maxMembers || 5);
+        const tone = n > max ? 'over' : (max > 0 && n >= max) ? 'full' : '';
+        const mem = (max > 0 && max <= 12)
+            ? `<span class="co-seg ${tone}">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`
+            : `<span class="co-bar" style="width:96px"><i class="${tone === 'over' ? 'bad' : tone === 'full' ? 'warn' : ''}" style="width:${window.coPct(n, max)}%"></i></span>`;
+        const ini = esc(String(l.ownerName || '؟').trim().charAt(0).toUpperCase());
+        const date = l.expiryDate ? esc(l.expiryDate) : '—';
+        return `<div class="co-row" onclick="window.openSubDetail('${l.id}')">
+            <div class="co-who"><span class="co-av">${ini}</span><div style="min-width:0"><b>${l.isCompanyOwner === true ? '👑 ' : ''}${esc(l.ownerName || '—')}</b><span class="co-sub-m" dir="ltr">${date} · ${n}/${max}</span></div></div>
+            <span class="co-st ${exp ? 'off' : ''}">${exp ? 'منتهٍ' : 'نشط'}</span>
+            <span class="co-date co-c-exp" dir="ltr">${date}</span>
+            <span class="co-mem co-c-mem">${mem}<span class="co-n">${n} / ${max}</span></span>
+            <button class="co-dots" aria-label="إجراءات" onclick="event.stopPropagation(); window.coMenu(this, '${l.id}')">⋯</button>
+        </div>`;
+    }).join('') : '<div class="co-empty">لا يوجد قادة</div>';
+    const more = document.getElementById('coLeadersMore');
+    if (more) {
+        const rest = leaders.length - shown.length;
+        more.style.display = rest > 0 ? '' : 'none';
+        if (rest > 0) more.textContent = `عرض المزيد (${rest} متبقٍ)`;
+    }
+};
+window.coLeadersMore = () => { window._coLeaderLimit += 30; window.coRenderLeaders(false); };
+
+window.coMenuClose = () => document.getElementById('coMenu')?.remove();
+window.coMenu = (btn, id) => {
+    const old = document.getElementById('coMenu');
+    if (old) { const same = old.dataset.for === id; old.remove(); if (same) return; }
+    const c = (window._companiesIndex || {})[window._coSelected];
+    const l = c && c.leaders.find(x => x.id === id);
+    if (!l) return;
+    const nm = JSON.stringify(l.ownerName || '').replace(/"/g, '&quot;');
+    const act = (code) => `onclick="window.coMenuClose(); ${code}"`;
+    const m = document.createElement('div');
+    m.id = 'coMenu'; m.className = 'co-menu'; m.dataset.for = id;
+    m.innerHTML = `
+        <button ${act(`window.openSubDetail('${id}')`)}>📂 فتح التفاصيل</button>
+        <button ${act(`window.openLeaderQuickRoster('${id}', ${nm})`)}>👥 الأعضاء</button>
+        <button ${act(`window.startEditSub('${id}')`)}>✏️ تعديل البيانات</button>
+        <button ${act(`window.changeUserKey('sub', '${id}')`)}>🔑 تغيير الشفرة</button>
+        <button ${act(`window.resetDevice('sub', '${id}')`)}>🔄 تصفير الجهاز</button>
+        <hr>
+        <button class="danger" ${act(`window.deleteEntry('sub', '${id}')`)}>🗑️ حذف نهائي</button>`;
+    const r = btn.getBoundingClientRect();
+    m.style.top = Math.min(r.bottom + 4, window.innerHeight - 330) + 'px';
+    m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 224)) + 'px';
+    document.getElementById('winCo').appendChild(m);
+};
+if (!window._coMenuBound) {
+    window._coMenuBound = true;
+    document.addEventListener('click', (e) => { if (!e.target.closest('#coMenu')) window.coMenuClose(); });
+}
+
+
+
+
+window._coTab = 'leaders';
+window._coPayCache = {};
+
+window.coTabsHtml = () => {
+    const t = window._coTab || 'leaders';
+    return `<div class="co-tabs">` + [['leaders', 'القادة'], ['settings', 'الإعدادات']]
+        .map(([k, l]) => `<button class="co-tab ${t === k ? 'on' : ''}" onclick="window.coSetTab('${k}')">${l}</button>`).join('') + `</div>`;
+};
+window.coSetTab = (k) => { window._coTab = k; window.coRenderDetail(); };
+
+window.coSettingsHtml = (c) => {
+    const raw = (window.companiesRaw || []).find(x => x.id === c.id) || {};
+    const field = (c.leaders || []).filter(l => l.isLeader !== false);
+    const allocated = field.reduce((s, l) => s + (parseInt(l.maxMembers) || 0), 0);
+    const latest = (c.leaders || []).map(l => l.expiryDate).filter(Boolean).sort().pop() || '';
+    const inp = (id, label, val, attrs = '') =>
+        `<label class="co-fl"><span class="co-k">${label}</span><input id="${id}" class="co-search" value="${esc(String(val ?? ''))}" ${attrs}></label>`;
+    return `<div class="co-settings" id="coSettings">
+        <section class="co-box"><h4>بيانات الشركة</h4>
+            ${inp('coS_name', 'اسم الشركة', c.name)}
+            ${inp('coS_phone', 'رقم الهاتف', raw.phone || '', 'type="tel" dir="ltr"')}
+            ${inp('coS_email', 'البريد الإلكتروني', raw.email || '', 'type="email" dir="ltr"')}
+            <button class="co-btn" onclick="window.coSaveInfo()">حفظ البيانات</button>
+        </section>
+        <section class="co-box"><h4>الاشتراك</h4>
+            ${inp('coS_price', 'سعر الاشتراك ($)', raw.planPrice || '', 'type="number" min="0"')}
+            ${inp('coS_expiry', 'تاريخ الانتهاء (يُطبَّق على كل قادة الشركة)', latest, 'type="date"')}
+            <button class="co-btn" onclick="window.coSaveBilling()">حفظ الاشتراك</button>
+        </section>
+        <section class="co-box"><h4>السقوف</h4>
+            <span class="co-s">المستخدم حالياً: ${field.length} قائد · ${allocated} عضو مخصص لهم</span>
+            <div class="co-two">
+                ${inp('coS_maxL', 'أقصى عدد قادة', Number(raw.maxLeaders) || field.length, 'type="number" min="0"')}
+                ${inp('coS_pool', 'إجمالي الأعضاء (الحصة)', Number(raw.memberPool) || allocated, 'type="number" min="0"')}
+            </div>
+            <div class="co-two">
+                ${inp('coS_cc', 'تغييرات أكواد القادة (السقف)', Number(raw.codeChangesQuota) || 0, 'type="number" min="0"')}
+                ${inp('coS_cu', 'المستخدم منها', Number(raw.codeChangesUsed) || 0, 'type="number" min="0"')}
+            </div>
+            <button class="co-btn" onclick="window.coSaveQuota()">حفظ السقوف</button>
+        </section>
+        <section class="co-box"><h4>🧾 سجل المدفوعات</h4><div id="coPayments" class="co-pay"></div></section>
+        <section class="co-box co-danger"><button class="co-btn co-del" onclick="window.coDeleteCompany()">🗑️ حذف الشركة نهائياً</button></section>
+    </div>`;
+};
+
+// الجسور: تنقل القيم إلى حقول النافذة القديمة ثم تستدعي دوالّها كما هي
+window.coSaveInfo = () => {
+    window._activeCompanyId = window._coSelected;
+    const g = id => document.getElementById(id)?.value || '';
+    const s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    s('companyRename_input', g('coS_name'));
+    s('companyEditPhone_input', g('coS_phone'));
+    s('companyEditEmail_input', g('coS_email'));
+    window.saveCompanyName();
+};
+window.coSaveBilling = () => {
+    window._activeCompanyId = window._coSelected;
+    const g = id => document.getElementById(id)?.value || '';
+    const s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    s('companyBilling_price', g('coS_price'));
+    s('companyBilling_expiry', g('coS_expiry'));
+    window.saveCompanyBilling();
+};
+window.coSaveQuota = () => {
+    window._activeCompanyId = window._coSelected;
+    const g = id => document.getElementById(id)?.value || '';
+    const s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    s('companyQuota_leaders', g('coS_maxL'));
+    s('companyQuota_pool', g('coS_pool'));
+    s('companyQuota_codeChanges', g('coS_cc'));
+    s('companyQuota_codeUsed', g('coS_cu'));
+    window.saveCompanyQuota();
+};
+window.coDeleteCompany = () => { window._activeCompanyId = window._coSelected; window.deleteCompany(); };
+
+window.coLoadPayments = async (id) => {
+    const dst = () => document.getElementById('coPayments');
+    if (window._coPayCache[id] && dst()) { dst().innerHTML = window._coPayCache[id]; return; }
+    window._activeCompanyId = id;
+    await window.loadCompanyPayments(id);
+    const src = document.getElementById('companyDetail_payments');
+    if (src && dst() && window._coSelected === id) {
+        dst().innerHTML = src.innerHTML;
+        if (!/تعذر/.test(src.innerHTML)) window._coPayCache[id] = src.innerHTML;
+    }
+};
 
 </script>
 
@@ -15028,6 +15476,158 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
 .cm-scope textarea { width:100%; min-height:180px; padding:10px 12px; border:1px solid var(--cm-line); border-radius:10px; background:rgba(0,0,0,.35); color:var(--cm-ink); font-family:monospace; font-size:.8rem; direction:ltr; text-align:left; }
 .cm-scope .cm-hubcard { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:28px 16px; border-radius:20px; border:1px solid var(--cm-line); background:var(--cm-card); cursor:pointer; transition:transform .2s, border-color .2s; color:var(--cm-ink); font:inherit; }
 .cm-scope .cm-hubcard:hover { transform:translateY(-3px); }
+
+
+
+
+
+/* ===== إدارة الشركات — التصميم الجديد (#winCo) ===== */
+#winCo.app-window{
+  --co-bg:#0b1124; --co-surface:#111a33; --co-surface2:#172245;
+  --co-line:#243061; --co-line2:#2c3a72; --co-text:#e8ecff; --co-mute:#9aa5c8;
+  --co-accent:#38bdf8; --co-ok:#34d399; --co-warn:#fbbf24; --co-bad:#fb7185;
+  padding:0; background:var(--co-bg) !important; color:var(--co-text);
+  font-family:'Tajawal',sans-serif; direction:rtl; overflow:hidden;
+}
+#winCo *{box-sizing:border-box}
+#winCo .co-wrap{width:100%;height:100%;display:flex;flex-direction:column;gap:24px;padding:24px 32px}
+#winCo .co-head{display:flex;align-items:center;gap:16px;flex-shrink:0}
+#winCo .co-title{font-size:24px;font-weight:900;margin:0}
+#winCo .co-pill{font-size:12px;font-weight:700;padding:4px 16px;border-radius:99px;background:var(--co-surface2);color:var(--co-mute)}
+#winCo .co-spacer{flex:1}
+#winCo .co-btn{height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--co-line2);background:var(--co-surface2);color:var(--co-text);font:700 13px 'Tajawal',sans-serif;cursor:pointer}
+#winCo .co-btn:hover{border-color:var(--co-accent)}
+#winCo .co-primary{background:var(--co-accent);border-color:var(--co-accent);color:#04101f}
+#winCo .co-icon{width:44px;padding:0}
+#winCo .co-back{display:none}
+#winCo .co-body{display:grid;grid-template-columns:360px minmax(0,1fr);gap:24px;flex:1;min-height:0}
+#winCo .co-list-pane,#winCo .co-detail-pane{background:var(--co-surface);border:1px solid var(--co-line);border-radius:16px;min-height:0}
+#winCo .co-list-pane{display:flex;flex-direction:column;gap:16px;padding:16px}
+#winCo .co-kind{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;border-radius:14px;background:var(--co-bg);border:1px solid var(--co-line)}
+#winCo .co-kind button{height:40px;border-radius:10px;border:0;background:transparent;color:var(--co-mute);font:800 13px 'Tajawal',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .15s}
+#winCo .co-kind button b{min-width:22px;height:22px;padding:0 6px;border-radius:99px;background:var(--co-surface2);color:var(--co-text);font-size:11px;display:inline-flex;align-items:center;justify-content:center}
+#winCo .co-kind button.on{background:var(--co-surface2);color:var(--co-text);box-shadow:inset 0 0 0 1px var(--co-accent)}
+#winCo .co-kind button.on[data-k="trials"]{box-shadow:inset 0 0 0 1px var(--co-warn)}
+#winCo .co-kind button.on[data-k="trials"] b{background:rgba(251,191,36,.2);color:var(--co-warn)}
+#winCo .co-item.trial .co-av{background:rgba(251,191,36,.15);color:var(--co-warn)}
+#winCo .co-detail-pane{padding:24px;overflow-y:auto}
+#winCo .co-search{width:100%;height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--co-line);background:var(--co-bg);color:var(--co-text);font:500 14px 'Tajawal',sans-serif;outline:none;text-align:right}
+#winCo .co-search:focus{border-color:var(--co-accent)}
+#winCo .co-chips{display:flex;flex-wrap:wrap;gap:8px}
+#winCo .co-chip{font:700 12px 'Tajawal',sans-serif;padding:8px 16px;border-radius:99px;border:1px solid var(--co-line2);background:transparent;color:var(--co-mute);cursor:pointer}
+#winCo .co-chip.on{background:var(--co-surface2);color:var(--co-text);border-color:var(--co-accent)}
+#winCo .co-list{display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;flex:1}
+#winCo .co-item{display:flex;align-items:center;gap:16px;width:100%;padding:16px;border-radius:16px;border:1px solid transparent;background:transparent;color:inherit;text-align:right;cursor:pointer;font-family:inherit}
+#winCo .co-item:hover{background:rgba(23,34,69,.6)}
+#winCo .co-item.on{background:var(--co-surface2);border-color:var(--co-accent)}
+#winCo .co-av{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:12px;background:var(--co-surface2);border:1px solid var(--co-line2);color:var(--co-accent);font-weight:900}
+#winCo .co-av-lg{width:56px;height:56px;font-size:22px}
+#winCo .co-item-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+#winCo .co-item-name{font-weight:900;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#winCo .co-item-sub{font-size:12px;color:var(--co-mute)}
+#winCo .co-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--co-ok)}
+#winCo .co-dot.soon{background:var(--co-warn)}
+#winCo .co-dot.expired{background:var(--co-bad)}
+#winCo .co-dh{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+#winCo .co-dname{font-size:22px;font-weight:900;margin:0}
+#winCo .co-note{color:var(--co-mute);font-size:13px;margin:0 0 16px}
+#winCo .co-empty{display:grid;place-items:center;height:100%;min-height:160px;color:var(--co-mute);font-size:14px}
+@media (max-width:820px){
+  #winCo .co-wrap{padding:16px;gap:16px}
+  #winCo .co-body{grid-template-columns:minmax(0,1fr)}
+  #winCo .co-wrap[data-view="list"] .co-detail-pane{display:none}
+  #winCo .co-wrap[data-view="detail"] .co-list-pane{display:none}
+  #winCo .co-wrap[data-view="detail"] .co-back{display:inline-block}
+  #winCo .co-wrap[data-view="detail"] .co-title,
+  #winCo .co-wrap[data-view="detail"] .co-pill{display:none}
+    #companyDetailModal .cd-btn.hidden{display:none}
+}
+
+
+#winCo .co-bar{display:block;height:6px;border-radius:99px;background:#1d2850;overflow:hidden;margin-top:4px;direction:ltr}
+#winCo .co-bar i{display:block;height:100%;border-radius:99px;background:var(--co-accent)}
+#winCo .co-bar i.warn{background:var(--co-warn)}
+#winCo .co-bar i.bad{background:var(--co-bad)}
+#winCo .co-dwrap{display:flex;flex-direction:column;gap:16px}
+#winCo .co-dwrap .co-dh{margin-bottom:0}
+#winCo .co-status{font-size:12px;font-weight:700;padding:4px 16px;border-radius:99px;background:rgba(52,211,153,.14);color:var(--co-ok)}
+#winCo .co-status.soon{background:rgba(251,191,36,.14);color:var(--co-warn)}
+#winCo .co-status.expired{background:rgba(251,113,133,.14);color:var(--co-bad)}
+#winCo .co-dh-main{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+#winCo .co-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+#winCo .co-card{display:flex;flex-direction:column;gap:8px;padding:16px;border-radius:16px;background:var(--co-surface2);border:1px solid var(--co-line)}
+#winCo .co-k{font-size:12px;color:var(--co-mute)}
+#winCo .co-v{font-size:26px;font-weight:900;line-height:1.2}
+#winCo .co-s{font-size:12px;font-weight:700;color:var(--co-mute)}
+#winCo .co-gold{display:flex;align-items:center;flex-wrap:wrap;gap:16px;padding:16px;border-radius:16px;border:1px solid var(--co-warn);background:rgba(251,191,36,.06)}
+#winCo .co-gtag{font-size:12px;font-weight:700;padding:4px 16px;border-radius:99px;background:rgba(251,191,36,.14);color:var(--co-warn)}
+#winCo .co-sm{height:40px;font-size:12px}
+#winCo .co-leaders-ph{display:flex;flex-direction:column;gap:16px;align-items:flex-start;padding:24px;border-radius:16px;border:1px dashed var(--co-line2)}
+@media (max-width:820px){
+  #winCo .co-cards{grid-template-columns:minmax(0,1fr)}
+}
+
+
+
+#winCo .co-table{border:1px solid var(--co-line);border-radius:16px;overflow:hidden;background:var(--co-surface)}
+#winCo .co-tools{display:flex;align-items:center;gap:16px;padding:16px}
+#winCo .co-tools b{font-size:16px}
+#winCo .co-search-sm{width:264px;height:40px}
+#winCo .co-row{display:grid;grid-template-columns:2.2fr 1fr 1.2fr 1.2fr 44px;align-items:center;gap:16px;padding:16px;border-top:1px solid var(--co-line);cursor:pointer}
+#winCo .co-row:not(.co-th):hover{background:rgba(23,34,69,.6)}
+#winCo .co-th{cursor:default;font-size:12px;color:var(--co-mute);padding-top:8px;padding-bottom:8px}
+#winCo .co-who{display:flex;align-items:center;gap:16px;min-width:0}
+#winCo .co-who .co-av{width:32px;height:32px;font-size:13px;border-radius:8px}
+#winCo .co-who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#winCo .co-st{width:fit-content;font-size:12px;font-weight:700;padding:4px 16px;border-radius:99px;background:rgba(52,211,153,.14);color:var(--co-ok)}
+#winCo .co-st.off{background:rgba(251,113,133,.14);color:var(--co-bad)}
+#winCo .co-date{font-size:13px;color:var(--co-mute)}
+#winCo .co-mem{display:flex;align-items:center;gap:16px;direction:ltr}
+#winCo .co-seg{display:flex;gap:4px;width:96px}
+#winCo .co-seg i{flex:1;height:6px;border-radius:3px;background:#1d2850}
+#winCo .co-seg i.on{background:var(--co-ok)}
+#winCo .co-seg.full i.on{background:var(--co-warn)}
+#winCo .co-seg.over i.on{background:var(--co-bad)}
+#winCo .co-n{font-size:12px;color:var(--co-mute);font-variant-numeric:tabular-nums}
+#winCo .co-dots{width:44px;height:44px;border-radius:12px;border:1px solid transparent;background:transparent;color:var(--co-mute);font-size:20px;cursor:pointer}
+#winCo .co-dots:hover{border-color:var(--co-line2);color:var(--co-text)}
+#winCo .co-sub-m{display:none}
+#winCo .co-showmore{margin:16px;width:calc(100% - 32px)}
+#winCo .co-menu{position:fixed;z-index:50;width:216px;padding:8px;border-radius:16px;background:var(--co-surface2);border:1px solid var(--co-line2);box-shadow:0 16px 40px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:4px}
+#winCo .co-menu button{height:40px;padding:0 16px;border:0;border-radius:8px;background:transparent;color:var(--co-text);font:700 13px 'Tajawal',sans-serif;text-align:right;cursor:pointer}
+#winCo .co-menu button:hover{background:var(--co-surface)}
+#winCo .co-menu hr{border:0;border-top:1px solid var(--co-line);margin:4px 0}
+#winCo .co-menu .danger{color:var(--co-bad)}
+@media (max-width:820px){
+  #winCo .co-th{display:none}
+  #winCo .co-row{grid-template-columns:minmax(0,1fr) auto 44px}
+  #winCo .co-c-exp,#winCo .co-c-mem{display:none}
+  #winCo .co-sub-m{display:block;font-size:12px;color:var(--co-mute);font-weight:400}
+  #winCo .co-tools{flex-wrap:wrap}
+  #winCo .co-search-sm{width:100%}
+}
+
+
+
+#winCo .co-tabs{display:flex;gap:8px;border-bottom:1px solid var(--co-line)}
+#winCo .co-tab{height:44px;padding:0 24px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--co-mute);font:700 14px 'Tajawal',sans-serif;cursor:pointer;margin-bottom:-1px}
+#winCo .co-tab.on{color:var(--co-text);border-bottom-color:var(--co-accent)}
+#winCo .co-dwrap[data-tab="settings"] .co-table{display:none}
+#winCo .co-dwrap[data-tab="leaders"] .co-settings{display:none}
+#winCo .co-settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+#winCo .co-box{display:flex;flex-direction:column;gap:16px;padding:24px;border-radius:16px;background:var(--co-surface);border:1px solid var(--co-line)}
+#winCo .co-box h4{margin:0;font-size:14px;font-weight:900}
+#winCo .co-fl{display:flex;flex-direction:column;gap:8px}
+#winCo .co-two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#winCo .co-pay{display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto}
+#winCo .co-danger{border-color:rgba(251,113,133,.45);grid-column:1/-1}
+#winCo .co-del{border-color:var(--co-bad);color:var(--co-bad);background:transparent;border-style:dashed}
+@media (max-width:820px){
+  #winCo .co-settings{grid-template-columns:minmax(0,1fr)}
+  #winCo .co-two{grid-template-columns:minmax(0,1fr)}
+}
+
+
 </style>
 
 <!-- ============ مركز رفع البيانات الموحد ============ -->
@@ -15741,6 +16341,33 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
     </div>
 </div>
 
+
+
+
+<div id="winCo" class="app-window hidden text-right">
+  <div class="co-wrap" id="coWrap" data-view="list">
+    <header class="co-head">
+      <button class="co-btn co-back" onclick="window.coBack()">→ الشركات</button>
+      <h1 class="co-title">إدارة الشركات</h1>
+      <span class="co-pill" id="coCount">0 شركة</span>
+      <span class="co-spacer"></span>
+      <button class="co-btn co-primary" onclick="window.openCompanyAddModal()">+ شركة جديدة</button>
+      <button class="co-btn co-icon" onclick="window.closeWin('winCo')" aria-label="إغلاق">✕</button>
+    </header>
+    <div class="co-body">
+      <aside class="co-list-pane">
+        <div class="co-kind" id="coKind"></div>
+        <input id="coSearch" class="co-search" type="search" placeholder="ابحث باسم الشركة أو القائد…" oninput="window.coRender()">
+        <div class="co-chips" id="coChips"></div>
+        <div id="coList" class="co-list"></div>
+      </aside>
+      <section class="co-detail-pane" id="coDetail"></section>
+    </div>
+  </div>
+</div>
+
+
+
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
 
@@ -15756,7 +16383,9 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                     <p class="text-rose-400/60 text-[11px] font-mono uppercase tracking-widest mt-0.5">Companies Management</p>
                 </div>
             </div>
-            <button onclick="window.closeWin('winSubs')" class="w-10 h-10 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-base flex items-center justify-center border border-white/10">✕</button>
+<div class="flex items-center gap-2">
+    <button onclick="window.closeWin('winSubs')" class="w-10 h-10 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-base flex items-center justify-center border border-white/10">✕</button>
+</div>
         </div>
 
         <!-- المحتوى الرئيسي: شريط تحكم جانبي + بطاقات القادة -->
