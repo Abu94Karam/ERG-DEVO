@@ -1306,6 +1306,8 @@ window.requestTrial = async () => {
                 return;
             }
             if (d.status === 'active' && d.expiryDate > Date.now()) {
+                if (msgEl) { msgEl.textContent = '✅ تجربتك مفعّلة. ادخل من «تسجيل الدخول» برمز الشركة وكود القائد المرسلين لك.'; msgEl.style.color = '#10b981'; }
+                return;
                 const daysLeft = Math.ceil((d.expiryDate - Date.now()) / (1000*60*60*24));
                 window.activeKey = phoneHash;
                 window.listenMasterBroadcast?.();
@@ -4713,11 +4715,29 @@ window.showCompanyPane = (pane) => {
      if (btn) btn.textContent = toSettings ? '→ العودة للقادة' : '⚙️ إعدادات الشركة';
     const ttl = document.getElementById('companyPaneTitle');
     if (ttl) ttl.textContent = toSettings ? 'إعدادات الشركة' : 'قادة الشركة';
+    if (toSettings && window.csTab) window.csTab();
 };
 window.toggleCompanySettings = () => {
     const sett = document.getElementById('companySettingsPane');
     window.showCompanyPane(sett && sett.classList.contains('hidden') ? 'settings' : 'leaders');
 };
+
+
+
+// تبويبات إعدادات الشركة: تفتح النموذج وتعبّئه تلقائياً
+window._csTab = 'info';
+window.csTab = (t) => {
+    t = t || window._csTab || 'info';
+    window._csTab = t;
+    document.querySelectorAll('#companySettingsPane .cs-tab').forEach(b => b.classList.toggle('is-active', b.dataset.t === t));
+    document.querySelectorAll('#companySettingsPane .cs-sec').forEach(s => s.classList.toggle('hidden', s.dataset.s !== t));
+    const open = (wrapId, fn) => { const w = document.getElementById(wrapId); if (w && w.classList.contains('hidden')) fn(); };
+    if (t === 'info') open('companyRenameWrap', window.toggleCompanyRename);
+    if (t === 'billing') open('companyBillingWrap', window.toggleCompanyBilling);
+    if (t === 'quota') open('companyQuotaWrap', window.toggleCompanyQuota);
+    const a = document.activeElement; if (a && a.tagName === 'INPUT') a.blur(); // لا نُظهر لوحة المفاتيح تلقائياً
+};
+
 
 window.companyLeadersShowMore = () => {
     window._companyLeadersLimit += 30;
@@ -4727,6 +4747,7 @@ window.companyLeadersShowMore = () => {
 // استبدال عرض القادة الافتراضي بالنسخة الجديدة عند فتح تفاصيل الشركة
 const _origOpenCompanyDetail = window.openCompanyDetail;
 window.openCompanyDetail = (companyId) => {
+    window._csTab = 'info';
     _origOpenCompanyDetail(companyId);
     const s = document.getElementById('companyLeadersSearch'); if (s && !window._keepCompanyLeadersState) s.value = '';
     const f = document.getElementById('companyLeadersFilter'); if (f && !window._keepCompanyLeadersState) f.value = 'all';
@@ -5269,7 +5290,7 @@ window.deleteCompany = () => {
 window.loadCompanyPayments = async (companyId) => {
     const box = document.getElementById('companyDetail_payments');
     if (!box) return;
-    box.innerHTML = '<p class="text-slate-600 text-[10px] text-center py-2">جاري التحميل...</p>';
+        box.innerHTML = '<p class="cs-pay-empty">جاري التحميل...</p>';
     try {
         const c = (window._companiesIndex || {})[companyId];
         const parents = new Set((c?.leaders || []).map(l => l.parentRequest).filter(Boolean));
@@ -5278,13 +5299,14 @@ window.loadCompanyPayments = async (companyId) => {
             .filter(r => r.status === 'Approved' && (r.companyId === companyId || parents.has(r.id)))
             .sort((a, b) => (b.approvedAt || b.timestamp || 0) - (a.approvedAt || a.timestamp || 0));
         if (window._activeCompanyId !== companyId) return;
-        box.innerHTML = rows.length ? rows.map(r => `
-            <div class="flex items-center justify-between bg-white/3 border border-white/5 rounded-lg px-3 py-2">
-                <span class="text-emerald-300 text-[11px] font-black">${Number(r.price) || 0} $</span>
-                <span class="text-slate-400 text-[10px] font-bold">${r.type === 'renewal' ? '🔄 تجديد' : '🆕 اشتراك جديد'} · ${new Date(r.approvedAt || r.timestamp || Date.now()).toLocaleDateString('ar-SA')}</span>
-            </div>`).join('') : '<p class="text-slate-600 text-[10px] text-center py-2">لا توجد مدفوعات مسجلة</p>';
+                box.innerHTML = rows.length ? rows.map(r => `
+            <div class="cs-pay-row">
+                <span class="cs-pay-ico">${r.type === 'renewal' ? '🔄' : '🆕'}</span>
+                <span class="cs-pay-meta">${r.type === 'renewal' ? 'تجديد اشتراك' : 'اشتراك جديد'}<small>${new Date(r.approvedAt || r.timestamp || Date.now()).toLocaleDateString('ar-SA')}</small></span>
+                <b class="cs-pay-amt">${Number(r.price) || 0} $</b>
+            </div>`).join('') : '<p class="cs-pay-empty">لا توجد مدفوعات مسجلة</p>';
     } catch (e) {
-        box.innerHTML = '<p class="text-rose-400 text-[10px] text-center py-2">تعذر تحميل السجل</p>';
+        box.innerHTML = '<p class="cs-pay-empty bad">تعذر تحميل السجل</p>';
     }
 };
 
@@ -13988,6 +14010,78 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
 #companyDetailModal .cd-span { grid-column: 1 / -1; }
 #companyDetailModal .cd-danger { border-style: dashed; border-color: rgba(255,107,134,.35); background: transparent; }
 #companyDetailModal .cd-form:not(.hidden) { display: flex; flex-direction: column; gap: 10px; }
+/* ===== إصلاح: النافذة تحت الشريط العلوي ===== */
+#companyDetailModal{align-items:flex-start!important;padding:calc(4rem + var(--safe-top,0px) + 12px) 16px 16px!important}
+#companyDetailModal .cd-shell{height:min(780px,calc(100dvh - 4rem - 28px - var(--safe-top,0px)))}
+
+/* ===== إعدادات الشركة (تصميم جديد) ===== */
+#companyDetailModal .cs-wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;flex:1;min-height:0}
+#companyDetailModal .cs-nav{display:flex;flex-direction:column;gap:6px;align-self:start}
+#companyDetailModal .cs-tab{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:14px;border:1px solid transparent;background:transparent;color:var(--cd-mute);font-size:12.5px;font-weight:800;text-align:right;cursor:pointer;transition:.15s}
+#companyDetailModal .cs-tab:hover{background:var(--cd-surface);color:var(--cd-text)}
+#companyDetailModal .cs-tab .cs-ti{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--cd-surface2);font-size:15px;flex:none}
+#companyDetailModal .cs-tab.is-active{color:var(--cd-text);background:linear-gradient(270deg,rgba(255,180,84,.16),rgba(52,211,192,.06));border-color:rgba(255,180,84,.38)}
+#companyDetailModal .cs-tab.is-active .cs-ti{background:linear-gradient(135deg,var(--cd-amber),var(--cd-teal))}
+#companyDetailModal .cs-tab.is-danger{color:var(--cd-rose)}
+#companyDetailModal .cs-tab.is-danger.is-active{border-color:rgba(255,107,134,.45);background:rgba(255,107,134,.10)}
+#companyDetailModal .cs-body{min-height:0;overflow-y:auto;padding-inline-end:4px}
+
+#companyDetailModal .cs-sec{display:flex;flex-direction:column;gap:16px;padding:22px;border-radius:20px;background:var(--cd-surface);border:1px solid var(--cd-line)}
+#companyDetailModal .cs-sec.hidden{display:none}
+#companyDetailModal .cs-sh{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--cd-line)}
+#companyDetailModal .cs-si{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-size:20px;background:var(--cd-surface2);border:1px solid var(--cd-line-strong);flex:none}
+#companyDetailModal .cs-sh h4{margin:0;font-size:15px;font-weight:900;color:var(--cd-text)}
+#companyDetailModal .cs-sh p{margin:3px 0 0;font-size:11px;font-weight:600;color:var(--cd-mute)}
+#companyDetailModal .cs-form{display:flex;flex-direction:column;gap:14px}
+#companyDetailModal .cs-form.hidden{display:none}
+#companyDetailModal .cs-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+#companyDetailModal .cs-full{grid-column:1/-1}
+#companyDetailModal .cs-f{display:flex;flex-direction:column;gap:6px;min-width:0}
+#companyDetailModal .cs-f>span{font-size:11px;font-weight:900;color:var(--cd-mute)}
+#companyDetailModal .cs-input{width:100%;min-height:46px;padding:0 14px;border-radius:12px;background:var(--cd-bg0);border:1px solid var(--cd-line-strong);color:var(--cd-text);font-size:13px;font-weight:700;text-align:right;outline:none;transition:.15s}
+#companyDetailModal .cs-input[dir="ltr"]{text-align:left}
+#companyDetailModal .cs-input:focus{border-color:var(--cd-amber);box-shadow:0 0 0 3px rgba(255,180,84,.16)}
+#companyDetailModal .cs-hint{margin:0;padding:10px 12px;border-radius:12px;background:rgba(139,155,255,.08);border:1px solid rgba(139,155,255,.22);color:var(--cd-mute);font-size:11px;font-weight:700;line-height:1.6}
+#companyDetailModal .cs-usage{margin:0;padding:10px 12px;border-radius:12px;background:rgba(52,211,192,.08);border:1px solid rgba(52,211,192,.25);color:var(--cd-teal);font-size:11.5px;font-weight:900}
+#companyDetailModal .cs-actions{display:flex;justify-content:flex-start;gap:10px}
+#companyDetailModal .cs-btn{min-height:44px;padding:0 20px;border-radius:12px;border:1px solid var(--cd-line-strong);background:var(--cd-surface2);color:var(--cd-text);font-size:12.5px;font-weight:900;cursor:pointer;transition:.15s}
+#companyDetailModal .cs-btn:hover{border-color:var(--cd-amber)}
+#companyDetailModal .cs-btn-main{border:0;color:#06101f;background:linear-gradient(135deg,var(--cd-amber),var(--cd-teal))}
+#companyDetailModal .cs-btn-rose{color:var(--cd-rose);border-color:rgba(255,107,134,.5);background:rgba(255,107,134,.10)}
+#companyDetailModal .cs-btn-rose:hover{background:rgba(255,107,134,.2);border-color:var(--cd-rose)}
+#companyDetailModal .cs-tool{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:14px;background:var(--cd-bg0);border:1px dashed var(--cd-line-strong)}
+#companyDetailModal .cs-tool b{display:block;font-size:12.5px;font-weight:900}
+#companyDetailModal .cs-tool small{display:block;margin-top:3px;color:var(--cd-mute);font-size:10.5px;font-weight:600}
+#companyDetailModal .cs-sec.cs-danger{background:transparent;border:1px dashed rgba(255,107,134,.4)}
+#companyDetailModal .cs-sec.cs-danger .cs-si{background:rgba(255,107,134,.12);border-color:rgba(255,107,134,.4)}
+
+/* سجل المدفوعات */
+#companyDetailModal .cs-pay{display:flex;flex-direction:column;gap:8px}
+#companyDetailModal .cs-pay-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--cd-bg0);border:1px solid var(--cd-line)}
+#companyDetailModal .cs-pay-ico{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:rgba(52,211,192,.12);font-size:16px;flex:none}
+#companyDetailModal .cs-pay-meta{flex:1;min-width:0;font-size:12px;font-weight:800;color:var(--cd-text)}
+#companyDetailModal .cs-pay-meta small{display:block;margin-top:2px;color:var(--cd-mute);font-size:10.5px;font-weight:600}
+#companyDetailModal .cs-pay-amt{color:var(--cd-teal);font-size:15px;font-weight:900;direction:ltr}
+#companyDetailModal .cs-pay-empty{padding:28px 0;text-align:center;font-size:12px;color:var(--cd-faint)}
+#companyDetailModal .cs-pay-empty.bad{color:var(--cd-rose)}
+
+/* شرائح معلومات الشركة (تُولَّد من الكود القديم) */
+#companySettingsPane #companyDetail_info>.grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))!important;gap:10px}
+#companySettingsPane .company-info-chip{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--cd-bg0);border:1px solid var(--cd-line)}
+#companySettingsPane .company-info-label{color:var(--cd-mute)}
+#companySettingsPane .company-info-value[style*="#fff"]{color:var(--cd-text)!important}
+
+@media(max-width:900px){
+  #companyDetailModal .cs-wrap{grid-template-columns:1fr;gap:12px}
+  #companyDetailModal .cs-nav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px}
+  #companyDetailModal .cs-tab{white-space:nowrap;padding:9px 12px;flex:none}
+  #companyDetailModal .cs-tab .cs-ti{display:none}
+  #companyDetailModal .cs-body{overflow:visible}
+  #companyDetailModal .cs-sec{padding:16px}
+  #companyDetailModal .cs-grid{grid-template-columns:1fr}
+  #companyDetailModal .cs-actions .cs-btn{flex:1}
+  #companyDetailModal .cs-tool{flex-direction:column;align-items:stretch}
+}
  
 /* تركيز واضح + احترام تقليل الحركة */
 #companyDetailModal button:focus-visible, #companyDetailModal input:focus-visible, #companyDetailModal select:focus-visible { outline: 2px solid var(--cd-amber); outline-offset: 2px; }
@@ -16682,72 +16776,76 @@ body.light-mode #companyDetailModal.lux-modal-backdrop {
                 <button id="companyLeadersMore" onclick="window.companyLeadersShowMore()" class="hidden cd-btn cd-btn-amber cd-block cd-more"></button>
             </div>
  
-            <!-- لوحة إعدادات الشركة (تظهر بزر ⚙️) -->
-            <div id="companySettingsPane" class="hidden flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar cd-pane">
-                <div class="cd-settings">
- 
-                    <section class="cd-card">
-                        <h4 class="cd-card-title">بيانات الشركة</h4>
-                        <div id="companyDetail_info"></div>
-                        <button onclick="window.toggleCompanyRename()" class="cd-btn cd-btn-amber cd-block">✏️ تعديل بيانات الشركة</button>
-                        <div id="companyRenameWrap" class="hidden cd-form">
-                            <input type="text" id="companyRename_input" placeholder="اسم الشركة" class="erg-input lux-field-input text-right w-full">
-                            <input type="tel" id="companyEditPhone_input" inputmode="tel" dir="ltr" placeholder="رقم الهاتف" class="erg-input lux-field-input text-right w-full">
-                            <input type="email" id="companyEditEmail_input" inputmode="email" dir="ltr" placeholder="البريد الإلكتروني" class="erg-input lux-field-input text-right w-full">
-                            <button onclick="window.saveCompanyName()" class="cd-btn cd-btn-teal cd-block">حفظ البيانات</button>
-                        </div>
-                    </section>
- 
-                    <section class="cd-card">
-                        <h4 class="cd-card-title">الاشتراك والسقوف</h4>
-                        <button onclick="window.toggleCompanyBilling()" class="cd-btn cd-btn-cyan cd-block">💵 الاشتراك والتمديد</button>
-                        <div id="companyBillingWrap" class="hidden cd-form">
-                            <input type="number" id="companyBilling_price" placeholder="سعر الاشتراك ($)" class="erg-input lux-field-input text-right w-full">
-                            <input type="date" id="companyBilling_expiry" class="erg-input lux-field-input text-right w-full">
-                            <button onclick="window.saveCompanyBilling()" class="cd-btn cd-btn-teal cd-block">حفظ (السعر والتاريخ يُطبَّقان على كل قادة الشركة)</button>
-                        </div>
-<button onclick="window.showCompanyAccessModal(window._activeCompanyId)" class="cd-btn cd-btn-teal cd-block">🔑 الرمز التعريفي للشركة</button>
-                        <button onclick="window.toggleCompanyQuota()" class="cd-btn cd-btn-teal cd-block">🔢 سقوف القادة والأعضاء</button>
-                        <div id="companyQuotaWrap" class="hidden cd-form">
-                            <p id="companyQuota_usage" class="text-[11px] font-black text-right" style="color:var(--cd-mute);">—</p>
-                            <div class="flex gap-2">
-                                <div class="flex-1">
-                                    <p class="lux-field-label">أقصى عدد قادة</p>
-                                    <input type="number" min="0" id="companyQuota_leaders" class="erg-input lux-field-input text-right w-full">
+                        <!-- لوحة إعدادات الشركة (تظهر بزر ⚙️) -->
+            <div id="companySettingsPane" class="hidden flex-col flex-1 min-h-0 cd-pane">
+                <div class="cs-wrap">
+
+                    <nav class="cs-nav">
+                        <button class="cs-tab is-active" data-t="info" onclick="window.csTab('info')"><span class="cs-ti">🏢</span>بيانات الشركة</button>
+                        <button class="cs-tab" data-t="billing" onclick="window.csTab('billing')"><span class="cs-ti">💵</span>الاشتراك والتمديد</button>
+                        <button class="cs-tab" data-t="quota" onclick="window.csTab('quota')"><span class="cs-ti">🔢</span>السقوف</button>
+                        <button class="cs-tab" data-t="payments" onclick="window.csTab('payments')"><span class="cs-ti">🧾</span>سجل المدفوعات</button>
+                        <button class="cs-tab is-danger" data-t="danger" onclick="window.csTab('danger')"><span class="cs-ti">⚠️</span>منطقة الخطر</button>
+                    </nav>
+
+                    <div class="cs-body custom-scrollbar">
+
+                        <section class="cs-sec" data-s="info">
+                            <header class="cs-sh"><span class="cs-si">🏢</span><div><h4>بيانات الشركة</h4><p>الاسم وبيانات التواصل</p></div></header>
+                            <div id="companyDetail_info"></div>
+                            <div id="companyRenameWrap" class="hidden cs-form">
+                                <div class="cs-grid">
+                                    <label class="cs-f cs-full"><span>اسم الشركة</span><input type="text" id="companyRename_input" placeholder="اسم الشركة" class="cs-input"></label>
+                                    <label class="cs-f"><span>رقم الهاتف</span><input type="tel" id="companyEditPhone_input" inputmode="tel" dir="ltr" placeholder="07XXXXXXXX" class="cs-input"></label>
+                                    <label class="cs-f"><span>البريد الإلكتروني</span><input type="email" id="companyEditEmail_input" inputmode="email" dir="ltr" placeholder="name@example.com" class="cs-input"></label>
                                 </div>
-                                <div class="flex-1">
-                                    <p class="lux-field-label">إجمالي الأعضاء (الحصة)</p>
-                                    <input type="number" min="0" id="companyQuota_pool" class="erg-input lux-field-input text-right w-full">
-                                </div>
-                            </div>   
-                            <div class="flex gap-2">
-                                <div class="flex-1">
-                                    <p class="lux-field-label">تغييرات أكواد القادة (السقف)</p>
-                                    <input type="number" min="0" id="companyQuota_codeChanges" class="erg-input lux-field-input text-right w-full">
-                                </div>
-                                <div class="flex-1">
-                                    <p class="lux-field-label">المستخدم منها</p>
-                                    <input type="number" min="0" id="companyQuota_codeUsed" class="erg-input lux-field-input text-right w-full">
-                                </div>
+                                <div class="cs-actions"><button onclick="window.saveCompanyName()" class="cs-btn cs-btn-main">💾 حفظ البيانات</button></div>
                             </div>
-                            <button onclick="window.saveCompanyQuota()" class="cd-btn cd-btn-teal cd-block">حفظ السقوف</button>
-                        </div>
-                    </section>
- 
-                    <section class="cd-card cd-span">
-                        <h4 class="cd-card-title">🧾 سجل المدفوعات</h4>
-                        <div id="companyDetail_payments" class="space-y-1"></div>
-                    </section>
- 
-                    <section class="cd-card cd-danger cd-span">
-                        <button onclick="window.deleteCompany()" class="cd-btn cd-btn-rose cd-block">🗑️ حذف الشركة نهائياً</button>
-                    </section>
- 
+                        </section>
+
+                        <section class="cs-sec hidden" data-s="billing">
+                            <header class="cs-sh"><span class="cs-si">💵</span><div><h4>الاشتراك والتمديد</h4><p>السعر والتاريخ يُطبَّقان على كل قادة الشركة</p></div></header>
+                            <div id="companyBillingWrap" class="hidden cs-form">
+                                <div class="cs-grid">
+                                    <label class="cs-f"><span>سعر الاشتراك ($)</span><input type="number" id="companyBilling_price" placeholder="0" class="cs-input"></label>
+                                    <label class="cs-f"><span>تاريخ انتهاء الاشتراك</span><input type="date" id="companyBilling_expiry" class="cs-input"></label>
+                                </div>
+                                <p class="cs-hint">💡 عند حفظ تاريخ جديد يُحدَّث انتهاء اشتراك جميع قادة الشركة وحالتهم.</p>
+                                <div class="cs-actions"><button onclick="window.saveCompanyBilling()" class="cs-btn cs-btn-main">💾 حفظ الاشتراك</button></div>
+                            </div>
+                            <div class="cs-tool">
+                                <div><b>🔑 الرمز التعريفي للشركة</b><small>عرض الرمز الخاص بالشركة</small></div>
+                                <button onclick="window.showCompanyAccessModal(window._activeCompanyId)" class="cs-btn">عرض الرمز</button>
+                            </div>
+                        </section>
+
+                        <section class="cs-sec hidden" data-s="quota">
+                            <header class="cs-sh"><span class="cs-si">🔢</span><div><h4>سقوف القادة والأعضاء</h4><p>الحد الأقصى للقادة والأعضاء وتغييرات الأكواد</p></div></header>
+                            <div id="companyQuotaWrap" class="hidden cs-form">
+                                <p id="companyQuota_usage" class="cs-usage">—</p>
+                                <div class="cs-grid">
+                                    <label class="cs-f"><span>أقصى عدد قادة</span><input type="number" min="0" id="companyQuota_leaders" class="cs-input"></label>
+                                    <label class="cs-f"><span>إجمالي الأعضاء (الحصة)</span><input type="number" min="0" id="companyQuota_pool" class="cs-input"></label>
+                                    <label class="cs-f"><span>تغييرات أكواد القادة (السقف)</span><input type="number" min="0" id="companyQuota_codeChanges" class="cs-input"></label>
+                                    <label class="cs-f"><span>المستخدم منها</span><input type="number" min="0" id="companyQuota_codeUsed" class="cs-input"></label>
+                                </div>
+                                <div class="cs-actions"><button onclick="window.saveCompanyQuota()" class="cs-btn cs-btn-main">💾 حفظ السقوف</button></div>
+                            </div>
+                        </section>
+
+                        <section class="cs-sec hidden" data-s="payments">
+                            <header class="cs-sh"><span class="cs-si">🧾</span><div><h4>سجل المدفوعات</h4><p>الاشتراكات والتجديدات المعتمدة لهذه الشركة</p></div></header>
+                            <div id="companyDetail_payments" class="cs-pay"></div>
+                        </section>
+
+                        <section class="cs-sec cs-danger hidden" data-s="danger">
+                            <header class="cs-sh"><span class="cs-si">⚠️</span><div><h4>منطقة الخطر</h4><p>حذف الشركة نهائياً مع جميع قادتها وأعضاء فرقهم، ولا يمكن التراجع عنه</p></div></header>
+                            <div class="cs-actions"><button onclick="window.deleteCompany()" class="cs-btn cs-btn-rose">🗑️ حذف الشركة نهائياً</button></div>
+                        </section>
+
+                    </div>
                 </div>
             </div>
-        </section>
-    </div>
-</div>
 
 <div id="companyAddModal" class="hidden fixed inset-0 z-[10500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeCompanyAddModal()">
     <div class="w-full max-w-md rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
