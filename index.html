@@ -10805,6 +10805,426 @@ window.riskToggleOverride = async () => {
 
 
 
+
+// ===================== تقييم مخاطر — الدفعة 3: مكتبة أنواع العمل في Firestore =====================
+window.RISK_SEED_TYPES = window.RISK_SEED_TYPES || (window.RISK_WORK_TYPES || []).slice();
+window._risk.libFromDb = false;
+window._risk.libEdit = null;
+
+window.riskLoadLibrary = async () => {
+    const fallback = () => { window._risk.libFromDb = false; window.RISK_WORK_TYPES = (window.userRole === 'master') ? window.RISK_SEED_TYPES.slice() : []; };
+    try {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'risk_library'));
+        const arr = snap.docs.map(d => ({ key: d.id, ...d.data() }))
+            .filter(t => t.active !== false && t.label && Array.isArray(t.conditions) && t.conditions.length)
+            .map(t => ({ key: t.key, label: t.label, icon: t.icon || '📋', level: window.RISK_LEVELS[t.level] ? t.level : 'medium', conditions: t.conditions, order: Number(t.order) || 0 }))
+            .sort((a, b) => (a.order - b.order) || String(a.label).localeCompare(String(b.label), 'ar'));
+        if (arr.length) { window.RISK_WORK_TYPES = arr; window._risk.libFromDb = true; }
+        else fallback();
+    } catch (e) { console.warn('risk library', e); fallback(); }
+};
+
+window.riskOnShow = async () => {
+    document.getElementById('riskMemberFab')?.classList.add('hidden');
+    document.getElementById('riskLibBtn')?.classList.toggle('hidden', window.userRole !== 'master');
+    await Promise.all([window.riskLoadCtx(), window.riskLoadLibrary()]);
+    window.riskListen();
+};
+
+window.riskNewPermit = () => {
+    if (!window.riskAllowed()) return window.showNotif('هذه الميزة غير مفعّلة في باقتك', 'error');
+    if (!window.RISK_WORK_TYPES.length) return window.showNotif('مكتبة أنواع العمل غير مهيّأة بعد، تواصل مع الإدارة', 'error');
+    window._risk.wiz = { step: 1, typeKey: '', location: '', task: '', desc: '', workers: '', conds: [] };
+    const m = document.getElementById('riskWizModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskWizRender();
+};
+
+// ---------- محرر المكتبة (المدير فقط) ----------
+window.riskLibOpen = async () => {
+    if (window.userRole !== 'master') return;
+    await window.riskLoadLibrary();
+    window._risk.libEdit = null;
+    const m = document.getElementById('riskLibModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskLibRender();
+};
+window.riskLibClose = () => {
+    const m = document.getElementById('riskLibModal');
+    m?.classList.add('hidden'); m?.classList.remove('flex');
+    window._risk.libEdit = null;
+};
+window.riskLibNew = () => {
+    window._risk.libEdit = { isNew: true, key: '', label: '', icon: '📋', level: 'medium', condsText: '', order: (window.RISK_WORK_TYPES.length + 1) * 10 };
+    window.riskLibRender();
+};
+window.riskLibEdit = (key) => {
+    const t = window.RISK_WORK_TYPES.find(x => x.key === key); if (!t) return;
+    window._risk.libEdit = { isNew: false, key: t.key, label: t.label, icon: t.icon, level: t.level, condsText: t.conditions.join('\n'), order: t.order || 0 };
+    window.riskLibRender();
+};
+window.riskLibCancel = () => { window._risk.libEdit = null; window.riskLibRender(); };
+
+window.riskLibRender = () => {
+    const body = document.getElementById('riskLibBody'); if (!body) return;
+    const e = window._risk.libEdit;
+    if (!e) {
+        const rows = window.RISK_WORK_TYPES.map(t => {
+            const lv = window.RISK_LEVELS[t.level];
+            return `<div class="flex items-center justify-between rounded-xl px-3 py-2 mb-2" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);">
+                <div class="flex gap-2"><button onclick="window.riskLibDelete('${t.key}')" class="text-rose-400 text-sm px-2">🗑️</button><button onclick="window.riskLibEdit('${t.key}')" class="text-cyan-300 text-sm px-2">✏️</button></div>
+                <div class="text-right"><p class="text-white text-sm font-black">${t.icon} ${esc(t.label)}</p><p class="text-[10px] font-black" style="color:${lv.color}">خطورة ${lv.label} · ${t.conditions.length} شروط</p></div></div>`;
+        }).join('');
+        body.innerHTML = (window._risk.libFromDb ? '' : `<div class="rounded-xl p-3 mb-3" style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.4);"><p class="text-amber-300 text-xs font-black mb-2">المكتبة في Firestore فارغة، وما تراه الآن هو المكتبة الأولية المؤقتة. استوردها لتصبح قابلة للتعديل ولتعمل القواعد الجديدة للأعضاء والقادة.</p><button onclick="window.riskLibImportSeed()" class="w-full py-2.5 rounded-xl font-black text-xs text-black" style="background:linear-gradient(135deg,#f59e0b,#fbbf24);">⬇️ استيراد المكتبة الأولية (${window.RISK_SEED_TYPES.length} أنواع)</button></div>`)
+            + rows + `<button onclick="window.riskLibNew()" class="w-full mt-2 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ نوع عمل جديد</button>`;
+        return;
+    }
+    const inputCls = 'erg-input lux-field-input text-right w-full mb-3';
+    body.innerHTML = `
+        <p class="text-slate-400 text-xs font-black mb-1">اسم نوع العمل *</p>
+        <input id="riskLib_label" class="${inputCls}" value="${esc(e.label)}">
+        <div class="flex gap-2"><div class="flex-1"><p class="text-slate-400 text-xs font-black mb-1">الرمز (إيموجي)</p><input id="riskLib_icon" class="${inputCls}" value="${esc(e.icon)}"></div>
+        <div class="flex-1"><p class="text-slate-400 text-xs font-black mb-1">مستوى الخطورة</p>
+        <select id="riskLib_level" class="${inputCls}">${Object.keys(window.RISK_LEVELS).map(k => `<option value="${k}" ${e.level === k ? 'selected' : ''}>${window.RISK_LEVELS[k].label}</option>`).join('')}</select></div></div>
+        <p class="text-slate-400 text-xs font-black mb-1">الشروط (شرط في كل سطر، 3 على الأقل) *</p>
+        <textarea id="riskLib_conds" rows="9" class="${inputCls}">${esc(e.condsText)}</textarea>
+        <p class="text-slate-400 text-xs font-black mb-1">الترتيب في القائمة (رقم أصغر = أعلى)</p>
+        <input id="riskLib_order" type="number" class="${inputCls}" value="${esc(e.order)}">
+        <div class="flex gap-2 mt-1"><button onclick="window.riskLibSave()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">حفظ</button>
+        <button onclick="window.riskLibCancel()" class="flex-1 py-3 rounded-xl font-black text-sm text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);">إلغاء</button></div>`;
+};
+
+window.riskLibSave = async () => {
+    const e = window._risk.libEdit; if (!e || window.userRole !== 'master') return;
+    const label = (document.getElementById('riskLib_label')?.value || '').trim();
+    const icon = (document.getElementById('riskLib_icon')?.value || '').trim() || '📋';
+    const level = document.getElementById('riskLib_level')?.value || 'medium';
+    const conds = (document.getElementById('riskLib_conds')?.value || '').split('\n').map(x => x.trim()).filter(Boolean);
+    const order = Number(document.getElementById('riskLib_order')?.value) || 0;
+    if (!label) return window.showNotif('اسم نوع العمل مطلوب', 'error');
+    if (!window.RISK_LEVELS[level]) return window.showNotif('مستوى الخطورة غير صالح', 'error');
+    if (conds.length < 3) return window.showNotif('أدخل 3 شروط على الأقل', 'error');
+    const key = e.isNew ? ('t' + Date.now().toString(36)) : e.key;
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_library', key),
+            { label, icon, level, conditions: conds, order, active: true, updatedAt: Date.now() });
+        window.showNotif('✅ حُفظ نوع العمل', 'success');
+        window._risk.libEdit = null;
+        await window.riskLoadLibrary();
+        window.riskLibRender();
+    } catch (err) {
+        console.error('risk lib save', err);
+        window.showNotif('تعذر الحفظ، تحقق من القواعد', 'error');
+    }
+};
+
+window.riskLibDelete = (key) => {
+    const t = window.RISK_WORK_TYPES.find(x => x.key === key); if (!t) return;
+    window.showConfirm('حذف نوع عمل', `سيُحذف «${t.label}» من المكتبة. التصاريح القديمة لا تتأثر.`, async () => {
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_library', key));
+            window.showNotif('تم الحذف', 'success');
+            await window.riskLoadLibrary();
+            window.riskLibRender();
+        } catch (err) {
+            console.error('risk lib delete', err);
+            window.showNotif('تعذر الحذف، تحقق من القواعد', 'error');
+        }
+    });
+};
+
+window.riskLibImportSeed = async () => {
+    if (window.userRole !== 'master') return;
+    try {
+        const batch = writeBatch(db);
+        window.RISK_SEED_TYPES.forEach((t, i) => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_library', t.key),
+            { label: t.label, icon: t.icon, level: t.level, conditions: t.conditions, order: (i + 1) * 10, active: true, updatedAt: Date.now() }));
+        await batch.commit();
+        window.showNotif('✅ استُوردت المكتبة الأولية', 'success');
+        await window.riskLoadLibrary();
+        window.riskLibRender();
+    } catch (err) {
+        console.error('risk lib import', err);
+        window.showNotif('تعذر الاستيراد، تحقق من القواعد', 'error');
+    }
+};
+
+
+
+
+// ===================== تقييم مخاطر — الدفعة 4: ثنائية اللغة + المرجعية القانونية + القاموس + حزمة المحتوى =====================
+
+// ---- 1) المصطلحات الثنائية (English - عربي) ----
+window.RISK_LEVELS.low.label = 'Low - منخفض';
+window.RISK_LEVELS.medium.label = 'Medium - متوسط';
+window.RISK_LEVELS.high.label = 'High - عالٍ';
+window.RISK_LEVELS.critical.label = 'Critical - حرج';
+window.RISK_ROLE_LABEL = { member: 'Member - عضو', leader: 'Leader - قائد', owner: 'Owner - مالك الشركة', master: 'Master - المدير العام' };
+window.RISK_STATUS.approved.label = 'Approved - ساري';
+window.RISK_STATUS.pending.label = 'Pending - بانتظار الاعتماد';
+window.RISK_STATUS.rejected.label = 'Rejected - مرفوض';
+window.RISK_STATUS.expired.label = 'Expired - منتهٍ';
+
+// ---- 2) المرجعية القانونية: jo (الأردن) / intl (عالمي) / both ----
+window._risk.jurisdiction = 'jo';
+window.RISK_JUR_LABEL = { jo: 'Jordan - الأردن (القانون المحلي)', intl: 'International - عالمي', both: 'Both - الاثنان معاً' };
+
+window.riskLoadCtx = async () => {
+    const c = window.riskCtx();
+    window._risk.validityHours = 0;
+    window._risk.overrideAllowed = (c.role === 'master');
+    if (c.role !== 'master') window._risk.jurisdiction = 'jo';
+    if (c.role === 'master' || !c.leaderId) return;
+    try {
+        const s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', c.leaderId));
+        if (s.exists()) {
+            const d = s.data();
+            window._risk.validityHours = Number(d.validityHours) || 0;
+            window._risk.overrideAllowed = d.overrideAllowed === true;
+            if (window.RISK_JUR_LABEL[d.jurisdiction]) window._risk.jurisdiction = d.jurisdiction;
+        }
+    } catch (e) { console.warn('risk ctx', e); }
+};
+
+window.riskLoadLibrary = async () => {
+    const fallback = () => { window._risk.libFromDb = false; window.RISK_WORK_TYPES = (window.userRole === 'master') ? window.RISK_SEED_TYPES.slice() : []; };
+    try {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'risk_library'));
+        const arr = snap.docs.map(d => ({ key: d.id, ...d.data() }))
+            .filter(t => t.active !== false && t.label && Array.isArray(t.conditions) && t.conditions.length)
+            .map(t => ({
+                key: t.key, label: t.label, icon: t.icon || '📋',
+                level: window.RISK_LEVELS[t.level] ? t.level : 'medium',
+                conditions: t.conditions,
+                condsJo: Array.isArray(t.conditionsJo) ? t.conditionsJo : [],
+                condsIntl: Array.isArray(t.conditionsIntl) ? t.conditionsIntl : [],
+                order: Number(t.order) || 0
+            }))
+            .sort((a, b) => (a.order - b.order) || String(a.label).localeCompare(String(b.label), 'ar'));
+        if (arr.length) { window.RISK_WORK_TYPES = arr; window._risk.libFromDb = true; }
+        else fallback();
+    } catch (e) { console.warn('risk library', e); fallback(); }
+};
+
+// الشروط النهائية = الشروط العامة + شروط المرجعية المختارة
+window.riskWizConds = (t) => {
+    const j = window._risk.jurisdiction || 'jo';
+    let extra = [];
+    if (j === 'jo' || j === 'both') extra = extra.concat(t.condsJo || []);
+    if (j === 'intl' || j === 'both') extra = extra.concat(t.condsIntl || []);
+    return (t.conditions || []).concat(extra);
+};
+
+window.riskWizSelect = (key) => {
+    const w = window._risk.wiz; if (!w) return;
+    const t = window.RISK_WORK_TYPES.find(x => x.key === key); if (!t) return;
+    if (w.typeKey !== key) { w.typeKey = key; w.conds = window.riskWizConds(t).map(x => ({ t: x, s: '' })); }
+    window.riskWizRender();
+};
+
+// ---- إعدادات الشركة: المدة + المرجعية ----
+const _riskRenderPrev = window.riskRender;
+window.riskRender = () => {
+    _riskRenderPrev();
+    const c = window.riskCtx();
+    document.getElementById('riskSettingsBtn')?.classList.toggle('hidden', !(c.role === 'owner' || c.role === 'master'));
+};
+
+window.riskOpenSettings = async () => {
+    await window.riskLoadCtx();
+    const inp = document.getElementById('riskSet_hours');
+    if (inp && !document.getElementById('riskSet_jur')) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = `<p class="text-slate-400 text-xs font-black mb-1">المرجعية القانونية للشروط - Legal Reference</p>
+            <select id="riskSet_jur" class="erg-input lux-field-input text-right w-full mb-4">${Object.keys(window.RISK_JUR_LABEL).map(k => `<option value="${k}">${window.RISK_JUR_LABEL[k]}</option>`).join('')}</select>`;
+        inp.insertAdjacentElement('afterend', wrap);
+    }
+    const sel = document.getElementById('riskSet_jur');
+    if (sel) sel.value = window._risk.jurisdiction || 'jo';
+    if (inp) inp.value = window._risk.validityHours || window.RISK_DEFAULT_VALIDITY_H;
+    const m = document.getElementById('riskSettingsModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+};
+
+window.riskSaveSettings = async () => {
+    const c = window.riskCtx();
+    const jur = document.getElementById('riskSet_jur')?.value || 'jo';
+    if (!window.RISK_JUR_LABEL[jur]) return;
+    if (c.role === 'master') {
+        window._risk.jurisdiction = jur;
+        window.showNotif('✅ تم تغيير المرجعية لجلسة المدير الحالية فقط', 'success');
+        window.riskCloseSettings();
+        return;
+    }
+    if (c.role !== 'owner') return;
+    const h = Number(document.getElementById('riskSet_hours')?.value);
+    if (!h || h < 1 || h > 168) return window.showNotif('المدة بين ساعة و168 ساعة', 'error');
+    const keys = Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 400);
+    try {
+        const batch = writeBatch(db);
+        keys.forEach(k => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', k), { validityHours: h, jurisdiction: jur, updatedAt: Date.now() }, { merge: true }));
+        await batch.commit();
+        window._risk.validityHours = h; window._risk.jurisdiction = jur;
+        window.showNotif('✅ حُفظت إعدادات التصاريح لقادة الشركة (' + keys.length + ')', 'success');
+        window.riskCloseSettings();
+    } catch (e) {
+        console.error('risk settings', e);
+        window.showNotif('تعذر الحفظ، تحقق من الصلاحيات', 'error');
+    }
+};
+
+// ---- 3) محرر المكتبة مع شروط الأردن والعالمية + استيراد الحزمة ----
+window.riskLibNew = () => {
+    window._risk.libEdit = { isNew: true, key: '', label: '', icon: '📋', level: 'medium', condsText: '', jo: '', intl: '', order: (window.RISK_WORK_TYPES.length + 1) * 10 };
+    window.riskLibRender();
+};
+window.riskLibEdit = (key) => {
+    const t = window.RISK_WORK_TYPES.find(x => x.key === key); if (!t) return;
+    window._risk.libEdit = { isNew: false, key: t.key, label: t.label, icon: t.icon, level: t.level, condsText: t.conditions.join('\n'), jo: (t.condsJo || []).join('\n'), intl: (t.condsIntl || []).join('\n'), order: t.order || 0 };
+    window.riskLibRender();
+};
+
+window.riskLibRender = () => {
+    const body = document.getElementById('riskLibBody'); if (!body) return;
+    const e = window._risk.libEdit;
+    if (!e) {
+        const rows = window.RISK_WORK_TYPES.map(t => {
+            const lv = window.RISK_LEVELS[t.level];
+            return `<div class="flex items-center justify-between rounded-xl px-3 py-2 mb-2" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);">
+                <div class="flex gap-2"><button onclick="window.riskLibDelete('${t.key}')" class="text-rose-400 text-sm px-2">🗑️</button><button onclick="window.riskLibEdit('${t.key}')" class="text-cyan-300 text-sm px-2">✏️</button></div>
+                <div class="text-right"><p class="text-white text-sm font-black">${t.icon} ${esc(t.label)}</p><p class="text-[10px] font-black" style="color:${lv.color}">${lv.label} · ${t.conditions.length} + ${(t.condsJo || []).length} JO + ${(t.condsIntl || []).length} INTL</p></div></div>`;
+        }).join('');
+        body.innerHTML = (window._risk.libFromDb ? '' : `<div class="rounded-xl p-3 mb-3" style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.4);"><p class="text-amber-300 text-xs font-black mb-2">المكتبة في Firestore فارغة وما تراه هو المكتبة الأولية المؤقتة. استورد حزمة المحتوى (الزر أدناه) أو المكتبة الأولية.</p><button onclick="window.riskLibImportSeed()" class="w-full py-2.5 rounded-xl font-black text-xs text-black" style="background:linear-gradient(135deg,#f59e0b,#fbbf24);">⬇️ استيراد المكتبة الأولية (${window.RISK_SEED_TYPES.length} أنواع)</button></div>`)
+            + `<div class="rounded-xl p-3 mb-3" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.35);">
+                <p class="text-cyan-200 text-xs font-black mb-2">📦 استيراد حزمة محتوى (ملف JSON: أنواع العمل + الشروط + القاموس)</p>
+                <input type="file" accept=".json,application/json" onchange="window.riskLibImportPack(this)" class="text-slate-300 text-xs w-full"></div>`
+            + rows + `<button onclick="window.riskLibNew()" class="w-full mt-2 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ نوع عمل جديد</button>`;
+        return;
+    }
+    const inputCls = 'erg-input lux-field-input text-right w-full mb-3';
+    body.innerHTML = `
+        <p class="text-slate-400 text-xs font-black mb-1">اسم نوع العمل (English - عربي) *</p>
+        <input id="riskLib_label" class="${inputCls}" value="${esc(e.label)}">
+        <div class="flex gap-2"><div class="flex-1"><p class="text-slate-400 text-xs font-black mb-1">الرمز (إيموجي)</p><input id="riskLib_icon" class="${inputCls}" value="${esc(e.icon)}"></div>
+        <div class="flex-1"><p class="text-slate-400 text-xs font-black mb-1">مستوى الخطورة</p>
+        <select id="riskLib_level" class="${inputCls}">${Object.keys(window.RISK_LEVELS).map(k => `<option value="${k}" ${e.level === k ? 'selected' : ''}>${window.RISK_LEVELS[k].label}</option>`).join('')}</select></div></div>
+        <p class="text-slate-400 text-xs font-black mb-1">الشروط العامة (شرط في كل سطر، 3 على الأقل) *</p>
+        <textarea id="riskLib_conds" rows="7" class="${inputCls}">${esc(e.condsText)}</textarea>
+        <p class="text-slate-400 text-xs font-black mb-1">🇯🇴 شروط إضافية للأردن (اختياري)</p>
+        <textarea id="riskLib_jo" rows="4" class="${inputCls}">${esc(e.jo)}</textarea>
+        <p class="text-slate-400 text-xs font-black mb-1">🌍 شروط إضافية عالمية (اختياري)</p>
+        <textarea id="riskLib_intl" rows="4" class="${inputCls}">${esc(e.intl)}</textarea>
+        <p class="text-slate-400 text-xs font-black mb-1">الترتيب في القائمة (رقم أصغر = أعلى)</p>
+        <input id="riskLib_order" type="number" class="${inputCls}" value="${esc(e.order)}">
+        <div class="flex gap-2 mt-1"><button onclick="window.riskLibSave()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">حفظ</button>
+        <button onclick="window.riskLibCancel()" class="flex-1 py-3 rounded-xl font-black text-sm text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);">إلغاء</button></div>`;
+};
+
+window.riskLibSave = async () => {
+    const e = window._risk.libEdit; if (!e || window.userRole !== 'master') return;
+    const lines = (id) => (document.getElementById(id)?.value || '').split('\n').map(x => x.trim()).filter(Boolean);
+    const label = (document.getElementById('riskLib_label')?.value || '').trim();
+    const icon = (document.getElementById('riskLib_icon')?.value || '').trim() || '📋';
+    const level = document.getElementById('riskLib_level')?.value || 'medium';
+    const conds = lines('riskLib_conds'), jo = lines('riskLib_jo'), intl = lines('riskLib_intl');
+    const order = Number(document.getElementById('riskLib_order')?.value) || 0;
+    if (!label) return window.showNotif('اسم نوع العمل مطلوب', 'error');
+    if (!window.RISK_LEVELS[level]) return window.showNotif('مستوى الخطورة غير صالح', 'error');
+    if (conds.length < 3) return window.showNotif('أدخل 3 شروط عامة على الأقل', 'error');
+    const key = e.isNew ? ('t' + Date.now().toString(36)) : e.key;
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_library', key),
+            { label, icon, level, conditions: conds, conditionsJo: jo, conditionsIntl: intl, order, active: true, updatedAt: Date.now() });
+        window.showNotif('✅ حُفظ نوع العمل', 'success');
+        window._risk.libEdit = null;
+        await window.riskLoadLibrary();
+        window.riskLibRender();
+    } catch (err) {
+        console.error('risk lib save', err);
+        window.showNotif('تعذر الحفظ، تحقق من القواعد', 'error');
+    }
+};
+
+window.riskLibImportPack = async (input) => {
+    const f = input && input.files && input.files[0];
+    if (!f || window.userRole !== 'master') return;
+    let pack;
+    try { pack = JSON.parse(await f.text()); } catch (e) { input.value = ''; return window.showNotif('ملف الحزمة غير صالح (JSON)', 'error'); }
+    const types = Array.isArray(pack.types) ? pack.types : [];
+    const gloss = Array.isArray(pack.glossary) ? pack.glossary : [];
+    if (!types.length && !gloss.length) { input.value = ''; return window.showNotif('الحزمة لا تحتوي أنواع عمل ولا مصطلحات', 'error'); }
+    const now = Date.now(), ops = [];
+    types.forEach(t => {
+        if (!t || !t.key || !t.label || !Array.isArray(t.conditions) || t.conditions.length < 3) return;
+        ops.push([doc(db, 'artifacts', appId, 'public', 'data', 'risk_library', String(t.key)), {
+            label: String(t.label), icon: t.icon || '📋', level: window.RISK_LEVELS[t.level] ? t.level : 'medium',
+            conditions: t.conditions, conditionsJo: Array.isArray(t.conditionsJo) ? t.conditionsJo : [],
+            conditionsIntl: Array.isArray(t.conditionsIntl) ? t.conditionsIntl : [],
+            order: Number(t.order) || 0, active: true, updatedAt: now
+        }]);
+    });
+    gloss.forEach((g, i) => {
+        if (!g || !g.en || !g.ar) return;
+        const slug = String(g.en).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || ('t' + i);
+        ops.push([doc(db, 'artifacts', appId, 'public', 'data', 'risk_glossary', (g.cat || 'g') + '-' + slug),
+            { en: String(g.en), ar: String(g.ar), fr: String(g.fr || ''), cat: String(g.cat || 'general'), updatedAt: now }]);
+    });
+    try {
+        for (let i = 0; i < ops.length; i += 400) {
+            const b = writeBatch(db);
+            ops.slice(i, i + 400).forEach(([r, d]) => b.set(r, d));
+            await b.commit();
+        }
+        window._risk.gloss = null;
+        window.showNotif(`✅ استُوردت الحزمة: ${types.length} نوع عمل و${gloss.length} مصطلح`, 'success');
+        await window.riskLoadLibrary();
+        window.riskLibRender();
+    } catch (err) {
+        console.error('risk pack import', err);
+        window.showNotif('تعذر الاستيراد، تحقق من القواعد', 'error');
+    }
+    input.value = '';
+};
+
+// ---- 4) القاموس (للجميع): English - عربي ----
+window._risk.gloss = null; window._risk.glossCat = 'all'; window._risk.glossQ = '';
+window.RISK_GLOSS_CATS = { all: 'All - الكل', hse: 'HSE - الصحة والسلامة والبيئة', hazard: 'Hazards - الأخطار', audit: 'Audit - التدقيق', permit: 'Permit - التصاريح', report: 'Report - تقرير الحادث', quality: 'Quality - الجودة' };
+
+window.riskGlossOpen = async () => {
+    if (!window.riskAllowed()) return window.showNotif('هذه الميزة غير مفعّلة في باقتك', 'error');
+    const m = document.getElementById('riskGlossModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+    const list = document.getElementById('riskGlossList');
+    if (!window._risk.gloss) {
+        if (list) list.innerHTML = '<p class="text-slate-500 text-xs text-center py-6">جاري التحميل...</p>';
+        try {
+            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'risk_glossary'));
+            window._risk.gloss = snap.docs.map(d => d.data()).sort((a, b) => String(a.en).localeCompare(String(b.en)));
+        } catch (e) { console.warn('risk glossary', e); window._risk.gloss = []; }
+    }
+    window.riskGlossRender();
+};
+window.riskGlossClose = () => {
+    const m = document.getElementById('riskGlossModal');
+    m?.classList.add('hidden'); m?.classList.remove('flex');
+};
+window.riskGlossSet = (k) => { window._risk.glossCat = k; window.riskGlossRender(); };
+window.riskGlossSearch = (v) => { window._risk.glossQ = (v || '').trim().toLowerCase(); window.riskGlossRender(true); };
+window.riskGlossRender = (listOnly) => {
+    const cats = document.getElementById('riskGlossCats');
+    if (cats && !listOnly) cats.innerHTML = Object.keys(window.RISK_GLOSS_CATS).map(k => `<button onclick="window.riskGlossSet('${k}')" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${window._risk.glossCat === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${window._risk.glossCat === k ? '#000' : '#94a3b8'};border:1px solid ${window._risk.glossCat === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${window.RISK_GLOSS_CATS[k]}</button>`).join('');
+    const list = document.getElementById('riskGlossList'); if (!list) return;
+    const q = window._risk.glossQ, c = window._risk.glossCat;
+    const all = window._risk.gloss || [];
+    const res = all.filter(g => (c === 'all' || g.cat === c) && (!q || (g.en + ' ' + g.ar + ' ' + (g.fr || '')).toLowerCase().includes(q)));
+    if (!all.length) { list.innerHTML = '<p class="text-slate-500 text-xs text-center py-6">القاموس فارغ. يستورده المدير من حزمة المحتوى.</p>'; return; }
+    list.innerHTML = res.slice(0, 120).map(g => `<div class="rounded-xl px-3 py-2 mb-2" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);">
+        <p class="text-white text-sm font-black" dir="auto">${esc(g.en)} - ${esc(g.ar)}</p>
+        ${g.fr ? `<p class="text-slate-400 text-[11px] mt-0.5" dir="ltr">FR: ${esc(g.fr)}</p>` : ''}</div>`).join('')
+        + (res.length > 120 ? `<p class="text-slate-500 text-[11px] text-center">يُعرض أول 120 من ${res.length}. ضيّق البحث.</p>` : '');
+};
+
+
 // ===== Dark / Light Mode Engine =====
 window.toggleTheme = () => {
     const isLight = document.body.classList.toggle('light-mode');
@@ -17836,8 +18256,14 @@ body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#ee
             <div id="riskStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
             <div class="flex items-center justify-between mb-3 gap-3">
                 <button onclick="window.riskNewPermit()" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ طلب تصريح جديد</button>
-                <p id="riskScopeLabel" class="text-slate-500 text-xs font-black"></p>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.riskGlossOpen()" class="px-3 py-2 rounded-xl text-[11px] font-black text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);">📖 القاموس</button>                    
+<button id="riskLibBtn" onclick="window.riskLibOpen()" class="hidden px-3 py-2 rounded-xl text-[11px] font-black text-cyan-200" style="background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.35);">📚 المكتبة</button>                    
+<button id="riskSettingsBtn" onclick="window.riskOpenSettings()" class="hidden px-3 py-2 rounded-xl text-[11px] font-black text-orange-200" style="background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.35);">⚙️ إعدادات الشركة</button>
+                    <p id="riskScopeLabel" class="text-slate-500 text-xs font-black"></p>
+                </div>
             </div>
+            <div id="riskFilters" class="flex flex-wrap gap-2 mb-3"></div>
             <div id="riskList" class="grid gap-3 md:grid-cols-2"></div>
         </div>
     </div>
@@ -17887,6 +18313,35 @@ body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#ee
 </div>
 
 
+
+<!-- ===== تقييم مخاطر — الدفعة 3: محرر المكتبة (للمدير) ===== -->
+<div id="riskLibModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskLibClose()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(34,211,238,0.3);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-4">
+            <button onclick="window.riskLibClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📚 مكتبة أنواع العمل والشروط</p>
+        </div>
+        <div id="riskLibBody"></div>
+    </div>
+</div>
+
+
+
+
+
+<!-- ===== تقييم مخاطر — الدفعة 4: نافذة القاموس (English - عربي) ===== -->
+<div id="riskGlossModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskGlossClose()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] flex flex-col" style="background:#0c111c;border:1px solid rgba(34,211,238,0.3);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3 shrink-0">
+            <button onclick="window.riskGlossClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📖 القاموس - Glossary</p>
+        </div>
+        <input id="riskGloss_q" oninput="window.riskGlossSearch(this.value)" placeholder="🔍 ابحث بالعربي أو English"
+            class="erg-input lux-field-input text-right w-full mb-3 shrink-0">
+        <div id="riskGlossCats" class="flex flex-wrap gap-2 mb-3 shrink-0"></div>
+        <div id="riskGlossList" class="overflow-y-auto flex-1"></div>
+    </div>
+</div>
 
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
@@ -18227,7 +18682,12 @@ body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#ee
 
                         <section class="cs-sec hidden" data-s="billing">
                             <header class="cs-sh"><span class="cs-si">💵</span><div><h4>الاشتراك والتمديد</h4><p>السعر والتاريخ يُطبَّقان على كل قادة الشركة</p></div></header>
-                            <div id="companyBillingWrap" class="hidden cs-form">
+        <button onclick="window.riskToggleOverride()"
+            class="w-full mt-2 py-3 rounded-xl font-black text-xs text-rose-300"
+            style="background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3);">
+            🔓 تبديل التجاوز الاستثنائي لتصاريح الشركة
+        </button> 
+                           <div id="companyBillingWrap" class="hidden cs-form">
                                 <div class="cs-grid">
                                     <label class="cs-f"><span>سعر الاشتراك ($)</span><input type="number" id="companyBilling_price" placeholder="0" class="cs-input"></label>
                                     <label class="cs-f"><span>تاريخ انتهاء الاشتراك</span><input type="date" id="companyBilling_expiry" class="cs-input"></label>
