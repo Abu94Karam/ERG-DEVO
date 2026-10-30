@@ -3158,8 +3158,8 @@ window.renderLeaderSidebar = () => {
     if (searchTerm) {
         leaders = leaders.filter(l => (l.ownerName || '').toLowerCase().includes(searchTerm));
     }
-    if (leaders.length === 0) {
-        list.innerHTML = `<div class="text-center opacity-40 text-xs italic p-6">لا يوجد قادة</div>`;
+        if (leaders.length === 0) {
+        list.innerHTML = `<div class="tm-none">لا يوجد قادة</div>`;
         return;
     }
     list.innerHTML = leaders.map(l => {
@@ -3170,18 +3170,13 @@ window.renderLeaderSidebar = () => {
         const active = window.currentViewingLeader === l.id;
         const initial = (l.ownerName || '؟').trim().charAt(0).toUpperCase();
         return `
-        <button onclick="window.selectLeaderInSidebar('${l.id}')"
-            class="leader-side-card ${active ? 'leader-side-card-active' : ''}">
-            <div class="leader-avatar-lux" style="background:linear-gradient(135deg, ${barColor}33, rgba(245,158,11,0.08)); border-color:${barColor}88;">${initial}</div>
-            <div class="flex-1 min-w-0">
-                <p class="text-white text-xs font-black truncate">${esc(l.ownerName)}</p>
-                <div class="flex items-center gap-2 mt-2.5">
-                    <div class="leader-progress-track">
-                        <div class="leader-progress-fill" style="width:${pct}%; background:${barColor}; box-shadow:0 0 8px ${barColor}aa;"></div>
-                    </div>
-                    <span class="text-[10px] font-mono text-slate-400 shrink-0">${count}/${max}</span>
-                </div>
-            </div>
+        <button type="button" onclick="window.selectLeaderInSidebar('${l.id}')" class="tm-lead ${active ? 'is-active' : ''}">
+            <span class="tm-lead-av" style="--c:${barColor};--c-soft:${barColor}26">${initial}</span>
+            <span class="tm-lead-tx">
+                <span class="tm-lead-name">${esc(l.ownerName)}</span>
+                <span class="tm-bar"><i style="width:${pct}%;background:${barColor}"></i></span>
+            </span>
+            <span class="tm-lead-n">${count}/${max}</span>
         </button>`;
     }).join('');
 };
@@ -3192,7 +3187,7 @@ window.selectLeaderInSidebar = (leaderId) => {
     const leader = (window._teamScopeLeaders || window.subscribers || []).find(s => s.id === leaderId);
     const headerTitle = document.getElementById('teamWinTitle');
     if (headerTitle && leader) {
-        headerTitle.innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">التابع للقائد: ${esc(leader.ownerName)}</span>`;
+                headerTitle.innerHTML = `إدارة الفريق <span class="tm-crumb">‹ ${window._teamCompanyName ? esc(window._teamCompanyName) + ' ‹ ' : ''}${esc(leader.ownerName)}</span>`;
     }
     document.getElementById('teamDetailEmptyState')?.classList.add('hidden');
     document.getElementById('teamDetailEmptyState')?.classList.remove('flex');
@@ -3262,18 +3257,18 @@ window.renderOrphanCleanupList = () => {
     const orphans = window._orphanMembersCache || [];
     const selectAll = document.getElementById('orphanSelectAll');
     if (selectAll) selectAll.checked = false;
-    if (orphans.length === 0) {
-        list.innerHTML = `<div class="text-center opacity-40 text-xs italic p-8">لا يوجد أعضاء معلّقون حاليًا 🎉</div>`;
+        if (orphans.length === 0) {
+        list.innerHTML = `<div class="tm-none">لا يوجد أعضاء معلّقون حاليًا 🎉</div>`;
         return;
     }
     list.innerHTML = orphans.map(m => `
-        <div class="flex items-center justify-between gap-3 rounded-xl p-3 border border-white/8" style="background:rgba(255,255,255,0.02);">
-            <input type="checkbox" class="orphanCheckbox" value="${m.id}">
-            <div class="flex-1 min-w-0 text-right">
-                <p class="text-white text-xs font-black truncate">${esc(m.memberName || '—')}</p>
-                <p class="text-[10px] font-mono text-slate-500 truncate">${m.teamKey || m.id} — قائد مفقود: ${m.parentKey || '—'}</p>
+        <div class="m-orph">
+            <input type="checkbox" class="orphanCheckbox m-cb" value="${m.id}">
+            <div class="m-orph-tx">
+                <b>${esc(m.memberName || '—')}</b>
+                <small>${m.teamKey || m.id} — قائد مفقود: ${m.parentKey || '—'}</small>
             </div>
-            <button onclick="window.deleteEntry('member','${m.id}')" title="حذف" class="text-red-400 text-sm hover:scale-110 transition-all">🗑️</button>
+            <button type="button" class="m-orph-del" title="حذف" onclick="window.deleteEntry('member','${m.id}')">🗑️</button>
         </div>
     `).join('');
 };
@@ -3373,26 +3368,19 @@ window.renderTeamTable = () => {
         return;
     }
 
-    // تحديد نمط الشبكة تلقائياً حسب عدد الأعضاء المعروضين
-    const memberDisplayCount = currentTeam.length;
-    if (memberDisplayCount > 6) {
-        gridBody.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2';
-    } else {
-        gridBody.className = 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3';
-    }
+        gridBody.className = 'tm-grid';
 
     gridBody.innerHTML = currentTeam.map((member, idx) => {
         const docId = member.id;
-        const seqNumber = idx + 1;
-        const compactClass = memberDisplayCount > 6 ? ' team-card-compact' : '';
-
+        const initial = String(member.memberName || '؟').trim().charAt(0).toUpperCase();
         return `
-        <div class="team-card${compactClass}" onclick="window.openMemberDetail('${docId}')">
-            <div class="team-card-avatar">${seqNumber}</div>
-            <p class="text-white font-black text-base truncate">${esc(member.memberName)}</p>
-            <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-                👤 عضو فريق
-            </span>
+        <div class="tm-card" onclick="window.openMemberDetail('${docId}')">
+            <div class="tm-card-av">${esc(initial)}</div>
+            <div class="tm-card-tx">
+                <p class="tm-card-name">${esc(member.memberName)}</p>
+                <span class="tm-card-tag">👤 عضو فريق</span>
+            </div>
+            <span class="tm-card-no">#${idx + 1}</span>
         </div>`;
     }).join('');
 };
@@ -3407,7 +3395,7 @@ window.openMemberPerms = async (docId) => {
     const allowed = window.SIDE_FEATURES.filter(k => window.featChecked(leaderDoc.features, k) && window.featChecked(leaderDoc.memberFeatures, k));
     const own = m.features || {};
     document.getElementById('memberPerms_name').textContent = m.memberName || '—';
-    document.getElementById('memberPerms_box').innerHTML = allowed.length ? allowed.map(k => `<label class="flex items-center gap-2 text-sm text-slate-200 font-bold"><input type="checkbox" class="mpFeat" data-k="${k}" ${own[k] === false ? '' : 'checked'}> ${window.FEATURE_ICONS[k] || '⚙️'} ${window.FEATURE_LABELS[k] || k}</label>`).join('') : '<p class="text-slate-400 text-sm font-bold">لا توجد مزايا متاحة لأعضاء هذا القائد لتقييدها.</p>';
+        document.getElementById('memberPerms_box').innerHTML = allowed.length ? allowed.map(k => `<label class="m-fc"><input type="checkbox" class="mpFeat" data-k="${k}" ${own[k] === false ? '' : 'checked'}><span class="m-fc-b"><span class="m-fc-i">${window.FEATURE_ICONS[k] || '⚙️'}</span><span class="m-fc-l">${window.FEATURE_LABELS[k] || k}</span><span class="m-sw"></span></span></label>`).join('') : '<p class="m-empty">لا توجد مزايا متاحة لأعضاء هذا القائد لتقييدها.</p>';
     document.getElementById('memberPerms_save').onclick = () => window.saveMemberPerms(docId);
     const modal = document.getElementById('memberPermsModal');
     modal.classList.remove('hidden'); modal.classList.add('flex');
@@ -3430,7 +3418,6 @@ window.saveMemberPerms = async (docId) => {
 window.openMemberDetail = (docId) => {
     const m = (window.teamMembers || []).find(x => x.id === docId);
     if (!m) return;
-
     document.getElementById('memberDetail_name').textContent = m.memberName || '—';
     const avatarInitialEl = document.getElementById('memberDetail_avatarInitial');
     if (avatarInitialEl) avatarInitialEl.textContent = (m.memberName || '؟').trim().charAt(0).toUpperCase();
@@ -3445,10 +3432,10 @@ window.openMemberDetail = (docId) => {
 
     document.getElementById('memberDetail_btnReveal').onclick = () => window.revealKey('member', docId);
     document.getElementById('memberDetail_btnChangeKey').onclick = () => window.changeUserKey('member', docId);
-    document.getElementById('memberDetail_btnEdit').onclick = () => { window.closeMemberDetailModal(); window.startEditMember(docId); };
+    document.getElementById('memberDetail_btnEdit').onclick = () => { window._mdRemember(docId); window.closeMemberDetailModal(); window.startEditMember(docId); };
     document.getElementById('memberDetail_btnReset').onclick = () => window.resetDevice('member', docId);
     document.getElementById('memberDetail_btnPerms').onclick = () => window.openMemberPerms(docId);
-    document.getElementById('memberDetail_btnDelete').onclick = () => { window.closeMemberDetailModal(); window.deleteEntry('member', docId); };
+    document.getElementById('memberDetail_btnDelete').onclick = () => { window._mdRemember(docId); window.closeMemberDetailModal(); window.deleteEntry('member', docId); };
 
     const modal = document.getElementById('memberDetailModal');
     modal.classList.remove('hidden');
@@ -3565,6 +3552,7 @@ window.closeMemberFormModal = () => {
     const modal = document.getElementById('memberFormModal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     window._editingMemberId = null;
+    if (window.mdRestore) window.mdRestore(350);   // تعديل أو إلغاء: نرجع لنافذة العضو
 };
 
 
@@ -3761,6 +3749,7 @@ window.radialSections = [
     { app:'app_finance', win:'winFinance', label:'المالية والاشتراكات', color:'#10b981', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"/>' },
     { app:'app_import', win:'winUploadHub', label:'رفع البيانات', color:'#22d3ee', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>' },
     { app:'app_cameo', win:'winCameo', label:'توافق التخزين-CAMEO', color:'#f59e0b', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/>' },
+    { app:'app_risk', win:'winRiskPermits', label:'تقييم مخاطر', color:'#f97316', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>' },
     { app:'app_cloud', win:'winCloud', label:'الأرشيف الرقمي', color:'#64748b', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/>' },
     { app:'app_config', win:'winConfig', label:'أمان النظام', color:'#ea580c', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>' },
     { app:'app_dashboard', win:'winDashboard', label:'لوحة الإحصاء', color:'#8b5cf6', icon:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>' }
@@ -3768,7 +3757,7 @@ window.radialSections = [
 
 // ===== كتالوج المزايا الديناميكي — يُبنى تلقائيًا من قائمة تطبيقات سطح المكتب =====
 // أي تطبيق يُستحدث مستقبلاً ويُضاف لقائمة radialSections يصبح ميزة قابلة للتفعيل تلقائيًا بلا أي تعديل إضافي
-window.APP_FEATURE_KEY = { app_map: 'radar', app_cloud: 'cloud', app_dashboard: 'dashboard' }; // مفاتيح قديمة محفوظة للتوافق مع بيانات محفوظة سابقًا
+window.APP_FEATURE_KEY = { app_map: 'radar', app_cloud: 'cloud', app_dashboard: 'dashboard', app_risk: 'risk' }; // مفاتيح قديمة محفوظة للتوافق مع بيانات محفوظة سابقًا
 window.FEATURE_ICONS = { radar:'📍', pdfExport:'📄', cloud:'☁️', dashboard:'📊', erg:'🧯', reps:'📋', subs:'👥', team:'🤝', finance:'💰', import:'⬆️', config:'🔐', cameo:'⚗️', voiceBrief:'🔊', locShare:'📡', fieldReport:'🚨', waShare:'💬' };
 
 // هذه الأيقونات حصراً لمدير النظام، ولا يجوز أن تظهر ضمن مزايا أي قائد مهما كان نوع اشتراكه (يدوي أو باقة)
@@ -3802,6 +3791,7 @@ window.FEATURE_REGISTRY.push(
     { key: 'internalChat', label: 'القناة الداخلية',       icon: '🗨️', group: 'comms', defaultOn: true, member: true,  pub: true  },
     { key: 'notifCenter',  label: 'مركز الإشعارات',        icon: '🔔', group: 'comms', defaultOn: true, member: true,  pub: false },
     { key: 'liveAlerts',   label: 'تنبيه البلاغ العاجل',   icon: '📣', group: 'comms', defaultOn: true, member: true,  pub: false },
+    { key: 'riskPermit',   label: 'تصاريح العمل (تقييم مخاطر)', icon: '📋', group: 'tools', defaultOn: false, member: true,  pub: false },
     { key: 'memberAdd',    label: 'إضافة الأعضاء',         icon: '➕', group: 'admin', defaultOn: true, member: false, pub: false }
 );
 window.FEATURE_CATALOG = window.FEATURE_APPS.map(f => f.key).concat(window.FEATURE_REGISTRY.map(f => f.key));
@@ -4060,21 +4050,18 @@ window.openLeaderQuickRoster = (leaderId, leaderName) => {
         grid.innerHTML = '';
         empty.classList.remove('hidden');
     } else {
-        empty.classList.add('hidden');
-        const compactClass = members.length > 6 ? ' team-card-compact' : '';
-        grid.className = members.length > 6
-            ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2'
-            : 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3';
-
+                empty.classList.add('hidden');
+        grid.className = 'tm-grid';
         grid.innerHTML = members.map((member, idx) => {
-            const seqNumber = idx + 1;
+            const initial = String(member.memberName || '؟').trim().charAt(0).toUpperCase();
             return `
-            <div class="team-card${compactClass}" onclick="window.openMemberDetail('${member.id}')">
-                <div class="team-card-avatar">${seqNumber}</div>
-                <p class="text-white font-black text-base truncate">${esc(member.memberName)}</p>
-                <span class="inline-block mt-2.5 text-[11px] px-3 py-1 rounded-full font-black bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-                    👤 عضو فريق
-                </span>
+            <div class="tm-card" onclick="window.openMemberDetail('${member.id}')">
+                <div class="tm-card-av">${esc(initial)}</div>
+                <div class="tm-card-tx">
+                    <p class="tm-card-name">${esc(member.memberName)}</p>
+                    <span class="tm-card-tag">👤 عضو فريق</span>
+                </div>
+                <span class="tm-card-no">#${idx + 1}</span>
             </div>`;
         }).join('');
     }
@@ -4154,19 +4141,17 @@ window.renderTeamCompanyGrid = () => {
     if (q) list = list.filter(c => String(c.name).toLowerCase().includes(q));
     const cnt = document.getElementById('teamCompanyCount');
     if (cnt) cnt.textContent = (q ? list.length + ' / ' : '') + total + ' شركة';
-    if (list.length === 0) {
-        box.innerHTML = '<div class="col-span-full text-center opacity-40 text-xs italic p-10">لا توجد شركات</div>';
+        if (list.length === 0) {
+        box.innerHTML = '<div class="tm-none" style="grid-column:1/-1">لا توجد شركات</div>';
         return;
     }
     box.innerHTML = list.map(c => {
         const initial = String(c.name || '؟').trim().charAt(0).toUpperCase();
         return `
-        <button onclick="window.selectTeamCompany('${c.id}')"
-            class="group rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all duration-300 hover:scale-105 active:scale-95"
-            style="background:rgba(99,102,241,0.10); border:1px solid rgba(99,102,241,0.28); min-height:128px;">
-            <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white" style="background:linear-gradient(135deg,rgba(99,102,241,0.45),rgba(245,158,11,0.15));">${esc(initial)}</div>
-            <p class="text-white text-xs font-black text-center leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.name)}</p>
-            <p class="text-[10px] font-mono text-slate-400">🎖️ ${c.leaders} · 👤 ${c.members}</p>
+        <button type="button" class="tm-co" onclick="window.selectTeamCompany('${c.id}')">
+            <span class="tm-co-av">${esc(initial)}</span>
+            <span class="tm-co-name">${esc(c.name)}</span>
+            <span class="tm-co-meta"><span>🎖️ ${c.leaders}</span><span>👤 ${c.members}</span></span>
         </button>`;
     }).join('');
 };
@@ -4193,7 +4178,7 @@ window.selectTeamCompany = (companyId) => {
     const $ = id => document.getElementById(id);
     const hide = id => { $(id)?.classList.add('hidden'); $(id)?.classList.remove('flex'); };
     const show = id => { $(id)?.classList.remove('hidden'); $(id)?.classList.add('flex'); };
-    if ($('teamWinTitle')) $('teamWinTitle').innerHTML = `إدارة الفريق <br><span class="text-xl text-indigo-300 opacity-80 mt-2 block">شركة: ${esc(window._teamCompanyName)}</span>`;
+        if ($('teamWinTitle')) $('teamWinTitle').innerHTML = `إدارة الفريق <span class="tm-crumb">‹ ${esc(window._teamCompanyName)}</span>`;
     hide('teamCompanyStage'); hide('teamDetailContent');
     show('leaderSidebarCol'); show('teamDetailEmptyState');
     if ($('leaderSidebarSearch')) $('leaderSidebarSearch').value = '';
@@ -4957,7 +4942,26 @@ window.ldRestore = (delay = 0) => {
         window._subDetailReturn = b.company;                               // ✕ يرجع للشركة كما كان
     }, delay);
 };
-window.confirmCancel = () => { window.closeConfirm(); window.ldRestore(); };
+window.confirmCancel = () => { window.closeConfirm(); window.ldRestore(); window.mdRestore(); };
+
+
+
+// ===== الرجوع إلى نافذة العضو بعد تعديل أو إلغاء حذف =====
+window._mdBack = null;
+window._mdRemember = (docId) => { window._mdBack = { id: docId }; };
+window.mdRestore = (delay = 0) => {
+    const b = window._mdBack;
+    window._mdBack = null;
+    if (!b) return;
+    setTimeout(() => {
+        const m = document.getElementById('memberDetailModal');
+        if (m && !m.classList.contains('hidden')) return;                    // ما زالت مفتوحة
+        if (!(window.teamMembers || []).some(x => x.id === b.id)) return;    // العضو لم يعد موجوداً
+        window.openMemberDetail(b.id);
+    }, delay);
+};
+
+
 
 window.addEventListener('load', () => {
     // قائمة الأعضاء: عند إغلاقها نرجع لنافذة القائد
@@ -4969,7 +4973,7 @@ window.addEventListener('load', () => {
     const origConfirm = window.showConfirm;
     if (typeof origConfirm === 'function') {
         window.showConfirm = (title, msg, onConfirm) =>
-            origConfirm(title, msg, (...a) => { window._ldBack = null; return onConfirm && onConfirm(...a); });
+            origConfirm(title, msg, (...a) => { window._ldBack = null; window._mdBack = null; return onConfirm && onConfirm(...a); });
     }
 });
 // ===== سقوف الشركة: القراءة من مستند الشركة، وإن غابت تُحسب من القادة الحاليين =====
@@ -6194,7 +6198,7 @@ window.applyOSUI = () => {
     const statusDot = document.getElementById('statusDot');
     
     // قائمة بجميع الأيقونات
-    const allAppIds = ['app_erg', 'app_reps', 'app_map', 'app_subs', 'app_team', 'app_cloud', 'app_config', 'app_import', 'app_dashboard', 'app_finance', 'app_cameo'];
+    const allAppIds = ['app_erg', 'app_reps', 'app_map', 'app_subs', 'app_team', 'app_cloud', 'app_config', 'app_import', 'app_dashboard', 'app_finance', 'app_cameo', 'app_risk'];
 
     // 1. إخفاء جميع الأيقونات كإجراء أمني وافتراضي باستخدام (Style) مباشر
     allAppIds.forEach(id => {
@@ -7155,7 +7159,7 @@ window.refreshCompanyScope = async () => {
         if (!handler) return [];
         const parts = chunks.map(() => []);
         return chunks.map((chunk, idx) => onSnapshot(
-            query(collection(db, 'artifacts', appId, 'public', 'data', coll), where('parentKey', 'in', chunk)),
+        query(collection(db, 'artifacts', appId, 'public', 'data', coll), ...(coll === 'team_keys' ? [where('nsId', '==', window.myCompanyId)] : []), where('parentKey', 'in', chunk)),
             (snap) => {
                 parts[idx] = snap.docs;
                 handler({ docs: parts.flat(), docChanges: () => snap.docChanges() });
@@ -7254,8 +7258,10 @@ const filteredReports = window.userRole === 'master'
 
     // 4. مزامنة أعضاء الفريق (حسب الرتبة)
     const teamRef = collection(db, 'artifacts', appId, 'public', 'data', 'team_keys');
-    const teamQuery = (window.userRole === 'leader' || window.userRole === 'sub')
-        ? query(teamRef, where("parentKey", "in", (window._myScopeKeys || [window.activeKey]).slice(0, 30)))
+        const teamQuery = (window.userRole === 'leader' || window.userRole === 'sub')
+        ? ((window.isCompanyOwner === true && window.myCompanyId)
+            ? query(teamRef, where("nsId", "==", window.myCompanyId))
+            : query(teamRef, where("parentKey", "in", (window._myScopeKeys || [window.activeKey]).slice(0, 30))))
         : teamRef;
 
     window._teamUnsub = onSnapshot(teamQuery, window._teamHandler = (snapshot) => {
@@ -9981,6 +9987,821 @@ window.renderLauncher = () => {
 };
 
 
+
+// ===================== تقييم مخاطر · تصاريح العمل (الدفعة 1) =====================
+window.RISK_LEVELS = {
+    low:      { label: 'منخفض', color: '#10b981', rank: 0, who: 'تلقائي عند اكتمال الشروط' },
+    medium:   { label: 'متوسط', color: '#eab308', rank: 1, who: 'القائد' },
+    high:     { label: 'عالٍ',  color: '#f97316', rank: 2, who: 'مالك الشركة' },
+    critical: { label: 'حرج',   color: '#ef4444', rank: 3, who: 'المدير العام' }
+};
+window.RISK_ROLE_RANK = { member: 0, leader: 1, owner: 2, master: 3 };
+window.RISK_ROLE_LABEL = { member: 'عضو', leader: 'قائد', owner: 'مالك الشركة', master: 'المدير العام' };
+window.RISK_DEFAULT_VALIDITY_H = 12;
+window.RISK_STATUS = {
+    approved: { label: 'ساري', color: '#10b981' },
+    pending:  { label: 'بانتظار الاعتماد', color: '#eab308' },
+    rejected: { label: 'مرفوض', color: '#ef4444' },
+    expired:  { label: 'منتهٍ', color: '#64748b' }
+};
+
+// مكتبة أولية مؤقتة — ستُنقل إلى Firestore عندما نبنيها معاً
+window.RISK_WORK_TYPES = [
+    { key: 'general', label: 'عمل عام روتيني', icon: '🛠️', level: 'low', conditions: [
+        'تم إبلاغ المنفذين بخطوات العمل والأخطار المحتملة',
+        'معدات الوقاية الشخصية الأساسية متوفرة ومرتداة',
+        'منطقة العمل نظيفة ومخارج الطوارئ غير مسدودة',
+        'الأدوات والمعدات سليمة وصالحة للاستخدام',
+        'وسيلة الاتصال والإبلاغ عن الطوارئ متاحة'
+    ] },
+    { key: 'height', label: 'عمل بارتفاع', icon: '🪜', level: 'medium', conditions: [
+        'خطة العمل بارتفاع وضوابط المخاطر معتمدة',
+        'السقالات أو السلالم مفحوصة وثابتة ومؤمَّنة',
+        'الحواجز والحافات والفتحات مؤمَّنة',
+        'حزام الأمان الكامل ونقاط التثبيت مفحوصة',
+        'منع مرور الأفراد أسفل منطقة العمل',
+        'الظروف الجوية مناسبة (رياح، مطر)',
+        'المنفذون مدرَّبون ومؤهلون للعمل بارتفاع'
+    ] },
+    { key: 'lifting', label: 'عمليات الرفع', icon: '🏗️', level: 'medium', conditions: [
+        'خطة الرفع معدّة ومعتمدة للرفعات الحرجة',
+        'الرافعة وملحقاتها لها سجلات فحص سارية',
+        'الحبال والجنازير والخطافات مفحوصة قبل الاستخدام',
+        'المشغّل ومشرف الرفع والإشاري مؤهلون ومعيَّنون',
+        'الحمولة المقدّرة وثبات الأرض ومنطقة الحظر مؤكدة',
+        'لا يوجد أي شخص تحت الحمولة المعلّقة'
+    ] },
+    { key: 'excavation', label: 'أعمال الحفر', icon: '⛏️', level: 'medium', conditions: [
+        'تم التحقق من الخدمات المدفونة (كهرباء، مياه، غاز) قبل الحفر',
+        'جوانب الحفر مدعومة أو مائلة بما يمنع الانهيار',
+        'منطقة الحفر محاطة بحواجز وعلامات تحذير',
+        'مواقع الآليات والمواد بعيدة عن حواف الحفر',
+        'مدخل ومخرج آمن متوفر للعاملين'
+    ] },
+    { key: 'electrical', label: 'كهرباء وعزل LOTO', icon: '⚡', level: 'high', conditions: [
+        'العزل والقفل والتعليق (LOTO) مطبّق على مصدر الطاقة',
+        'تم التأكد من انعدام الجهد بجهاز قياس صالح',
+        'الأعمال الكهربائية يؤديها فنيون مؤهلون ومصرّح لهم فقط',
+        'الكابلات والأفياش والعدد اليدوية سليمة',
+        'التأريض وحماية التيار المتسرب متوفران',
+        'اللوحات مؤمّنة ومعرّفة ويمكن الوصول إليها',
+        'وسيلة إطفاء مناسبة للحرائق الكهربائية متوفرة'
+    ] },
+    { key: 'hot', label: 'أعمال ساخنة', icon: '🔥', level: 'high', conditions: [
+        'تصريح الأعمال الساخنة واختبار الغازات مكتملان',
+        'المواد القابلة للاشتعال أُزيلت أو حُميت من الشرر',
+        'طفايات الحريق متوفرة وفي متناول اليد',
+        'معدات اللحام والخراطيم وحماية ارتداد اللهب مفحوصة',
+        'أسطوانات الغاز مؤمّنة ومفصولة ومعرّفة',
+        'مراقب حريق معيَّن ويبقى بعد انتهاء العمل للمدة المحددة'
+    ] },
+    { key: 'confined', label: 'الأماكن المغلقة', icon: '🕳️', level: 'high', conditions: [
+        'تصريح دخول المكان المغلق والعزل مكتملان',
+        'تم فحص الجو بجهاز معايَر (أكسجين، غازات سامة، قابلة للاشتعال)',
+        'مراقب خارجي معيَّن واتصال دائم مع الداخلين',
+        'خطة الإنقاذ ومعدات الإنقاذ جاهزة',
+        'التهوية الكافية مؤمّنة',
+        'الداخلون مدرَّبون ولائقون للدخول',
+        'الإضاءة آمنة ومناسبة للمكان'
+    ] }
+];
+
+window._risk = { permits: [], unsub: null, wiz: null, memberCompany: '', validityHours: 0 };
+
+window.riskAllowed = () => {
+    const r = window.userRole;
+    if (r === 'master') return true;
+    if (r === 'leader') return window.featOn('risk');
+    if (r === 'member') return window.featOn('riskPermit');
+    return false;
+};
+
+window.riskCtx = () => {
+    const r = window.userRole;
+    if (r === 'master') return { role: 'master', uid: 'MASTER_SESSION', name: 'المدير العام', companyId: '', leaderId: '' };
+    if (r === 'leader') return {
+        role: window.isCompanyOwner === true ? 'owner' : 'leader',
+        uid: window.activeKey, name: window.myLeaderName || 'قائد',
+        companyId: window.myCompanyId || window.activeKey, leaderId: window.activeKey
+    };
+    return {
+        role: 'member', uid: window.activeKey, name: window.myMemberName || 'عضو',
+        companyId: window._risk.memberCompany || window.activeParentKey || '', leaderId: window.activeParentKey || ''
+    };
+};
+
+window.riskAuth = (level, role) => window.RISK_ROLE_RANK[role] >= window.RISK_LEVELS[level].rank;
+window.riskStatus = (p) => (p.status === 'approved' && p.expiresAt && p.expiresAt < Date.now()) ? 'expired' : p.status;
+window.riskLeft = (p) => {
+    const ms = (p.expiresAt || 0) - Date.now();
+    if (ms <= 0) return '';
+    const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h} س ${m} د` : `${m} د`;
+};
+
+window.riskTryOpen = () => {
+    if (!window.riskAllowed()) return window.showNotif('هذه الميزة غير مفعّلة في باقتك', 'error');
+    window.openWin('winRiskPermits');
+};
+
+window.riskClose = () => {
+    const el = document.getElementById('winRiskPermits');
+    if (window.userRole === 'member') {
+        el?.classList.add('hidden'); el?.classList.remove('flex');
+        window.openWin('winERG');
+    } else {
+        window.closeWin('winRiskPermits');
+    }
+};
+
+window.riskUnlisten = () => { if (window._risk.unsub) { window._risk.unsub(); window._risk.unsub = null; } };
+
+window.riskListen = () => {
+    window.riskUnlisten();
+    const c = window.riskCtx();
+    const col = collection(db, 'artifacts', appId, 'public', 'data', 'risk_permits');
+    let q, scope;
+    if (c.role === 'master')      { q = col; scope = 'كل الشركات'; }
+    else if (c.role === 'owner')  { q = query(col, where('companyId', '==', c.companyId)); scope = 'كل تصاريح شركتك'; }
+    else if (c.role === 'leader') { q = query(col, where('leaderId', '==', c.leaderId)); scope = 'تصاريح فريقك'; }
+    else                          { q = query(col, where('requesterId', '==', c.uid)); scope = 'تصاريحك'; }
+    const lbl = document.getElementById('riskScopeLabel');
+    if (lbl) lbl.textContent = scope;
+    window._risk.unsub = onSnapshot(q, snap => {
+        window._risk.permits = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        window.riskRender();
+    }, err => {
+        console.warn('risk listen', err);
+        window.showNotif('تعذر تحميل التصاريح، تحقق من الصلاحيات', 'error');
+    });
+    window.riskRender();
+};
+
+window.riskOnShow = async () => {
+    document.getElementById('riskMemberFab')?.classList.add('hidden');
+        if (window.userRole === 'member' && !window._risk.memberCompany) {
+        try {
+            const t = await auth.currentUser.getIdTokenResult();
+            window._risk.memberCompany = t.claims.companyId || '';
+        } catch (e) { console.warn('risk member company', e); }
+    }
+    window.riskListen();
+};
+
+window.riskRender = () => {
+    const ps = window._risk.permits || [];
+    const cnt = { approved: 0, pending: 0, expired: 0, rejected: 0 };
+    ps.forEach(p => { const s = window.riskStatus(p); if (cnt[s] !== undefined) cnt[s]++; });
+    const st = document.getElementById('riskStats');
+    if (st) st.innerHTML = ['approved', 'pending', 'expired', 'rejected'].map(k => {
+        const m = window.RISK_STATUS[k];
+        return `<div class="rounded-2xl p-4 text-center" style="background:${m.color}1a;border:1px solid ${m.color}40;"><p class="text-2xl font-black" style="color:${m.color}">${cnt[k]}</p><p class="text-[11px] font-black text-slate-300 mt-1">${m.label}</p></div>`;
+    }).join('');
+    const list = document.getElementById('riskList');
+    if (!list) return;
+    if (!ps.length) {
+        list.innerHTML = '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">لا توجد تصاريح بعد. اضغط «طلب تصريح جديد» للبدء.</p>';
+        return;
+    }
+    list.innerHTML = ps.map(p => {
+        const s = window.riskStatus(p), sm = window.RISK_STATUS[s] || window.RISK_STATUS.pending;
+        const lv = window.RISK_LEVELS[p.level] || window.RISK_LEVELS.low;
+        const t = window.RISK_WORK_TYPES.find(x => x.key === p.workTypeKey);
+        const left = s === 'approved' ? window.riskLeft(p) : '';
+        return `<div class="rounded-2xl p-4" style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));border:1px solid ${sm.color}55;">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}${left ? ' · ' + left : ''}</span>
+                <span class="text-slate-500 text-[10px] font-mono">${esc(p.permitNo || '')}</span>
+            </div>
+            <p class="text-white font-black text-sm">${t ? t.icon : '📋'} ${esc(p.workTypeLabel || '')}</p>
+            <p class="text-slate-400 text-xs mt-1">📍 ${esc(p.location || '—')}</p>
+            <div class="flex items-center justify-between mt-2">
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-black" style="background:${lv.color}26;color:${lv.color}">خطورة ${lv.label}</span>
+                <span class="text-slate-500 text-[10px]">${esc(p.requesterName || '')} · ${window.RISK_ROLE_LABEL[p.requesterRole] || ''}</span>
+            </div>
+        </div>`;
+    }).join('');
+};
+
+// ---------- معالج طلب التصريح ----------
+window.riskNewPermit = () => {
+    if (!window.riskAllowed()) return window.showNotif('هذه الميزة غير مفعّلة في باقتك', 'error');
+    window._risk.wiz = { step: 1, typeKey: '', location: '', task: '', desc: '', workers: '', conds: [] };
+    const m = document.getElementById('riskWizModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskWizRender();
+};
+
+window.riskWizClose = () => {
+    const m = document.getElementById('riskWizModal');
+    m?.classList.add('hidden'); m?.classList.remove('flex');
+    window._risk.wiz = null;
+};
+
+window.riskWizType = () => window.RISK_WORK_TYPES.find(t => t.key === (window._risk.wiz || {}).typeKey);
+
+window.riskWizSelect = (key) => {
+    const w = window._risk.wiz; if (!w) return;
+    const t = window.RISK_WORK_TYPES.find(x => x.key === key); if (!t) return;
+    if (w.typeKey !== key) { w.typeKey = key; w.conds = t.conditions.map(x => ({ t: x, s: '' })); }
+    window.riskWizRender();
+};
+
+window.riskWizSet = (i, s) => {
+    const w = window._risk.wiz; if (!w || !w.conds[i]) return;
+    w.conds[i].s = s;
+    window.riskWizRender();
+};
+
+window.riskWizRead = () => {
+    const w = window._risk.wiz; if (!w) return;
+    w.location = document.getElementById('riskF_loc')?.value || '';
+    w.task     = document.getElementById('riskF_task')?.value || '';
+    w.desc     = document.getElementById('riskF_desc')?.value || '';
+    w.workers  = document.getElementById('riskF_workers')?.value || '';
+};
+
+window.riskWizNext = () => {
+    const w = window._risk.wiz; if (!w) return;
+    if (w.step === 1 && !w.typeKey) return window.showNotif('اختر نوع العمل أولاً', 'error');
+    if (w.step === 2) {
+        window.riskWizRead();
+        if (!w.location.trim() || !w.task.trim()) return window.showNotif('الموقع والمهمة مطلوبان', 'error');
+    }
+    if (w.step === 3) {
+        if (w.conds.some(c => !c.s)) return window.showNotif('أجب عن كل الشروط قبل المتابعة', 'error');
+        if (w.conds.some(c => c.s === 'no')) return window.showNotif('لا يمكن المتابعة قبل استيفاء الشروط غير المتوفرة', 'error');
+    }
+    w.step++;
+    window.riskWizRender();
+};
+
+window.riskWizBack = () => {
+    const w = window._risk.wiz; if (!w) return;
+    if (w.step === 2) window.riskWizRead();
+    if (w.step > 1) w.step--;
+    window.riskWizRender();
+};
+
+window.riskWizRender = () => {
+    const w = window._risk.wiz; if (!w) return;
+    const names = ['نوع العمل', 'المعلومات', 'الشروط', 'المراجعة'];
+    document.getElementById('riskWizSteps').innerHTML = names.map((n, i) => {
+        const on = (i + 1) <= w.step;
+        return `<div class="flex-1 text-center"><div class="h-1.5 rounded-full mb-1" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.1)'}"></div><p class="text-[10px] font-black" style="color:${on ? '#fdba74' : '#64748b'}">${n}</p></div>`;
+    }).join('');
+    const body = document.getElementById('riskWizBody');
+    const nav = document.getElementById('riskWizNav');
+    const t = window.riskWizType();
+    const btn = (label, fn, primary, disabled) => `<button onclick="${fn}" class="flex-1 py-3 rounded-xl font-black text-sm ${primary ? 'text-black' : 'text-slate-200'}" style="${primary ? 'background:linear-gradient(135deg,#f97316,#fbbf24);' : 'background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);'}${disabled ? 'opacity:.4;' : ''}">${label}</button>`;
+    const inputCls = 'erg-input lux-field-input text-right w-full mb-3';
+
+    if (w.step === 1) {
+        body.innerHTML = window.RISK_WORK_TYPES.map(x => {
+            const lv = window.RISK_LEVELS[x.level], sel = x.key === w.typeKey;
+            return `<button onclick="window.riskWizSelect('${x.key}')" class="w-full flex items-center justify-between rounded-xl px-4 py-3 mb-2" style="background:${sel ? 'rgba(249,115,22,0.18)' : 'rgba(255,255,255,0.04)'};border:1px solid ${sel ? '#f97316' : 'rgba(255,255,255,0.08)'};"><span class="px-2 py-0.5 rounded-full text-[10px] font-black" style="background:${lv.color}26;color:${lv.color}">${lv.label}</span><span class="text-white text-sm font-black">${x.icon} ${esc(x.label)}</span></button>`;
+        }).join('') + (t ? `<p class="text-slate-400 text-xs mt-2">الجهة المخوّلة بالتصريح لهذا النوع: <b class="text-orange-300">${window.RISK_LEVELS[t.level].who}</b></p>` : '');
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true, !t);
+    } else if (w.step === 2) {
+        body.innerHTML = `
+            <p class="text-slate-400 text-xs font-black mb-1">📍 الموقع الدقيق (مبنى، طابق، ورشة، نقطة محددة) *</p>
+            <input id="riskF_loc" class="${inputCls}" value="${esc(w.location)}">
+            <p class="text-slate-400 text-xs font-black mb-1">🧰 القسم أو المهمة *</p>
+            <input id="riskF_task" class="${inputCls}" value="${esc(w.task)}">
+            <p class="text-slate-400 text-xs font-black mb-1">📝 وصف موجز للعمل</p>
+            <textarea id="riskF_desc" rows="3" class="${inputCls}">${esc(w.desc)}</textarea>
+            <p class="text-slate-400 text-xs font-black mb-1">👷 أسماء المنفذين</p>
+            <input id="riskF_workers" class="${inputCls}" value="${esc(w.workers)}">`;
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true) + btn('→ السابق', 'window.riskWizBack()', false);
+    } else if (w.step === 3) {
+        const done = w.conds.filter(c => c.s).length, bad = w.conds.filter(c => c.s === 'no').length;
+        const opt = (i, s, label, col, cur) => `<button onclick="window.riskWizSet(${i},'${s}')" class="px-3 py-1.5 rounded-lg text-xs font-black" style="background:${cur === s ? col : 'rgba(255,255,255,0.06)'};color:${cur === s ? '#000' : '#94a3b8'};border:1px solid ${cur === s ? col : 'rgba(255,255,255,0.1)'};">${label}</button>`;
+        body.innerHTML = `<p class="text-slate-300 text-xs font-black mb-2">${done} من ${w.conds.length} شروط مُجاب عنها</p>
+            <div class="h-1.5 rounded-full mb-3" style="background:rgba(255,255,255,0.08)"><div class="h-1.5 rounded-full" style="width:${Math.round(done / w.conds.length * 100)}%;background:#10b981"></div></div>`
+            + w.conds.map((c, i) => `<div class="rounded-xl p-3 mb-2" style="background:${c.s === 'no' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.04)'};border:1px solid ${c.s === 'no' ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.08)'};">
+                <p class="text-white text-xs font-bold mb-2 leading-relaxed">${i + 1}. ${esc(c.t)}</p>
+                <div class="flex gap-2 justify-end">${opt(i, 'ok', '✅ متوفر', '#10b981', c.s)}${opt(i, 'no', '❌ غير متوفر', '#ef4444', c.s)}${opt(i, 'na', '— لا ينطبق', '#94a3b8', c.s)}</div></div>`).join('')
+            + (bad ? `<p class="text-rose-400 text-xs font-black mt-2">⛔ لا يمكن إصدار التصريح أو إرساله قبل استيفاء ${bad} شرط غير متوفر.</p>` : '');
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true, done < w.conds.length || bad > 0) + btn('→ السابق', 'window.riskWizBack()', false);
+    } else {
+        const c = window.riskCtx(), lv = window.RISK_LEVELS[t.level], self = window.riskAuth(t.level, c.role);
+        const row = (k, v) => `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>`;
+        body.innerHTML = row('نوع العمل', `${t.icon} ${esc(t.label)}`) + row('مستوى الخطورة', `<span style="color:${lv.color}">${lv.label}</span>`)
+            + row('الموقع', esc(w.location)) + row('المهمة', esc(w.task)) + (w.desc.trim() ? row('الوصف', esc(w.desc)) : '') + (w.workers.trim() ? row('المنفذون', esc(w.workers)) : '')
+            + row('الشروط', `${w.conds.filter(x => x.s === 'ok').length} متوفر · ${w.conds.filter(x => x.s === 'na').length} لا ينطبق`)
+            + `<p class="text-xs font-black mt-3" style="color:${self ? '#34d399' : '#fbbf24'}">${self ? '✅ صلاحيتك تسمح بإصدار هذا التصريح مباشرة.' : '📨 سيُرسل للاعتماد من: ' + lv.who}</p>`;
+        nav.innerHTML = btn(self ? '✅ إصدار التصريح' : '📨 إرسال للاعتماد', 'window.riskSubmit()', true) + btn('→ السابق', 'window.riskWizBack()', false);
+    }
+};
+
+window.riskSubmit = async () => {
+    const w = window._risk.wiz, t = window.riskWizType();
+    if (!w || !t) return;
+    if (w.conds.some(c => c.s !== 'ok' && c.s !== 'na')) return window.showNotif('توجد شروط غير مستوفاة', 'error');
+    const c = window.riskCtx(), self = window.riskAuth(t.level, c.role), now = Date.now();
+    const hrs = Number(window._risk.validityHours) || window.RISK_DEFAULT_VALIDITY_H;
+    const data = {
+        permitNo: 'PTW-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: c.companyId, leaderId: c.leaderId,
+        requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        workTypeKey: t.key, workTypeLabel: t.label, level: t.level,
+        needRole: t.level === 'low' ? 'auto' : (t.level === 'medium' ? 'leader' : (t.level === 'high' ? 'owner' : 'master')),
+        location: w.location.trim(), task: w.task.trim(), description: w.desc.trim(), workers: w.workers.trim(),
+        conditions: w.conds.map(x => ({ text: x.t, status: x.s })),
+        createdAt: now
+    };
+    if (self) {
+        data.status = 'approved'; data.issuedAt = now; data.approvedAt = now; data.expiresAt = now + hrs * 3600000;
+        data.approvedBy = t.level === 'low' ? 'auto' : c.name; data.approvedByRole = t.level === 'low' ? 'auto' : c.role;
+    } else {
+        data.status = 'pending';
+    }
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_permits'), data);
+        window.riskWizClose();
+        window.showNotif(self ? '✅ صدر التصريح ' + data.permitNo : '📨 أُرسل الطلب للاعتماد', 'success');
+    } catch (e) {
+        console.error('risk submit', e);
+        window.showNotif('تعذر حفظ التصريح، تحقق من الصلاحيات', 'error');
+    }
+};
+
+// زر عضو عائم (الأعضاء يدخلون مباشرة لشاشة العمل دون سطح مكتب)
+window.updateRiskFab = () => {
+    const f = document.getElementById('riskMemberFab');
+    if (!f) return;
+    const w = document.getElementById('winRiskPermits');
+    const open = w && !w.classList.contains('hidden') && getComputedStyle(w).display !== 'none';
+    const on = window.userRole === 'member' && !!window.activeKey && !open && window.featOn('riskPermit');
+    f.classList.toggle('hidden', !on);
+};
+setInterval(() => { try { window.updateRiskFab(); } catch (e) {} }, 1500);
+
+// مراقبة ظهور/إخفاء النافذة من أي مسار (أيقونة، قائمة دائرية، رجوع)
+(() => {
+    const el = document.getElementById('winRiskPermits');
+    if (!el) return;
+    let on = false;
+    new MutationObserver(() => {
+        const shown = !el.classList.contains('hidden') && getComputedStyle(el).display !== 'none';
+        if (shown && !on) { on = true; window.riskOnShow(); }
+        else if (!shown && on) { on = false; window.riskUnlisten(); }
+    }).observe(el, { attributes: true, attributeFilter: ['class'] });
+})();
+
+
+
+
+
+
+// ===================== تقييم مخاطر — الدفعة 2 =====================
+// ملاحظة: تعريفات هذه الكتلة تحل محل التعريفات المماثلة في كتلة الدفعة 1 (الأحدث يغلب).
+window._risk.filter = 'all';
+window._risk.overrideAllowed = false;
+window._risk.unsubs = [];
+
+window.riskFmt = (t) => t ? new Date(t).toLocaleString('ar-EG-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+
+// العضو لا يقرأ وثيقة قائده بقواعدك، فلا نحتاج companyId له (التصاريح تُربط بالقائد)
+window.riskCtx = () => {
+    const r = window.userRole;
+    if (r === 'master') return { role: 'master', uid: 'MASTER_SESSION', name: 'المدير العام', companyId: '', leaderId: '' };
+    if (r === 'leader') return {
+        role: window.isCompanyOwner === true ? 'owner' : 'leader',
+        uid: window.activeKey, name: window.myLeaderName || 'قائد',
+        companyId: window.myCompanyId || window.activeKey, leaderId: window.activeKey
+    };
+    return { role: 'member', uid: window.activeKey, name: window.myMemberName || 'عضو', companyId: '', leaderId: window.activeParentKey || '' };
+};
+
+window.riskAuthOverride = (level, role) => role === 'master' || (role === 'owner' && level !== 'critical');
+
+// إعدادات الشركة (مدة الصلاحية + التجاوز) من risk_ctx/{leaderId}
+window.riskLoadCtx = async () => {
+    const c = window.riskCtx();
+    window._risk.validityHours = 0;
+    window._risk.overrideAllowed = (c.role === 'master');
+    if (c.role === 'master' || !c.leaderId) return;
+    try {
+        const s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', c.leaderId));
+        if (s.exists()) {
+            const d = s.data();
+            window._risk.validityHours = Number(d.validityHours) || 0;
+            window._risk.overrideAllowed = d.overrideAllowed === true;
+        }
+    } catch (e) { console.warn('risk ctx', e); }
+};
+
+window.riskUnlisten = () => {
+    (window._risk.unsubs || []).forEach(u => { try { u(); } catch (e) {} });
+    window._risk.unsubs = [];
+    if (window._risk.unsub) { try { window._risk.unsub(); } catch (e) {} window._risk.unsub = null; }
+};
+
+window.riskListen = () => {
+    window.riskUnlisten();
+    const c = window.riskCtx();
+    const col = collection(db, 'artifacts', appId, 'public', 'data', 'risk_permits');
+    const bucket = {};
+    const apply = (key, snap) => {
+        bucket[key] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const seen = {};
+        window._risk.permits = [].concat(...Object.values(bucket))
+            .filter(p => seen[p.id] ? false : (seen[p.id] = true))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        window.riskRender();
+    };
+    const err = e => { console.warn('risk listen', e); window.showNotif('تعذر تحميل التصاريح، تحقق من الصلاحيات', 'error'); };
+    let scope;
+    if (c.role === 'master') {
+        scope = 'كل الشركات';
+        window._risk.unsubs.push(onSnapshot(col, s => apply('all', s), err));
+    } else if (c.role === 'owner') {
+        scope = 'كل تصاريح شركتك';
+        const keys = Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 40);
+        keys.forEach(k => window._risk.unsubs.push(onSnapshot(query(col, where('leaderId', '==', k)), s => apply(k, s), err)));
+    } else if (c.role === 'leader') {
+        scope = 'تصاريح فريقك';
+        window._risk.unsubs.push(onSnapshot(query(col, where('leaderId', '==', c.leaderId)), s => apply('l', s), err));
+    } else {
+        scope = 'تصاريحك';
+        window._risk.unsubs.push(onSnapshot(query(col, where('requesterId', '==', c.uid)), s => apply('m', s), err));
+    }
+    const lbl = document.getElementById('riskScopeLabel');
+    if (lbl) lbl.textContent = scope;
+    window.riskRender();
+};
+
+window.riskOnShow = async () => {
+    document.getElementById('riskMemberFab')?.classList.add('hidden');
+    await window.riskLoadCtx();
+    window.riskListen();
+};
+
+window.riskCanApprove = (p) => {
+    if (!p || p.status !== 'pending') return false;
+    const c = window.riskCtx();
+    if (c.role === 'master') return true;
+    if (p.requesterId === c.uid) return false;
+    if (p.needRole === 'leader') return c.role === 'leader' || c.role === 'owner';
+    if (p.needRole === 'owner') return c.role === 'owner';
+    return false;
+};
+
+window.riskSetFilter = (f) => { window._risk.filter = f; window.riskRender(); };
+
+window.riskRender = () => {
+    const all = window._risk.permits || [];
+    const c = window.riskCtx();
+    const cnt = { approved: 0, pending: 0, expired: 0, rejected: 0 };
+    all.forEach(p => { const s = window.riskStatus(p); if (cnt[s] !== undefined) cnt[s]++; });
+    const st = document.getElementById('riskStats');
+    if (st) st.innerHTML = ['approved', 'pending', 'expired', 'rejected'].map(k => {
+        const m = window.RISK_STATUS[k];
+        return `<div class="rounded-2xl p-4 text-center" style="background:${m.color}1a;border:1px solid ${m.color}40;"><p class="text-2xl font-black" style="color:${m.color}">${cnt[k]}</p><p class="text-[11px] font-black text-slate-300 mt-1">${m.label}</p></div>`;
+    }).join('');
+
+    const mine = all.filter(p => window.riskCanApprove(p)).length;
+    const f = window._risk.filter;
+    const chips = [['all', 'الكل'], ['mine', 'بانتظار اعتمادي' + (mine ? ' (' + mine + ')' : '')], ['active', 'سارية'], ['history', 'منتهية / مرفوضة']];
+    const fb = document.getElementById('riskFilters');
+    if (fb) fb.innerHTML = chips.map(([k, l]) => `<button onclick="window.riskSetFilter('${k}')" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${f === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${f === k ? '#000' : '#94a3b8'};border:1px solid ${f === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('');
+    document.getElementById('riskSettingsBtn')?.classList.toggle('hidden', c.role !== 'owner');
+
+    const ps = all.filter(p => {
+        const s = window.riskStatus(p);
+        if (f === 'mine') return window.riskCanApprove(p);
+        if (f === 'active') return s === 'approved';
+        if (f === 'history') return s === 'expired' || s === 'rejected';
+        return true;
+    });
+    const list = document.getElementById('riskList');
+    if (!list) return;
+    if (!ps.length) {
+        list.innerHTML = '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">لا توجد تصاريح في هذا العرض.</p>';
+        return;
+    }
+    list.innerHTML = ps.map(p => {
+        const s = window.riskStatus(p), sm = window.RISK_STATUS[s] || window.RISK_STATUS.pending;
+        const lv = window.RISK_LEVELS[p.level] || window.RISK_LEVELS.low;
+        const t = window.RISK_WORK_TYPES.find(x => x.key === p.workTypeKey);
+        const left = s === 'approved' ? window.riskLeft(p) : '';
+        const need = window.riskCanApprove(p);
+        return `<div onclick="window.riskOpenPermit('${p.id}')" class="rounded-2xl p-4 cursor-pointer transition-all hover:scale-[1.01]" style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));border:1px solid ${need ? '#f97316' : sm.color + '55'};">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}${left ? ' · ' + left : ''}</span>
+                <span class="text-slate-500 text-[10px] font-mono">${esc(p.permitNo || '')}</span>
+            </div>
+            <p class="text-white font-black text-sm">${t ? t.icon : '📋'} ${esc(p.workTypeLabel || '')}${p.overrideRequested ? ' <span class="text-rose-400 text-[10px]">⚠️ تجاوز</span>' : ''}</p>
+            <p class="text-slate-400 text-xs mt-1">📍 ${esc(p.location || '—')}</p>
+            <div class="flex items-center justify-between mt-2">
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-black" style="background:${lv.color}26;color:${lv.color}">خطورة ${lv.label}</span>
+                <span class="text-slate-500 text-[10px]">${esc(p.requesterName || '')} · ${window.RISK_ROLE_LABEL[p.requesterRole] || ''}</span>
+            </div>
+            ${need ? '<p class="text-orange-300 text-[11px] font-black mt-2">⏳ بانتظار اعتمادك</p>' : ''}
+        </div>`;
+    }).join('');
+};
+
+// ---------- معالج الطلب (مع التجاوز الاستثنائي) ----------
+window.riskWizSet = (i, s) => {
+    const w = window._risk.wiz; if (!w || !w.conds[i]) return;
+    w.conds[i].s = s;
+    if (!w.conds.some(c => c.s === 'no')) { w.isOverride = false; w.override = ''; }
+    window.riskWizRender();
+};
+
+window.riskWizOverride = () => {
+    const w = window._risk.wiz; if (!w) return;
+    if (w.conds.some(c => !c.s)) return window.showNotif('أجب عن كل الشروط أولاً', 'error');
+    if ((w.override || '').trim().length < 10) return window.showNotif('اكتب سبب التجاوز (10 أحرف على الأقل)', 'error');
+    w.isOverride = true; w.step = 4;
+    window.riskWizRender();
+};
+
+window.riskWizRender = () => {
+    const w = window._risk.wiz; if (!w) return;
+    const c = window.riskCtx();
+    const names = ['نوع العمل', 'المعلومات', 'الشروط', 'المراجعة'];
+    document.getElementById('riskWizSteps').innerHTML = names.map((n, i) => {
+        const on = (i + 1) <= w.step;
+        return `<div class="flex-1 text-center"><div class="h-1.5 rounded-full mb-1" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.1)'}"></div><p class="text-[10px] font-black" style="color:${on ? '#fdba74' : '#64748b'}">${n}</p></div>`;
+    }).join('');
+    const body = document.getElementById('riskWizBody');
+    const nav = document.getElementById('riskWizNav');
+    const t = window.riskWizType();
+    const btn = (label, fn, primary, disabled) => `<button onclick="${fn}" class="flex-1 py-3 rounded-xl font-black text-sm ${primary ? 'text-black' : 'text-slate-200'}" style="${primary ? 'background:linear-gradient(135deg,#f97316,#fbbf24);' : 'background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);'}${disabled ? 'opacity:.4;' : ''}">${label}</button>`;
+    const inputCls = 'erg-input lux-field-input text-right w-full mb-3';
+
+    if (w.step === 1) {
+        body.innerHTML = window.RISK_WORK_TYPES.map(x => {
+            const lv = window.RISK_LEVELS[x.level], sel = x.key === w.typeKey;
+            return `<button onclick="window.riskWizSelect('${x.key}')" class="w-full flex items-center justify-between rounded-xl px-4 py-3 mb-2" style="background:${sel ? 'rgba(249,115,22,0.18)' : 'rgba(255,255,255,0.04)'};border:1px solid ${sel ? '#f97316' : 'rgba(255,255,255,0.08)'};"><span class="px-2 py-0.5 rounded-full text-[10px] font-black" style="background:${lv.color}26;color:${lv.color}">${lv.label}</span><span class="text-white text-sm font-black">${x.icon} ${esc(x.label)}</span></button>`;
+        }).join('') + (t ? `<p class="text-slate-400 text-xs mt-2">الجهة المخوّلة بالتصريح لهذا النوع: <b class="text-orange-300">${window.RISK_LEVELS[t.level].who}</b></p>` : '');
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true, !t);
+    } else if (w.step === 2) {
+        body.innerHTML = `
+            <p class="text-slate-400 text-xs font-black mb-1">📍 الموقع الدقيق (مبنى، طابق، ورشة، نقطة محددة) *</p>
+            <input id="riskF_loc" class="${inputCls}" value="${esc(w.location)}">
+            <p class="text-slate-400 text-xs font-black mb-1">🧰 القسم أو المهمة *</p>
+            <input id="riskF_task" class="${inputCls}" value="${esc(w.task)}">
+            <p class="text-slate-400 text-xs font-black mb-1">📝 وصف موجز للعمل</p>
+            <textarea id="riskF_desc" rows="3" class="${inputCls}">${esc(w.desc)}</textarea>
+            <p class="text-slate-400 text-xs font-black mb-1">👷 أسماء المنفذين</p>
+            <input id="riskF_workers" class="${inputCls}" value="${esc(w.workers)}">`;
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true) + btn('→ السابق', 'window.riskWizBack()', false);
+    } else if (w.step === 3) {
+        const done = w.conds.filter(x => x.s).length, bad = w.conds.filter(x => x.s === 'no').length;
+        const opt = (i, s, label, col, cur) => `<button onclick="window.riskWizSet(${i},'${s}')" class="px-3 py-1.5 rounded-lg text-xs font-black" style="background:${cur === s ? col : 'rgba(255,255,255,0.06)'};color:${cur === s ? '#000' : '#94a3b8'};border:1px solid ${cur === s ? col : 'rgba(255,255,255,0.1)'};">${label}</button>`;
+        const canOvr = bad > 0 && (window._risk.overrideAllowed || c.role === 'master');
+        const ovrBy = (t.level === 'critical') ? 'المدير العام' : 'مالك الشركة';
+        body.innerHTML = `<p class="text-slate-300 text-xs font-black mb-2">${done} من ${w.conds.length} شروط مُجاب عنها</p>
+            <div class="h-1.5 rounded-full mb-3" style="background:rgba(255,255,255,0.08)"><div class="h-1.5 rounded-full" style="width:${Math.round(done / w.conds.length * 100)}%;background:#10b981"></div></div>`
+            + w.conds.map((x, i) => `<div class="rounded-xl p-3 mb-2" style="background:${x.s === 'no' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.04)'};border:1px solid ${x.s === 'no' ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.08)'};">
+                <p class="text-white text-xs font-bold mb-2 leading-relaxed">${i + 1}. ${esc(x.t)}</p>
+                <div class="flex gap-2 justify-end">${opt(i, 'ok', '✅ متوفر', '#10b981', x.s)}${opt(i, 'no', '❌ غير متوفر', '#ef4444', x.s)}${opt(i, 'na', '— لا ينطبق', '#94a3b8', x.s)}</div></div>`).join('')
+            + (bad ? `<p class="text-rose-400 text-xs font-black mt-2">⛔ لا يمكن إصدار التصريح قبل استيفاء ${bad} شرط غير متوفر.</p>` : '')
+            + (canOvr ? `<div class="rounded-xl p-3 mt-3" style="border:1px dashed #ef4444;background:rgba(239,68,68,0.07);">
+                <p class="text-rose-300 text-xs font-black mb-2">⚠️ التجاوز الاستثنائي مفعّل لشركتك. اكتب سبباً واضحاً؛ يُسجَّل باسمك ويراجعه ${ovrBy}.</p>
+                <textarea rows="2" class="erg-input lux-field-input text-right w-full mb-2" oninput="window._risk.wiz.override=this.value">${esc(w.override || '')}</textarea>
+                <button onclick="window.riskWizOverride()" class="w-full py-2.5 rounded-xl font-black text-xs text-rose-200" style="background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);">طلب تجاوز استثنائي</button></div>` : '');
+        nav.innerHTML = btn('التالي ←', 'window.riskWizNext()', true, done < w.conds.length || bad > 0) + btn('→ السابق', 'window.riskWizBack()', false);
+    } else {
+        const lv = window.RISK_LEVELS[t.level];
+        const ov = w.isOverride === true;
+        const self = ov ? window.riskAuthOverride(t.level, c.role) : window.riskAuth(t.level, c.role);
+        const approver = ov ? ((t.level === 'critical') ? 'المدير العام' : 'مالك الشركة') : lv.who;
+        const row = (k, v) => `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>`;
+        const failed = w.conds.filter(x => x.s === 'no').map(x => '❌ ' + esc(x.t)).join('<br>');
+        body.innerHTML = row('نوع العمل', `${t.icon} ${esc(t.label)}`) + row('مستوى الخطورة', `<span style="color:${lv.color}">${lv.label}</span>`)
+            + row('الموقع', esc(w.location)) + row('المهمة', esc(w.task)) + (w.desc.trim() ? row('الوصف', esc(w.desc)) : '') + (w.workers.trim() ? row('المنفذون', esc(w.workers)) : '')
+            + row('الشروط', `${w.conds.filter(x => x.s === 'ok').length} متوفر · ${w.conds.filter(x => x.s === 'na').length} لا ينطبق${ov ? ' · <span style="color:#f87171">' + w.conds.filter(x => x.s === 'no').length + ' غير متوفر</span>' : ''}`)
+            + (ov ? `<div class="rounded-xl p-3 mt-3" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);"><p class="text-rose-300 text-xs font-black mb-1">⚠️ طلب تجاوز استثنائي</p><p class="text-slate-300 text-[11px] leading-relaxed">${failed}</p><p class="text-slate-400 text-[11px] mt-2">السبب: ${esc(w.override || '')}</p></div>` : '')
+            + `<p class="text-xs font-black mt-3" style="color:${self ? '#34d399' : '#fbbf24'}">${self ? '✅ صلاحيتك تسمح بإصدار هذا التصريح مباشرة.' : '📨 سيُرسل للاعتماد من: ' + approver}</p>`;
+        nav.innerHTML = btn(self ? '✅ إصدار التصريح' : (ov ? '📨 إرسال طلب التجاوز' : '📨 إرسال للاعتماد'), 'window.riskSubmit()', true) + btn('→ السابق', 'window.riskWizBack()', false);
+    }
+};
+
+window.riskSubmit = async () => {
+    const w = window._risk.wiz, t = window.riskWizType();
+    if (!w || !t) return;
+    const ov = w.isOverride === true;
+    const bad = w.conds.filter(x => x.s === 'no').length;
+    if (w.conds.some(x => !x.s)) return window.showNotif('توجد شروط بلا إجابة', 'error');
+    if (bad && !ov) return window.showNotif('توجد شروط غير مستوفاة', 'error');
+    if (ov && (w.override || '').trim().length < 10) return window.showNotif('سبب التجاوز مطلوب', 'error');
+    const c = window.riskCtx(), now = Date.now();
+    const self = ov ? window.riskAuthOverride(t.level, c.role) : window.riskAuth(t.level, c.role);
+    const hrs = Number(window._risk.validityHours) || window.RISK_DEFAULT_VALIDITY_H;
+    const need = ov ? (t.level === 'critical' ? 'master' : 'owner')
+        : (t.level === 'low' ? 'auto' : (t.level === 'medium' ? 'leader' : (t.level === 'high' ? 'owner' : 'master')));
+    const data = {
+        permitNo: 'PTW-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: c.companyId, leaderId: c.leaderId,
+        requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        workTypeKey: t.key, workTypeLabel: t.label, level: t.level, needRole: need,
+        location: w.location.trim(), task: w.task.trim(), description: w.desc.trim(), workers: w.workers.trim(),
+        conditions: w.conds.map(x => ({ text: x.t, status: x.s })),
+        validityHours: hrs, createdAt: now
+    };
+    if (ov) { data.overrideRequested = true; data.overrideReason = w.override.trim(); }
+    if (self) {
+        data.status = 'approved'; data.issuedAt = now; data.approvedAt = now; data.expiresAt = now + hrs * 3600000;
+        data.approvedBy = (t.level === 'low' && !ov) ? 'auto' : c.name; data.approvedByRole = (t.level === 'low' && !ov) ? 'auto' : c.role;
+    } else {
+        data.status = 'pending';
+    }
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_permits'), data);
+        window.riskWizClose();
+        window.showNotif(self ? '✅ صدر التصريح ' + data.permitNo : '📨 أُرسل الطلب للاعتماد', 'success');
+    } catch (e) {
+        console.error('risk submit', e);
+        window.showNotif('تعذر حفظ التصريح، تحقق من الصلاحيات', 'error');
+    }
+};
+
+// ---------- الاعتماد والرفض ----------
+window.riskApprove = async (id) => {
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!window.riskCanApprove(p)) return window.showNotif('لا تملك صلاحية اعتماد هذا التصريح', 'error');
+    const c = window.riskCtx(), now = Date.now();
+    const hrs = Number(p.validityHours) || Number(window._risk.validityHours) || window.RISK_DEFAULT_VALIDITY_H;
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_permits', id), {
+            status: 'approved', approvedAt: now, issuedAt: now, expiresAt: now + hrs * 3600000,
+            approvedBy: c.name, approvedByRole: c.role
+        });
+        window.showNotif('✅ تم اعتماد التصريح ' + (p.permitNo || ''), 'success');
+        window.riskCloseDetail();
+    } catch (e) {
+        console.error('risk approve', e);
+        window.showNotif('تعذر الاعتماد، تحقق من الصلاحيات', 'error');
+    }
+};
+
+window.riskReject = async (id) => {
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!window.riskCanApprove(p)) return window.showNotif('لا تملك صلاحية رفض هذا التصريح', 'error');
+    const reason = (document.getElementById('riskRejectReason')?.value || '').trim();
+    if (reason.length < 3) return window.showNotif('سبب الرفض مطلوب', 'error');
+    const c = window.riskCtx();
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_permits', id), {
+            status: 'rejected', rejectReason: reason, rejectedAt: Date.now(),
+            approvedBy: c.name, approvedByRole: c.role
+        });
+        window.showNotif('تم رفض التصريح', 'success');
+        window.riskCloseDetail();
+    } catch (e) {
+        console.error('risk reject', e);
+        window.showNotif('تعذر الرفض، تحقق من الصلاحيات', 'error');
+    }
+};
+
+// ---------- QR + بطاقة التصريح ----------
+window.riskMakeQR = (text, size, cb) => {
+    const run = () => {
+        try {
+            const holder = document.createElement('div');
+            holder.style.cssText = 'position:fixed;left:-9999px;top:0;';
+            document.body.appendChild(holder);
+            new QRCode(holder, { text, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+            setTimeout(() => {
+                const url = holder.querySelector('canvas')?.toDataURL() || holder.querySelector('img')?.src || '';
+                holder.remove();
+                cb(url);
+            }, 80);
+        } catch (e) { console.warn('qr', e); cb(''); }
+    };
+    if (window.QRCode) return run();
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    s.onload = run; s.onerror = () => cb('');
+    document.head.appendChild(s);
+};
+
+window.riskQrText = (p) => `${p.permitNo}|${p.workTypeLabel}|${p.status}|${p.expiresAt ? new Date(p.expiresAt).toISOString() : ''}`;
+
+window.riskOpenPermit = (id) => {
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!p) return;
+    window._risk.detailId = id;
+    const s = window.riskStatus(p), sm = window.RISK_STATUS[s] || window.RISK_STATUS.pending;
+    const lv = window.RISK_LEVELS[p.level] || window.RISK_LEVELS.low;
+    const can = window.riskCanApprove(p);
+    const row = (k, v) => `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>`;
+    const conds = (p.conditions || []).map(x => `<p class="text-[11px] leading-relaxed py-0.5" style="color:${x.status === 'no' ? '#f87171' : '#cbd5e1'}">${x.status === 'ok' ? '✅' : (x.status === 'no' ? '❌' : '➖')} ${esc(x.text)}</p>`).join('');
+    document.getElementById('riskDetailBody').innerHTML = `
+        <div class="text-center mb-3">
+            <p class="text-slate-400 text-[11px] font-mono">${esc(p.permitNo || '')}</p>
+            <span class="inline-block mt-1 text-xs px-3 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}${s === 'approved' && window.riskLeft(p) ? ' · باقٍ ' + window.riskLeft(p) : ''}</span>
+            ${(s === 'approved' || s === 'expired') ? '<div id="riskQrBox" class="mt-3 flex justify-center"></div>' : ''}
+        </div>
+        ${row('نوع العمل', esc(p.workTypeLabel || ''))}${row('مستوى الخطورة', `<span style="color:${lv.color}">${lv.label}</span>`)}
+        ${row('الموقع', esc(p.location || '—'))}${row('المهمة', esc(p.task || '—'))}
+        ${p.description ? row('الوصف', esc(p.description)) : ''}${p.workers ? row('المنفذون', esc(p.workers)) : ''}
+        ${row('مقدّم الطلب', esc(p.requesterName || '') + ' · ' + (window.RISK_ROLE_LABEL[p.requesterRole] || ''))}
+        ${row('تاريخ الطلب', window.riskFmt(p.createdAt))}
+        ${p.issuedAt ? row('أُصدر', window.riskFmt(p.issuedAt)) : ''}${p.expiresAt ? row('ينتهي', window.riskFmt(p.expiresAt)) : ''}
+        ${p.approvedBy ? row(s === 'rejected' ? 'رفضه' : 'اعتمده', esc(p.approvedBy === 'auto' ? 'تلقائي (اكتمال الشروط)' : p.approvedBy) + (p.approvedByRole && p.approvedByRole !== 'auto' ? ' · ' + (window.RISK_ROLE_LABEL[p.approvedByRole] || '') : '')) : ''}
+        ${p.rejectReason ? row('سبب الرفض', esc(p.rejectReason)) : ''}
+        ${p.overrideRequested ? `<div class="rounded-xl p-3 mt-3" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);"><p class="text-rose-300 text-xs font-black mb-1">⚠️ تجاوز استثنائي</p><p class="text-slate-300 text-[11px]">${esc(p.overrideReason || '')}</p></div>` : ''}
+        <p class="text-slate-500 text-[11px] font-black mt-4 mb-1">الشروط</p>${conds}
+        ${can ? `<div class="mt-4"><textarea id="riskRejectReason" rows="2" placeholder="سبب الرفض (مطلوب عند الرفض)" class="erg-input lux-field-input text-right w-full mb-2"></textarea>
+            <div class="flex gap-2"><button onclick="window.riskApprove('${p.id}')" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#10b981,#34d399);">✅ اعتماد وإصدار</button>
+            <button onclick="window.riskReject('${p.id}')" class="flex-1 py-3 rounded-xl font-black text-sm text-rose-200" style="background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);">❌ رفض</button></div></div>` : ''}
+        ${(s === 'approved' || s === 'expired') ? `<button onclick="window.riskPdf('${p.id}')" class="w-full mt-4 py-3 rounded-xl font-black text-sm text-cyan-200" style="background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.35);">📄 تصدير / طباعة PDF</button>` : ''}`;
+    const m = document.getElementById('riskDetailModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+    if (s === 'approved' || s === 'expired') window.riskMakeQR(window.riskQrText(p), 132, (url) => {
+        const box = document.getElementById('riskQrBox');
+        if (box && url && window._risk.detailId === id) box.innerHTML = `<img src="${url}" width="132" height="132" style="background:#fff;padding:6px;border-radius:10px;${s === 'expired' ? 'opacity:.35;' : ''}">`;
+    });
+};
+
+window.riskCloseDetail = () => {
+    const m = document.getElementById('riskDetailModal');
+    m?.classList.add('hidden'); m?.classList.remove('flex');
+    window._risk.detailId = null;
+};
+
+window.riskPdf = (id) => {
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!p) return;
+    const lv = window.RISK_LEVELS[p.level] || window.RISK_LEVELS.low;
+    const s = window.riskStatus(p), sm = window.RISK_STATUS[s] || window.RISK_STATUS.pending;
+    window.riskMakeQR(window.riskQrText(p), 150, (qr) => {
+        const w = window.open('', '_blank');
+        if (!w) return window.showNotif('اسمح بالنوافذ المنبثقة لتصدير PDF', 'error');
+        const tr = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
+        const conds = (p.conditions || []).map((x, i) => `<tr><td>${i + 1}</td><td>${esc(x.text)}</td><td style="text-align:center">${x.status === 'ok' ? '✔' : (x.status === 'no' ? '✘' : '—')}</td></tr>`).join('');
+        w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(p.permitNo || 'تصريح')}</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;margin:24px;color:#111}h1{margin:0 0 4px;font-size:22px}.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #f97316;padding-bottom:10px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px}th,td{border:1px solid #bbb;padding:6px 8px;text-align:right}th{background:#f3f4f6;width:28%}
+.st{display:inline-block;padding:3px 12px;border-radius:12px;background:${sm.color};color:#fff;font-weight:bold;font-size:13px}.sig{display:flex;gap:16px;margin-top:28px}.sig div{flex:1;border-top:1px solid #333;padding-top:6px;text-align:center;font-size:12px}
+.ov{border:2px solid #dc2626;padding:8px;margin-bottom:14px;font-size:13px}</style></head><body>
+<div class="hd"><div><h1>تصريح عمل — Permit to Work</h1><div>رقم التصريح: <b>${esc(p.permitNo || '')}</b> &nbsp; <span class="st">${sm.label}</span></div></div>${qr ? `<img src="${qr}" width="110" height="110">` : ''}</div>
+<table>${tr('نوع العمل', esc(p.workTypeLabel || ''))}${tr('مستوى الخطورة', lv.label)}${tr('الموقع', esc(p.location || '—'))}${tr('القسم / المهمة', esc(p.task || '—'))}${tr('الوصف', esc(p.description || '—'))}${tr('المنفذون', esc(p.workers || '—'))}
+${tr('مقدّم الطلب', esc(p.requesterName || '') + ' (' + (window.RISK_ROLE_LABEL[p.requesterRole] || '') + ')')}${tr('تاريخ الطلب', window.riskFmt(p.createdAt))}${tr('تاريخ الإصدار', window.riskFmt(p.issuedAt))}${tr('ينتهي', window.riskFmt(p.expiresAt))}
+${tr('المعتمِد', esc(p.approvedBy === 'auto' ? 'تلقائي (اكتمال الشروط)' : (p.approvedBy || '—')))}</table>
+${p.overrideRequested ? `<div class="ov"><b>تجاوز استثنائي:</b> ${esc(p.overrideReason || '')}</div>` : ''}
+<table><tr><th style="width:36px">#</th><th>الشرط</th><th style="width:60px">الحالة</th></tr>${conds}</table>
+<div class="sig"><div>المنفِّذ / مقدّم الطلب</div><div>المعتمِد</div><div>مسؤول السلامة</div></div>
+</body></html>`);
+        w.document.close();
+        setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);
+    });
+};
+
+// ---------- إعدادات الشركة (مدة الصلاحية للمالك) ----------
+window.riskOpenSettings = async () => {
+    await window.riskLoadCtx();
+    const inp = document.getElementById('riskSet_hours');
+    if (inp) inp.value = window._risk.validityHours || window.RISK_DEFAULT_VALIDITY_H;
+    const m = document.getElementById('riskSettingsModal');
+    m?.classList.remove('hidden'); m?.classList.add('flex');
+};
+window.riskCloseSettings = () => {
+    const m = document.getElementById('riskSettingsModal');
+    m?.classList.add('hidden'); m?.classList.remove('flex');
+};
+window.riskSaveSettings = async () => {
+    const c = window.riskCtx();
+    if (c.role !== 'owner') return;
+    const h = Number(document.getElementById('riskSet_hours')?.value);
+    if (!h || h < 1 || h > 168) return window.showNotif('المدة بين ساعة و168 ساعة', 'error');
+    const keys = Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 400);
+    try {
+        const batch = writeBatch(db);
+        keys.forEach(k => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', k), { validityHours: h, updatedAt: Date.now() }, { merge: true }));
+        await batch.commit();
+        window._risk.validityHours = h;
+        window.showNotif('✅ حُفظت مدة صلاحية التصاريح لقادة الشركة (' + keys.length + ')', 'success');
+        window.riskCloseSettings();
+    } catch (e) {
+        console.error('risk settings', e);
+        window.showNotif('تعذر الحفظ، تحقق من الصلاحيات', 'error');
+    }
+};
+
+// ---------- المدير: تفعيل/تعطيل التجاوز الاستثنائي لشركة (من companyDetailModal) ----------
+window.riskToggleOverride = async () => {
+    if (window.userRole !== 'master') return;
+    const c = (window._companiesIndex || {})[window._activeCompanyId];
+    if (!c || !c.leaders || !c.leaders.length) return;
+    try {
+        const cur = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', c.leaders[0].id));
+        const next = !(cur.exists() && cur.data().overrideAllowed === true);
+        const batch = writeBatch(db);
+        c.leaders.forEach(l => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', l.id), { overrideAllowed: next, updatedAt: Date.now() }, { merge: true }));
+        await batch.commit();
+        window.showNotif(next ? `🔓 فُعّل التجاوز الاستثنائي لشركة ${c.name}` : `🔒 عُطّل التجاوز الاستثنائي لشركة ${c.name}`, 'success');
+    } catch (e) {
+        console.error('risk override toggle', e);
+        window.showNotif('تعذر التبديل، تحقق من القواعد', 'error');
+    }
+};
 
 
 
@@ -14427,6 +15248,215 @@ body.light-mode #subDetailModal.ld-overlay{--ld-bg:#ffffff;--ld-s:#f4f6ff;--ld-s
 @media(max-width:380px){
   #subDetailModal .ld-tiles{grid-template-columns:1fr}
 }
+
+
+
+
+
+/* ===== نوافذ العضو (تفاصيل / إضافة وتعديل / صلاحيات) ===== */
+.m-overlay{--m-bg:#0c1328;--m-s:#121a36;--m-s2:#19234a;--m-line:rgba(129,140,248,.18);--m-text:#e8ecff;--m-mute:#8b95b8;--m-a:#38bdf8;--m-a2:#818cf8;--m-bad:#fb7185;--m-warn:#fbbf24;--m-ok:#34d399;direction:rtl}
+body.light-mode .m-overlay{--m-bg:#ffffff;--m-s:#f4f6ff;--m-s2:#e8edff;--m-line:rgba(79,70,229,.16);--m-text:#0f172a;--m-mute:#64748b;--m-a:#0284c7;--m-a2:#4f46e5}
+.m-overlay .m-box{width:min(820px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;background:var(--m-bg);border:1px solid var(--m-line);border-radius:24px;box-shadow:0 30px 80px rgba(0,0,0,.55);overflow:hidden;color:var(--m-text)}
+.m-overlay .m-box.m-md{width:min(560px,100%)}
+.m-overlay .m-box.m-sm{width:min(500px,100%)}
+
+.m-overlay .m-hero{display:flex;align-items:center;gap:14px;padding:18px 22px;border-bottom:1px solid var(--m-line);background:radial-gradient(ellipse at 100% 0%,rgba(56,189,248,.16),transparent 55%),linear-gradient(270deg,rgba(129,140,248,.10),transparent);flex:none}
+.m-overlay .m-av{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;font-size:24px;font-weight:900;color:#04101f;background:linear-gradient(135deg,var(--m-a),var(--m-a2));box-shadow:0 10px 26px rgba(56,189,248,.26);flex:none}
+.m-overlay .m-ht{flex:1;min-width:0}
+.m-overlay .m-name{margin:0;font-size:18px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-overlay .m-sub{margin:4px 0 0;font-size:12px;font-weight:700;color:var(--m-mute)}
+.m-overlay .m-x{width:38px;height:38px;border-radius:12px;border:1px solid var(--m-line);background:var(--m-s);color:var(--m-mute);cursor:pointer;flex:none}
+.m-overlay .m-x:hover{color:var(--m-bad);border-color:var(--m-bad)}
+
+/* الجسم */
+.m-overlay .m-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:20px;padding:20px 22px;overflow-y:auto;min-height:0;background:var(--m-s)}
+.m-overlay .m-h{margin:0 0 10px;font-size:11px;font-weight:900;color:var(--m-a2);display:flex;align-items:center;gap:8px}
+.m-overlay .m-h::after{content:'';flex:1;height:1px;background:var(--m-line)}
+.m-overlay .m-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.m-overlay .m-tile{display:flex;align-items:center;gap:10px;padding:12px;border-radius:14px;background:var(--m-bg);border:1px solid var(--m-line);min-width:0}
+.m-overlay .m-tile.m-wide{grid-column:1/-1}
+.m-overlay .m-ti{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-size:16px;background:var(--c-soft,var(--m-s2));flex:none}
+.m-overlay .m-tt{flex:1;min-width:0}
+.m-overlay .m-tile small{display:block;font-size:10px;font-weight:800;color:var(--m-mute)}
+.m-overlay .m-tile b{display:block;margin-top:2px;font-size:13px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m-overlay .m-ltr{direction:ltr;text-align:right;font-family:monospace}
+
+/* الإجراءات */
+.m-overlay .m-group{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.m-overlay .m-act{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border-radius:14px;border:1px solid var(--m-line);background:var(--m-bg);color:var(--m-text);text-align:right;cursor:pointer;transition:.15s}
+.m-overlay .m-act:hover{border-color:var(--c);transform:translateX(-2px)}
+.m-overlay .m-ai{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:17px;background:var(--c-soft);flex:none}
+.m-overlay .m-at{flex:1;min-width:0}
+.m-overlay .m-at b{display:block;font-size:12.5px;font-weight:900;color:var(--m-text)}
+.m-overlay .m-at small{display:block;margin-top:2px;font-size:10.5px;font-weight:600;color:var(--m-mute);line-height:1.4}
+.m-overlay .m-ar{color:var(--m-mute);font-size:18px}
+.m-overlay .m-act.m-del{border-style:dashed;border-color:rgba(251,113,133,.45);background:transparent}
+.m-overlay .m-act.m-del .m-at b{color:var(--m-bad)}
+
+/* النماذج */
+.m-overlay .m-form{display:flex;flex-direction:column;gap:14px;padding:20px 22px;background:var(--m-s)}
+.m-overlay .m-scroll{overflow-y:auto;min-height:0}
+.m-overlay .m-f{display:flex;flex-direction:column;gap:6px;min-width:0}
+.m-overlay .m-f>label{font-size:11px;font-weight:900;color:var(--m-mute)}
+.m-overlay .m-in{width:100%;min-height:46px;padding:0 14px;border-radius:12px;background:var(--m-bg)!important;border:1px solid var(--m-line);color:var(--m-text);font-size:13px;font-weight:700;text-align:right;outline:none;transition:.15s}
+.m-overlay .m-in:focus{border-color:var(--m-a);box-shadow:0 0 0 3px rgba(56,189,248,.16)}
+.m-overlay .m-code{display:flex;gap:8px}
+.m-overlay .m-code .m-in{font-family:monospace;text-transform:uppercase;text-align:left;direction:ltr}
+.m-overlay .m-gen{min-width:46px;border-radius:12px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.1);color:var(--m-warn);font-size:16px;cursor:pointer}
+.m-overlay .m-hint{margin:0;padding:10px 12px;border-radius:12px;background:rgba(139,155,255,.08);border:1px solid rgba(139,155,255,.22);color:var(--m-mute);font-size:11px;font-weight:700;line-height:1.7}
+.m-overlay .m-empty{margin:0;padding:18px 0;text-align:center;font-size:12px;font-weight:700;color:var(--m-mute)}
+.m-overlay .m-foot{display:flex;gap:10px;padding:14px 22px;border-top:1px solid var(--m-line);background:var(--m-bg);flex:none}
+.m-overlay .m-btn{flex:1;min-height:46px;border-radius:13px;border:1px solid var(--m-line);background:var(--m-s2);color:var(--m-text);font-size:13px;font-weight:900;cursor:pointer;transition:.15s}
+.m-overlay .m-btn:hover{filter:brightness(1.12)}
+.m-overlay .m-btn.hidden{display:none!important}
+.m-overlay .m-btn-ok{border:0;color:#03180f;background:linear-gradient(135deg,#34d399,#10b981)}
+.m-overlay .m-btn-warn{border:0;color:#2a1600;background:linear-gradient(135deg,#fbbf24,#f59e0b)}
+
+/* قائمة الصلاحيات (مفاتيح) */
+.m-overlay .m-flist{display:flex;flex-direction:column;gap:8px}
+.m-overlay .m-fc{position:relative;display:block;cursor:pointer}
+.m-overlay .m-fc input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.m-overlay .m-fc-b{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--m-bg);border:1px solid var(--m-line);font-size:12px;font-weight:800;transition:.15s}
+.m-overlay .m-fc:hover .m-fc-b{border-color:var(--m-a)}
+.m-overlay .m-fc-i{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--m-s2);font-size:16px;flex:none}
+.m-overlay .m-fc-l{flex:1}
+.m-overlay .m-sw{width:36px;height:20px;border-radius:999px;background:var(--m-s2);border:1px solid var(--m-line);position:relative;flex:none;transition:.15s}
+.m-overlay .m-sw::after{content:'';position:absolute;top:2px;inset-inline-start:2px;width:14px;height:14px;border-radius:50%;background:var(--m-mute);transition:.15s}
+.m-overlay .m-fc input:checked+.m-fc-b{border-color:rgba(56,189,248,.5);background:linear-gradient(270deg,rgba(56,189,248,.12),transparent)}
+.m-overlay .m-fc input:checked+.m-fc-b .m-sw{background:var(--m-a);border-color:var(--m-a)}
+.m-overlay .m-fc input:checked+.m-fc-b .m-sw::after{background:#04101f;inset-inline-start:calc(100% - 16px)}
+
+@media(max-width:720px){
+  .m-overlay{padding:0!important;align-items:flex-end!important}
+  .m-overlay .m-box,.m-overlay .m-box.m-md,.m-overlay .m-box.m-sm{width:100%;max-height:94dvh;border-radius:22px 22px 0 0}
+  .m-overlay .m-hero{padding:14px 16px}
+  .m-overlay .m-two{grid-template-columns:1fr;padding:16px;gap:16px}
+  .m-overlay .m-form{padding:16px}
+  .m-overlay .m-foot{padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+}
+@media(max-width:380px){
+  .m-overlay .m-tiles{grid-template-columns:1fr}
+}
+
+
+
+
+
+/* ===== شاشة إدارة الفريق ===== */
+#winTeam.app-window{--tm-side:#0b1124;--tm-s:#111a33;--tm-s2:#172245;--tm-line:rgba(129,140,248,.14);--tm-text:#e8ecff;--tm-mute:#8b95b8;--tm-a:#38bdf8;--tm-a2:#818cf8;--tm-ok:#34d399;--tm-warn:#fbbf24;--tm-bad:#fb7185;
+  background:radial-gradient(ellipse at 90% 0%,rgba(56,189,248,.14) 0%,transparent 45%),radial-gradient(ellipse at 10% 100%,rgba(129,140,248,.16) 0%,transparent 50%),linear-gradient(160deg,#070b16 0%,#0a1024 50%,#060914 100%)!important}
+body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#eef2ff;--tm-line:rgba(79,70,229,.14);--tm-text:#0f172a;--tm-mute:#64748b;--tm-a:#0284c7;--tm-a2:#4f46e5;background:#f3f5fb!important}
+/* ألوان البطاقات داخل النوافذ المنبثقة (قائمة الأعضاء ...) */
+.m-overlay{--tm-s:var(--m-s);--tm-s2:var(--m-s2);--tm-line:var(--m-line);--tm-text:var(--m-text);--tm-mute:var(--m-mute);--tm-a:var(--m-a);--tm-a2:var(--m-a2)}
+
+#winTeam .tm-shell{width:100%;height:100%;display:flex;flex-direction:column}
+#winTeam .tm-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;border-bottom:1px solid var(--tm-line);background:linear-gradient(270deg,rgba(56,189,248,.10),transparent);flex:none}
+#winTeam .tm-top-l{display:flex;align-items:center;gap:14px;min-width:0}
+#winTeam .tm-top-r{display:flex;gap:8px;flex:none}
+#winTeam .tm-top-ico{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;font-size:22px;background:linear-gradient(135deg,var(--tm-a),var(--tm-a2));box-shadow:0 8px 22px rgba(56,189,248,.24);flex:none}
+#winTeam .tm-top-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#winTeam .tm-title{margin:0;color:var(--tm-text);font-size:17px;font-weight:900}
+#winTeam .tm-crumb{margin-inline-start:6px;color:var(--tm-a);font-size:13px;font-weight:800}
+#winTeam .tm-sub{margin:3px 0 0;color:var(--tm-mute);font-size:10px;font-family:monospace;letter-spacing:.16em;text-transform:uppercase}
+#winTeam .tm-ibtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--tm-line);background:var(--tm-s);color:var(--tm-mute);font-size:15px;cursor:pointer;transition:.15s}
+#winTeam .tm-ibtn:hover{color:var(--tm-ok);border-color:var(--tm-ok)}
+#winTeam .tm-ibtn-x:hover{color:var(--tm-bad);border-color:var(--tm-bad)}
+
+#winTeam .tm-body{display:flex;flex:1;min-height:0;overflow:hidden}
+#winTeam .tm-side{width:290px;flex:none;gap:12px;padding:16px;overflow-y:auto;background:var(--tm-side);border-inline-end:1px solid var(--tm-line)}
+#winTeam .tm-back{padding:10px 12px;border-radius:14px;background:rgba(56,189,248,.10);border:1px solid rgba(56,189,248,.30);flex:none}
+#winTeam .tm-back button{color:var(--tm-a);font-size:11px;font-weight:900;cursor:pointer;background:none;border:0}
+#winTeam .tm-back span{color:var(--tm-text);font-size:11px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#winTeam .tm-st{margin:0;color:var(--tm-a2);font-size:11px;font-weight:900}
+#winTeam .tm-leaders{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+#winTeam .tm-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:14px;padding:16px 20px;overflow:hidden}
+#winTeam .tm-stage,#winTeam .tm-detail,#winTeam .tm-empty{min-height:0}
+#winTeam .tm-stage{gap:12px}
+#winTeam .tm-detail{gap:14px}
+#winTeam .tm-empty{align-items:center;justify-content:center;gap:12px;color:var(--tm-mute);font-size:13px;font-weight:800;text-align:center}
+#winTeam .tm-empty-ico{font-size:46px;opacity:.7}
+#winTeam .tm-scroll{flex:1;min-height:0;overflow-y:auto;padding:2px 4px 16px}
+#winTeam .tm-panel{flex:1;min-height:0;overflow-y:auto;border-radius:18px;border:1px solid var(--tm-line);background:rgba(255,255,255,.015);padding:14px}
+
+/* إحصائيات */
+#winTeam .tm-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;flex:none}
+#winTeam .tm-kpi{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:16px;background:var(--tm-s);border:1px solid var(--tm-line);border-inline-start:4px solid var(--k)}
+#winTeam .tm-kpi-i{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--k-soft);flex:none}
+#winTeam .tm-kpi b{display:block;color:var(--tm-text);font-size:24px;font-weight:900;line-height:1}
+#winTeam .tm-kpi small{display:block;margin-top:4px;color:var(--tm-mute);font-size:11px;font-weight:800}
+
+/* شريط الأدوات */
+#winTeam .tm-tools{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:wrap}
+.tm-in{flex:1;min-width:150px;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--tm-line);background:var(--tm-s)!important;color:var(--tm-text);font-size:12.5px;font-weight:700;text-align:right;outline:none;transition:.15s}
+.tm-in:focus{border-color:var(--tm-a);box-shadow:0 0 0 3px rgba(56,189,248,.16)}
+.tm-sel{min-height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--tm-line);background:var(--tm-s)!important;color:var(--tm-text);font-size:12px;font-weight:800;outline:none}
+.tm-sel option{background:var(--tm-s);color:var(--tm-text)}
+.tm-btn{min-height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--tm-line);background:var(--tm-s);color:var(--tm-text);font-size:12px;font-weight:900;cursor:pointer;transition:.15s;white-space:nowrap}
+.tm-btn:hover{border-color:var(--tm-a)}
+.tm-btn-main{border:0;color:#04101f;background:linear-gradient(135deg,var(--tm-a),var(--tm-a2))}
+.tm-btn-ico{width:44px;padding:0;display:grid;place-items:center}
+.tm-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.30);color:var(--tm-a);font-size:11px;font-weight:900;white-space:nowrap}
+.tm-chip.hidden{display:none!important}
+.tm-chip-warn{background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.35);color:#fbbf24}
+.tm-chip-bad{background:rgba(251,113,133,.12);border-color:rgba(251,113,133,.35);color:#fb7185}
+
+/* الشبكات والبطاقات (تُستخدم أيضاً في نافذة قائمة الأعضاء) */
+.tm-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));align-content:start}
+.tm-none{padding:24px;text-align:center;color:var(--tm-mute);font-size:12px;font-weight:700}
+.tm-card{position:relative;display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;border:1px solid var(--tm-line);background:var(--tm-s);cursor:pointer;transition:.15s}
+.tm-card:hover{border-color:rgba(56,189,248,.5);transform:translateY(-2px)}
+.tm-card-av{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:18px;font-weight:900;color:#04101f;background:linear-gradient(135deg,var(--tm-a),var(--tm-a2));flex:none}
+.tm-card-tx{flex:1;min-width:0}
+.tm-card-name{margin:0;color:var(--tm-text);font-size:13.5px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-card-tag{display:inline-block;margin-top:5px;padding:2px 9px;border-radius:999px;background:rgba(129,140,248,.14);color:var(--tm-a2);font-size:10px;font-weight:900}
+.tm-card-no{color:var(--tm-mute);font-size:11px;font-weight:900;font-family:monospace}
+
+.tm-co{display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:18px;border:1px solid var(--tm-line);background:var(--tm-s);cursor:pointer;transition:.18s}
+.tm-co:hover{border-color:rgba(56,189,248,.5);transform:translateY(-2px)}
+.tm-co-av{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;font-size:20px;font-weight:900;color:#04101f;background:linear-gradient(135deg,var(--tm-a),var(--tm-a2))}
+.tm-co-name{text-align:center;color:var(--tm-text);font-size:12.5px;font-weight:900;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tm-co-meta{display:flex;gap:8px}
+.tm-co-meta span{padding:3px 9px;border-radius:999px;background:var(--tm-s2);color:var(--tm-mute);font-size:10.5px;font-weight:800}
+
+.tm-lead{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;border:1px solid var(--tm-line);background:var(--tm-s);text-align:right;cursor:pointer;transition:.15s}
+.tm-lead:hover{border-color:var(--tm-a)}
+.tm-lead.is-active{border-color:rgba(56,189,248,.55);background:linear-gradient(270deg,rgba(56,189,248,.14),var(--tm-s))}
+.tm-lead-av{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:900;color:var(--tm-text);background:var(--c-soft);border:1px solid var(--c);flex:none}
+.tm-lead-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.tm-lead-name{color:var(--tm-text);font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-bar{display:block;height:6px;border-radius:999px;background:var(--tm-s2);overflow:hidden}
+.tm-bar i{display:block;height:100%;border-radius:inherit}
+.tm-lead-n{color:var(--tm-mute);font-size:10.5px;font-weight:900;font-family:monospace;flex:none}
+
+/* نافذة الأعضاء المنبثقة + تنظيف المعلّقين */
+.m-overlay .m-box.m-lg{width:min(980px,100%)}
+.m-overlay .m-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 22px;border-bottom:1px solid var(--m-line);background:var(--m-bg);flex:none}
+.m-overlay .m-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.m-overlay .m-chk{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:var(--m-mute);cursor:pointer}
+.m-overlay .m-cb{width:18px!important;height:18px!important;min-height:0!important;accent-color:#fb7185;flex:none}
+.m-overlay .m-btn-bad{flex:none;padding:0 16px;border:0;color:#fff;background:linear-gradient(135deg,#fb7185,#e11d48)}
+.m-overlay .m-orph{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;background:var(--m-bg);border:1px solid var(--m-line)}
+.m-overlay .m-orph-tx{flex:1;min-width:0}
+.m-overlay .m-orph-tx b{display:block;font-size:12.5px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-overlay .m-orph-tx small{display:block;margin-top:2px;color:var(--m-mute);font-size:10.5px;font-family:monospace;direction:ltr;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-overlay .m-orph-del{width:34px;height:34px;border-radius:10px;border:1px solid rgba(251,113,133,.4);background:rgba(251,113,133,.1);color:var(--m-bad);cursor:pointer;flex:none}
+
+@media(max-width:820px){
+  #winTeam .tm-top{padding:12px 14px}
+  #winTeam .tm-body{flex-direction:column}
+  #winTeam .tm-side{width:100%;max-height:42%;border-inline-end:0;border-bottom:1px solid var(--tm-line);padding:12px}
+  #winTeam .tm-main{padding:12px 14px}
+  #winTeam .tm-kpis{gap:8px}
+  #winTeam .tm-kpi{padding:10px;gap:8px}
+  #winTeam .tm-kpi-i{display:none}
+  #winTeam .tm-kpi b{font-size:20px}
+  #winTeam .tm-tools .tm-in{flex:1 1 100%;order:5}
+  .m-overlay .m-bar{padding:10px 16px}
+}
+
+
+
+
 /* تركيز واضح وأنيق على حقول شاشة الدخول */
 #lockScreen input:focus, #trialFields input:focus {
     border-color: rgba(59,130,246,0.55) !important;
@@ -15693,6 +16723,17 @@ body.light-mode #subDetailModal.ld-overlay{--ld-bg:#ffffff;--ld-s:#f4f6ff;--ld-s
             <span class="text-white text-xs font-black text-center">توافق التخزين-CAMEO</span>
         </button>
 
+
+
+        <!-- تقييم مخاطر -->
+        <button id="app_risk" onclick="window.riskTryOpen()"
+            class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
+            style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.28);height:140px;">
+            <div class="w-12 h-12 rounded-[var(--radius-sm)] flex items-center justify-center group-hover:scale-110 transition-transform" style="background:rgba(249,115,22,0.2);">
+                <span class="text-2xl">📋</span>
+            </div>
+            <span class="text-white text-xs font-black text-center">تقييم مخاطر</span>
+        </button>
         <!-- الأرشيف الرقمي -->
         <button id="app_cloud" onclick="window.openWin('winCloud')"
             class="group col-span-1 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 transition-all duration-300 hover:scale-105 active:scale-95"
@@ -16780,6 +17821,73 @@ body.light-mode #subDetailModal.ld-overlay{--ld-bg:#ffffff;--ld-s:#f4f6ff;--ld-s
 
 
 
+
+<!-- ===== تقييم مخاطر · تصاريح العمل — الدفعة 1 ===== -->
+<div id="winRiskPermits" class="app-window bg-[#080b12] text-right" style="padding:0;">
+    <div class="w-full h-full flex flex-col">
+        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(249,115,22,0.16),rgba(249,115,22,0.03) 65%,transparent);border-bottom:1px solid rgba(249,115,22,0.2);">
+            <button onclick="window.riskClose()" class="text-slate-300 text-sm font-black px-4 py-2 rounded-xl" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);">↩ رجوع</button>
+            <div class="text-right">
+                <p class="text-white font-black text-lg">تقييم مخاطر · تصاريح العمل</p>
+                <p class="text-orange-400/70 text-[11px] font-mono uppercase tracking-widest">Risk Assessment &amp; Permit to Work</p>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5">
+            <div id="riskStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
+            <div class="flex items-center justify-between mb-3 gap-3">
+                <button onclick="window.riskNewPermit()" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ طلب تصريح جديد</button>
+                <p id="riskScopeLabel" class="text-slate-500 text-xs font-black"></p>
+            </div>
+            <div id="riskList" class="grid gap-3 md:grid-cols-2"></div>
+        </div>
+    </div>
+</div>
+
+<div id="riskWizModal" class="hidden fixed inset-0 z-[10050] items-center justify-center p-4" style="background:rgba(4,6,12,0.82);backdrop-filter:blur(6px);" onclick="window.riskWizClose()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.3);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskWizClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📋 طلب تصريح عمل</p>
+        </div>
+        <div id="riskWizSteps" class="flex gap-1 mb-4"></div>
+        <div id="riskWizBody"></div>
+        <div id="riskWizNav" class="flex gap-2 mt-5"></div>
+    </div>
+</div>
+
+<button id="riskMemberFab" onclick="window.riskTryOpen()" class="hidden fixed z-[10001] bottom-24 right-4 px-4 py-3 rounded-2xl font-black text-xs text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);box-shadow:0 8px 24px rgba(249,115,22,0.35);">📋 تصاريح العمل</button>
+
+
+
+
+
+
+<!-- ===== تقييم مخاطر — الدفعة 2: نافذة تفاصيل التصريح ونافذة إعدادات الشركة ===== -->
+<div id="riskDetailModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskCloseDetail()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.3);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskCloseDetail()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📋 بطاقة التصريح</p>
+        </div>
+        <div id="riskDetailBody"></div>
+    </div>
+</div>
+
+<div id="riskSettingsModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskCloseSettings()">
+    <div class="w-full max-w-sm rounded-[24px] p-5 text-right" style="background:#0c111c;border:1px solid rgba(249,115,22,0.3);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-4">
+            <button onclick="window.riskCloseSettings()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">⚙️ إعدادات تصاريح الشركة</p>
+        </div>
+        <p class="text-slate-400 text-xs font-black mb-1">مدة صلاحية التصريح (بالساعات، من 1 إلى 168)</p>
+        <input type="number" id="riskSet_hours" min="1" max="168" class="erg-input lux-field-input text-right w-full mb-4">
+        <button onclick="window.riskSaveSettings()" class="w-full py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">حفظ</button>
+        <p class="text-slate-500 text-[11px] mt-3 leading-relaxed">تُطبَّق على كل قادة الشركة الحاليين وأعضائهم. إن أضفت قائداً جديداً لاحقاً فاحفظ الإعداد مرة أخرى ليشمله.</p>
+    </div>
+</div>
+
+
+
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
 
@@ -17197,281 +18305,255 @@ body.light-mode #subDetailModal.ld-overlay{--ld-bg:#ffffff;--ld-s:#f4f6ff;--ld-s
     </div>
 </div>
 
-<div id="winTeam" class="app-window bg-[#080b12] text-right" style="padding:0;">
-    <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(99,102,241,0.14),rgba(99,102,241,0.03) 65%,transparent); border-bottom:1px solid rgba(99,102,241,0.18); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 4px 24px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(99,102,241,0.1);">
-            <div class="absolute top-0 right-0 left-0 h-[2px]" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.55),rgba(99,102,241,0.55),transparent);"></div>
-            <div class="flex items-center gap-4">
-                <div class="w-11 h-11 rounded-2xl flex items-center justify-center text-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.26),rgba(245,158,11,0.08) 70%,rgba(99,102,241,0.05)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 4px 18px rgba(99,102,241,0.2), 0 0 24px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.1);">👥</div>
-                <div>
-                    <div class="flex items-center gap-2.5 justify-end flex-wrap">
-                        <p id="teamWinTitle" class="text-white font-black text-sm uppercase tracking-wider">إدارة الفريق</p>
-                        <span id="teamMembersCount" class="text-xs bg-indigo-500/25 text-indigo-300 px-3 py-1 rounded-full font-black border border-indigo-400/30">0 عضو</span>
-                        <span id="teamExecLeadersBadge" class="hidden items-center gap-1 text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full font-black border border-amber-400/30">
-                            <span id="exec_stat_leaders">0</span> قائد
-                        </span>
-                    </div>
-                    <p class="text-indigo-400/50 text-[10px] font-mono uppercase tracking-widest mt-0.5">Team Management</p>
+<div id="winTeam" class="app-window text-right" style="padding:0;">
+  <div class="tm-shell">
+
+    <header class="tm-top">
+        <div class="tm-top-l">
+            <div class="tm-top-ico">👥</div>
+            <div>
+                <div class="tm-top-row">
+                    <p id="teamWinTitle" class="tm-title">إدارة الفريق</p>
+                    <span id="teamMembersCount" class="tm-chip">0 عضو</span>
+                    <span id="teamExecLeadersBadge" class="hidden tm-chip tm-chip-warn"><span id="exec_stat_leaders">0</span> قائد</span>
+                    <button type="button" id="exec_orphan_badge" class="hidden tm-chip tm-chip-bad" style="cursor:pointer" onclick="window.openOrphanCleanupModal()" title="أعضاء غير مرتبطين بقائد">🧹 <span id="exec_orphan_count">0</span> معلّق</button>
                 </div>
+                <p class="tm-sub">Team Management</p>
             </div>
-            <button onclick="window.promptSetMyLogoutCode()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-emerald-500/20 text-white/40 hover:text-emerald-400 transition-all text-sm flex items-center justify-center border border-white/10" title="تعيين/تغيير كود الخروج">🔐</button>
-            <button onclick="window.closeTeamWin()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
         </div>
-        
-        <!-- نافذة تنظيف الأعضاء المعلّقين -->
-        <div id="orphanCleanupModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeOrphanCleanupModal()">
-        <div class="w-full max-w-2xl rounded-2xl border border-rose-400/25 p-4 relative" style="background:linear-gradient(160deg,#2a1414,#1a0e0e); box-shadow:0 20px 60px rgba(0,0,0,0.5); max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
-            <div class="flex items-center justify-between mb-3">
-                <button onclick="window.closeOrphanCleanupModal()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-400 transition-all text-sm flex items-center justify-center border border-white/10">✕</button>
-                <p class="text-rose-300 text-xs font-black uppercase tracking-widest">⚠️ تنظيف الأعضاء المعلّقين</p>
-            </div>
-            <div class="rounded-xl p-3 mb-3 text-center" style="background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2);">
-                <p class="text-rose-300 text-xs font-bold">هؤلاء أعضاء غير مرتبطين بأي قائد فعلي حاليًا بالنظام. راجعهم بعناية قبل الحذف — هذا الإجراء نهائي ولا يمكن التراجع عنه.</p>
-            </div>
-            <div class="flex items-center justify-between mb-2">
-                <button onclick="window.deleteSelectedOrphans()" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition-all">🗑️ حذف المحدد</button>
-                <label class="flex items-center gap-2 text-xs text-slate-300 font-bold">
-                    <input type="checkbox" id="orphanSelectAll" onchange="window.toggleAllOrphans(this.checked)">
-                    تحديد الكل
-                </label>
-            </div>
-            <div id="orphanCleanupList" class="flex flex-col gap-2"></div>
+        <div class="tm-top-r">
+            <button type="button" class="tm-ibtn" onclick="window.promptSetMyLogoutCode()" title="تعيين/تغيير كود الخروج">🔐</button>
+            <button type="button" class="tm-ibtn tm-ibtn-x" onclick="window.closeTeamWin()">✕</button>
         </div>
-        </div>
+    </header>
 
-        <div class="flex flex-1 overflow-hidden">
-            <!-- عمود شبكة القادة (للمدير فقط) -->
-            <div id="leaderSidebarCol" class="hidden w-full sm:w-72 shrink-0 flex-col gap-4 p-5 overflow-y-auto custom-scrollbar" style="background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01)); border-left:1px solid rgba(245,158,11,0.15); box-shadow:inset -1px 0 0 rgba(255,255,255,0.03);">
-                <div id="teamCompanyBackBar" class="hidden items-center justify-between gap-2 px-3 py-2 rounded-2xl border border-indigo-400/30" style="background:rgba(99,102,241,0.12);">
-                    <button onclick="window.backToTeamCompanies()" class="text-[11px] font-black text-indigo-300 hover:text-white transition-all shrink-0">→ كل الشركات</button>
-                    <span id="teamCompanyBackName" class="text-[11px] font-black text-white truncate">🏢</span>
+    <!-- نافذة تنظيف الأعضاء المعلّقين -->
+    <div id="orphanCleanupModal" class="hidden fixed inset-0 z-[6000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area m-overlay" onclick="window.closeOrphanCleanupModal()">
+        <div class="m-box m-md" onclick="event.stopPropagation()">
+            <header class="m-hero">
+                <div class="m-av" style="background:linear-gradient(135deg,#fb7185,#e11d48);color:#fff">🧹</div>
+                <div class="m-ht">
+                    <p class="m-name">تنظيف الأعضاء المعلّقين</p>
+                    <p class="m-sub">أعضاء غير مرتبطين بقائد فعلي</p>
                 </div>
-                <input type="text" id="leaderSidebarSearch" oninput="window.renderLeaderSidebar()" placeholder="🔍 ابحث عن قائد..."
-                    class="erg-input w-full border border-white/10 rounded-2xl px-4 py-3 text-white text-sm outline-none transition-all text-right"
-                    style="background:rgba(0,0,0,0.4);">
+                <button type="button" class="m-x" onclick="window.closeOrphanCleanupModal()">✕</button>
+            </header>
+            <div class="m-form m-scroll custom-scrollbar">
+                <p class="m-hint" style="border-color:rgba(251,113,133,.35);background:rgba(251,113,133,.08)">⚠️ هؤلاء أعضاء غير مرتبطين بأي قائد فعلي حاليًا بالنظام. راجعهم بعناية قبل الحذف — هذا الإجراء نهائي ولا يمكن التراجع عنه.</p>
+                <div class="m-row">
+                    <label class="m-chk"><input type="checkbox" id="orphanSelectAll" class="m-cb" onchange="window.toggleAllOrphans(this.checked)">تحديد الكل</label>
+                    <button type="button" class="m-btn m-btn-bad" onclick="window.deleteSelectedOrphans()">🗑️ حذف المحدد</button>
+                </div>
+                <div id="orphanCleanupList" class="m-flist"></div>
+            </div>
+        </div>
+    </div>
 
-                <div class="h-px my-1" style="background:linear-gradient(90deg,transparent,rgba(245,158,11,0.4),rgba(255,255,255,0.15),rgba(245,158,11,0.4),transparent);"></div>
-                <p class="text-[11px] text-amber-400/70 font-black uppercase px-1 tracking-widest">🎖️ القادة</p>
+    <div class="tm-body">
 
-                <div id="leaderSidebarList" class="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pl-1"></div>
+        <!-- عمود قادة الشركة (للمدير) -->
+        <aside id="leaderSidebarCol" class="hidden flex-col tm-side custom-scrollbar">
+            <div id="teamCompanyBackBar" class="hidden items-center justify-between gap-2 tm-back">
+                <button type="button" onclick="window.backToTeamCompanies()">→ كل الشركات</button>
+                <span id="teamCompanyBackName">🏢</span>
+            </div>
+            <input type="text" id="leaderSidebarSearch" oninput="window.renderLeaderSidebar()" placeholder="🔍 ابحث عن قائد..." class="tm-in" style="flex:none">
+            <p class="tm-st">🎖️ القادة</p>
+            <div id="leaderSidebarList" class="tm-leaders custom-scrollbar"></div>
+        </aside>
+
+        <main class="tm-main">
+
+            <!-- مرحلة الشركات (للمدير) -->
+            <div id="teamCompanyStage" class="hidden flex-1 flex-col tm-stage">
+                <div class="tm-tools">
+                    <input type="text" id="teamCompanySearch" oninput="window.renderTeamCompanyGrid()" placeholder="🔍 ابحث عن شركة..." class="tm-in">
+                    <span id="teamCompanyCount" class="tm-chip">0 شركة</span>
+                </div>
+                <div class="tm-scroll custom-scrollbar">
+                    <div id="teamCompanyGrid" class="tm-grid"></div>
+                </div>
             </div>
 
-            <!-- لوحة تفاصيل الفريق -->
-            <div class="flex-1 flex flex-col overflow-hidden p-4 gap-3">
-                <!-- مرحلة الشركات (للمدير فقط): شبكة الشركات -->
-                <div id="teamCompanyStage" class="hidden flex-1 flex-col overflow-hidden gap-3">
-                    <div class="flex items-center gap-2 shrink-0">
-                        <input type="text" id="teamCompanySearch" oninput="window.renderTeamCompanyGrid()" placeholder="🔍 ابحث عن شركة..."
-                            class="erg-input flex-1 border border-white/10 rounded-2xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
-                            style="background:rgba(255,255,255,0.03);">
-                        <span id="teamCompanyCount" class="text-xs bg-indigo-500/25 text-indigo-300 px-3 py-2 rounded-full font-black border border-indigo-400/30 shrink-0">0 شركة</span>
-                    </div>
-                    <div id="teamCompanyGrid" class="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 content-start p-1"></div>
+            <div id="teamDetailEmptyState" class="hidden flex-1 flex-col tm-empty">
+                <div class="tm-empty-ico">👈</div>
+                <p>اختر قائداً من القائمة لعرض أعضاء فريقه</p>
+            </div>
+
+            <!-- فريق القائد -->
+            <div id="teamDetailContent" class="flex flex-col flex-1 tm-detail">
+                <div class="tm-kpis">
+                    <div class="tm-kpi" style="--k:#34d399;--k-soft:rgba(52,211,153,.16)"><span class="tm-kpi-i">✅</span><div><b id="team_stat_active">0</b><small>نشطون</small></div></div>
+                    <div class="tm-kpi" style="--k:#38bdf8;--k-soft:rgba(56,189,248,.16)"><span class="tm-kpi-i">👥</span><div><b id="team_stat_total">0</b><small>الإجمالي</small></div></div>
+                    <div class="tm-kpi" style="--k:#fbbf24;--k-soft:rgba(251,191,36,.16)"><span class="tm-kpi-i">📊</span><div><b id="team_stat_capacity">0</b><small>المتبقي</small></div></div>
                 </div>
 
-                <div id="teamDetailEmptyState" class="hidden flex-1 flex-col items-center justify-center gap-3 opacity-50">
-                    <div class="text-5xl">👈</div>
-                    <p class="text-slate-400 text-sm font-bold">اختر قائداً من القائمة لعرض أعضاء فريقه</p>
-                </div>
-
-                <div id="teamDetailContent" class="flex flex-col flex-1 overflow-hidden gap-3">
-                    <div class="team-stat-panel shrink-0">
-                        <div class="team-stat-seg">
-                            <div class="team-stat-icon-lux" style="background:rgba(16,185,129,0.14); border-color:rgba(16,185,129,0.35); color:#34d399;">✅</div>
-                            <div class="text-right">
-                                <p id="team_stat_active" class="team-stat-num-lux text-emerald-400">0</p>
-                                <p class="team-stat-label-lux">نشطون</p>
-                            </div>
-                        </div>
-                        <div class="team-stat-divider"></div>
-                        <div class="team-stat-seg">
-                            <div class="team-stat-icon-lux" style="background:rgba(99,102,241,0.14); border-color:rgba(99,102,241,0.35); color:#818cf8;">👥</div>
-                            <div class="text-right">
-                                <p id="team_stat_total" class="team-stat-num-lux text-indigo-400">0</p>
-                                <p class="team-stat-label-lux">الإجمالي</p>
-                            </div>
-                        </div>
-                        <div class="team-stat-divider"></div>
-                        <div class="team-stat-seg">
-                            <div class="team-stat-icon-lux" style="background:rgba(245,158,11,0.14); border-color:rgba(245,158,11,0.35); color:#fbbf24;">📊</div>
-                            <div class="text-right">
-                                <p id="team_stat_capacity" class="team-stat-num-lux text-amber-400">0</p>
-                                <p class="team-stat-label-lux">المتبقي</p>
-                            </div>
-                        </div>
-                    </div>
-
-           
-            <div class="flex items-center gap-2 shrink-0">
-                <button onclick="window.refreshTeamData()" title="تحديث القائمة"
-                    class="w-11 h-11 flex items-center justify-center rounded-2xl border border-white/10 text-slate-300 hover:text-indigo-300 hover:border-indigo-400/40 hover:rotate-180 transition-all duration-500 shrink-0"
-                    style="background:rgba(255,255,255,0.03);">🔄</button>
-                <input type="text" id="teamSearchInput" oninput="window.filterTeamSearch()" placeholder="🔍 ابحث بالاسم أو الكود..."
-                    class="erg-input flex-1 border border-white/10 rounded-2xl p-3 text-white text-xs outline-none focus:border-indigo-500 text-right transition-all"
-                    style="background:rgba(255,255,255,0.03);">
-                <div class="erg-input flex items-center gap-1.5 border border-white/10 rounded-2xl px-3 shrink-0 focus-within:border-indigo-500" style="background:rgba(255,255,255,0.03);">
-                    <span class="text-indigo-400 text-xs">⇅</span>
-                    <select id="teamSortSelect" onchange="window.renderTeamTable()"
-                        class="bg-transparent text-white text-xs font-black outline-none py-3 min-w-[110px]">
-                        <option value="newest" style="background:#0f1420;">الأحدث أولاً</option>
-                        <option value="name" style="background:#0f1420;">حسب الاسم</option>
+                <div class="tm-tools">
+                    <button type="button" class="tm-btn tm-btn-ico" onclick="window.refreshTeamData()" title="تحديث القائمة">🔄</button>
+                    <input type="text" id="teamSearchInput" oninput="window.filterTeamSearch()" placeholder="🔍 ابحث بالاسم أو الكود..." class="tm-in">
+                    <select id="teamSortSelect" onchange="window.renderTeamTable()" class="tm-sel">
+                        <option value="newest">الأحدث أولاً</option>
+                        <option value="name">حسب الاسم</option>
                     </select>
+                    <button type="button" data-feat="memberAdd" class="tm-btn tm-btn-main" onclick="window.openAddMemberModal()">➕ إضافة عضو</button>
                 </div>
-                <button data-feat="memberAdd" onclick="window.openAddMemberModal()"
-                    class="flex items-center gap-1.5 border border-indigo-400/30 rounded-2xl px-4 py-3 text-indigo-300 text-xs font-black transition-all hover:bg-indigo-500/15 hover:border-indigo-400/50 active:scale-95 shrink-0"
-                    style="background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(99,102,241,0.04)); box-shadow:0 4px 14px rgba(99,102,241,0.1);">
-                    ➕ إضافة عضو
-                </button>
+
+                <div class="tm-panel custom-scrollbar">
+                    <div id="teamGridBody" class="tm-grid"></div>
+                </div>
             </div>
-            <div class="flex-1 rounded-2xl border border-white/5 overflow-hidden" style="background:rgba(255,255,255,0.01);">
-                        <div class="overflow-y-auto custom-scrollbar h-full p-4">
-                            <div id="teamGridBody" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
-                        </div>
+
+        </main>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة إضافة / تعديل عضو -->
+<div id="memberFormModal" class="hidden fixed inset-0 z-[257000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area m-overlay" onclick="window.closeMemberFormModal()">
+    <div class="m-box m-md" onclick="event.stopPropagation()">
+        <header class="m-hero">
+            <div class="m-av">👤</div>
+            <div class="m-ht">
+                <p id="memberFormModalTitle" class="m-name">➕ إضافة عضو جديد</p>
+                <p class="m-sub">بيانات العضو</p>
+            </div>
+            <button type="button" class="m-x" onclick="window.closeMemberFormModal()">✕</button>
+        </header>
+        <div class="m-form">
+            <div class="m-f"><label>الاسم الكامل</label>
+                <input type="text" id="new_mn" placeholder="اسم العضو..." class="m-in"></div>
+            <div class="m-f"><label>كود العضو</label>
+                <div class="m-code">
+                    <input type="text" id="new_mk" placeholder="MEM-XXXXXX" class="m-in">
+                    <button type="button" class="m-gen" title="توليد كود" onclick="window.genMemberKey('new_mk')">⚡</button>
+                </div></div>
+        </div>
+        <footer class="m-foot">
+            <button type="button" id="addMemBtn" onclick="window.addNewMember()" class="m-btn m-btn-ok">✅ إضافة العضو</button>
+            <button type="button" id="updateMemBtn" onclick="window.updateMember()" class="hidden m-btn m-btn-warn">🔄 تحديث</button>
+            <button type="button" class="m-btn" onclick="window.closeMemberFormModal()">إلغاء</button>
+        </footer>
+    </div>
+</div>
+
+
+
+            <!-- نافذة تفاصيل العضو -->
+<div id="memberDetailModal" class="hidden fixed inset-0 z-[256500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area m-overlay" onclick="window.closeMemberDetailModal()">
+    <div class="m-box" onclick="event.stopPropagation()">
+
+        <header class="m-hero">
+            <div id="memberDetail_avatarInitial" class="m-av">؟</div>
+            <div class="m-ht">
+                <p id="memberDetail_name" class="m-name">—</p>
+                <p class="m-sub">👤 عضو فريق</p>
+            </div>
+            <button type="button" class="m-x" onclick="window.closeMemberDetailModal()">✕</button>
+        </header>
+
+        <div class="m-two custom-scrollbar">
+
+            <section>
+                <p class="m-h">📋 معلومات العضو</p>
+                <div class="m-tiles">
+                    <div class="m-tile m-wide" style="--c-soft:rgba(129,140,248,.16)">
+                        <span class="m-ti">🔑</span>
+                        <div class="m-tt"><small>كود العضو</small><b id="memberDetail_key" class="m-ltr">—</b></div>
+                    </div>
+                    <div class="m-tile m-wide" style="--c-soft:rgba(52,211,153,.14)">
+                        <span class="m-ti">🎖️</span>
+                        <div class="m-tt"><small>القائد التابع له</small><b id="memberDetail_leader">—</b></div>
+                    </div>
+                    <div class="m-tile m-wide" style="--c-soft:rgba(251,191,36,.14)">
+                        <span class="m-ti">📅</span>
+                        <div class="m-tt"><small>تاريخ الإضافة</small><b id="memberDetail_date">—</b></div>
                     </div>
                 </div>
-                        </div>
+            </section>
+
+            <section>
+                <p class="m-h">🔐 الأمان والوصول</p>
+                <div class="m-group">
+                    <button type="button" id="memberDetail_btnReveal" class="m-act" style="--c:#22d3ee;--c-soft:rgba(34,211,238,.14)">
+                        <span class="m-ai">👁️</span><span class="m-at"><b>كشف الشفرة</b><small>عرض كود العضو الفعلي</small></span><span class="m-ar">‹</span>
+                    </button>
+                    <button type="button" id="memberDetail_btnChangeKey" class="m-act" style="--c:#c084fc;--c-soft:rgba(192,132,252,.14)">
+                        <span class="m-ai">🔑</span><span class="m-at"><b>تغيير الشفرة</b><small>إصدار كود وصول جديد</small></span><span class="m-ar">‹</span>
+                    </button>
+                    <button type="button" id="memberDetail_btnReset" class="m-act" style="--c:#60a5fa;--c-soft:rgba(96,165,250,.14)">
+                        <span class="m-ai">🔄</span><span class="m-at"><b>تصفير الجهاز</b><small>فك ربط الجهاز المسجّل</small></span><span class="m-ar">‹</span>
+                    </button>
+                </div>
+
+                <p class="m-h">🛠️ الصلاحيات والحساب</p>
+                <div class="m-group">
+                    <button type="button" id="memberDetail_btnPerms" class="m-act" style="--c:#fbbf24;--c-soft:rgba(251,191,36,.14)">
+                        <span class="m-ai">🎛️</span><span class="m-at"><b>الصلاحيات</b><small>تحديد المزايا المتاحة لهذا العضو</small></span><span class="m-ar">‹</span>
+                    </button>
+                    <button type="button" id="memberDetail_btnEdit" class="m-act" style="--c:#fbbf24;--c-soft:rgba(251,191,36,.14)">
+                        <span class="m-ai">✏️</span><span class="m-at"><b>تعديل البيانات</b><small>تعديل اسم العضو</small></span><span class="m-ar">‹</span>
+                    </button>
+                </div>
+
+                <p class="m-h">⚠️ منطقة الخطر</p>
+                <div class="m-group">
+                    <button type="button" id="memberDetail_btnDelete" class="m-act m-del" style="--c:#fb7185;--c-soft:rgba(251,113,133,.14)">
+                        <span class="m-ai">🗑️</span><span class="m-at"><b>حذف نهائي</b><small>حذف هذا العضو نهائياً، ولا يمكن التراجع</small></span>
+                    </button>
+                </div>
+            </section>
+
         </div>
     </div>
 </div>
 
 
-<!-- نافذة منبثقة لإضافة/تعديل عضو -->
-            <div id="memberFormModal" class="hidden fixed inset-0 z-[257000] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberFormModal()">
-            <div class="w-full max-w-2xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
-                <button onclick="window.closeMemberFormModal()" class="member-detail-close">✕</button>
-
-                <div class="member-detail-hero" style="padding:22px 28px;">
-                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0" style="background:linear-gradient(135deg,rgba(245,158,11,0.22),rgba(99,102,241,0.1)); border:1px solid rgba(245,158,11,0.35); box-shadow:0 0 12px rgba(245,158,11,0.15);">👤</div>
-                    <div class="member-detail-hero-text">
-                        <p id="memberFormModalTitle" class="member-detail-name" style="font-size:16px;">➕ إضافة عضو جديد</p>
-                        <p class="member-detail-sub">بيانات العضو</p>
-                    </div>
-                </div>
-
-                <div class="p-6">
-                    <div class="lux-form-card">
-                        <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <p class="lux-field-label">الاسم الكامل</p>
-                                <input type="text" id="new_mn" placeholder="اسم العضو..." class="erg-input lux-field-input text-right">
-                            </div>
-                            <div>
-                                <p class="lux-field-label">كود العضو</p>
-                                <div class="relative">
-                                    <input type="text" id="new_mk" placeholder="MEM-XXXXXX" class="erg-input lux-field-input font-mono uppercase">
-                                    <button onclick="window.genMemberKey('new_mk')" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-300 text-sm">⚡</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex gap-2 mt-1">
-                        <button id="addMemBtn" onclick="window.addNewMember()" class="flex-1 py-3 rounded-2xl text-white text-xs font-black transition-all active:scale-95 hover:brightness-110" style="background:linear-gradient(135deg,rgba(16,185,129,0.95),rgba(5,150,105,0.85) 60%,rgba(16,185,129,0.95)); box-shadow:0 4px 16px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.2); border:1px solid rgba(16,185,129,0.5);">✅ اعتماد</button>
-                        <button id="updateMemBtn" onclick="window.updateMember()" class="hidden flex-1 py-3 rounded-2xl text-white text-xs font-black transition-all active:scale-95 hover:brightness-110" style="background:linear-gradient(135deg,rgba(245,158,11,0.95),rgba(217,119,6,0.85) 60%,rgba(245,158,11,0.95)); box-shadow:0 4px 16px rgba(245,158,11,0.3), inset 0 1px 0 rgba(255,255,255,0.25); border:1px solid rgba(245,158,11,0.5);">🔄 تحديث</button>
-                    </div>
-                </div>
-            </div>
-            </div>
-
-            <!-- نافذة تفاصيل العضو -->
-            <div id="memberDetailModal" class="hidden fixed inset-0 z-[256500] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberDetailModal()">
-                <div class="w-full max-w-3xl rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
-                    <button onclick="window.closeMemberDetailModal()" class="member-detail-close">✕</button>
-
-                    <div class="member-detail-hero">
-                        <div class="member-detail-avatar-ring">
-                            <div id="memberDetail_avatarInitial" class="member-detail-avatar">؟</div>
-                        </div>
-                        <div class="member-detail-hero-text">
-                            <p id="memberDetail_name" class="member-detail-name">—</p>
-                            <p class="member-detail-sub">👤 عضو فريق</p>
-                        </div>
-                    </div>
-
-                    <div class="member-detail-body">
-                        <div class="member-detail-info-row">
-                            <div class="member-detail-info-icon" style="background:rgba(99,102,241,0.14); border-color:rgba(99,102,241,0.35); color:#818cf8;">🔑</div>
-                            <div class="flex-1 text-right min-w-0">
-                                <p class="member-detail-info-label">كود العضو</p>
-                                <p id="memberDetail_key" class="member-detail-info-value text-indigo-300 font-mono truncate">—</p>
-                            </div>
-                        </div>
-                        <div class="member-detail-info-row">
-                            <div class="member-detail-info-icon" style="background:rgba(16,185,129,0.14); border-color:rgba(16,185,129,0.35); color:#34d399;">🎖️</div>
-                            <div class="flex-1 text-right min-w-0">
-                                <p class="member-detail-info-label">القائد التابع له</p>
-                                <p id="memberDetail_leader" class="member-detail-info-value text-emerald-300 truncate">—</p>
-                            </div>
-                        </div>
-                        <div class="member-detail-info-row member-detail-info-full">
-                            <div class="member-detail-info-icon" style="background:rgba(245,158,11,0.14); border-color:rgba(245,158,11,0.35); color:#fbbf24;">📅</div>
-                            <div class="flex-1 text-right min-w-0">
-                                <p class="member-detail-info-label">تاريخ الإضافة</p>
-                                <p id="memberDetail_date" class="member-detail-info-value text-amber-300">—</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="member-detail-actions">
-                        <button id="memberDetail_btnReveal" class="member-detail-action-btn" style="background:rgba(34,211,238,0.1); border-color:rgba(34,211,238,0.3); color:#22d3ee;">
-                            <span class="member-detail-action-icon">👁️</span>كشف الشفرة
-                        </button>
-                        <button id="memberDetail_btnChangeKey" class="member-detail-action-btn" style="background:rgba(168,85,247,0.1); border-color:rgba(168,85,247,0.3); color:#c084fc;">
-                            <span class="member-detail-action-icon">🔑</span>تغيير الشفرة
-                        </button>
-                        <button id="memberDetail_btnEdit" class="member-detail-action-btn" style="background:rgba(245,158,11,0.1); border-color:rgba(245,158,11,0.3); color:#fbbf24;">
-                            <span class="member-detail-action-icon">✏️</span>تعديل البيانات
-                        </button>
-                        <button id="memberDetail_btnReset" class="member-detail-action-btn" style="background:rgba(59,130,246,0.1); border-color:rgba(59,130,246,0.3); color:#60a5fa;">
-                            <span class="member-detail-action-icon">🔄</span>تصفير الجهاز
-                        </button>
-<button id="memberDetail_btnPerms" class="member-detail-action-btn" style="background:rgba(251,191,36,0.1); border-color:rgba(251,191,36,0.3); color:#fbbf24;">
-                            <span class="member-detail-action-icon">🎛️</span>الصلاحيات
-                        </button>
-                        <button id="memberDetail_btnDelete"
-                            <span class="member-detail-action-icon">🗑️</span>حذف نهائي
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-
 <!-- نافذة صلاحيات عضو بعينه -->
-<div id="memberPermsModal" class="hidden fixed inset-0 z-[256600] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeMemberPerms()">
-    <div class="w-full max-w-md rounded-[28px] p-5 relative member-detail-card flex flex-col gap-4 text-right" onclick="event.stopPropagation()">
-        <button onclick="window.closeMemberPerms()" class="member-detail-close">✕</button>
-        <div style="padding-left:56px;">
-            <p class="text-white font-black text-base">🎛️ صلاحيات العضو</p>
-            <p id="memberPerms_name" class="text-amber-300 text-xs font-black mt-1">—</p>
-            <p class="text-slate-400 text-xs font-bold mt-1">ألغِ علامة الميزة لمنعها عن هذا العضو وحده. المزايا غير المعروضة غير متاحة أصلاً لأعضاء قائده.</p>
+<div id="memberPermsModal" class="hidden fixed inset-0 z-[256600] items-center justify-center p-4 lux-modal-backdrop modal-safe-area m-overlay" onclick="window.closeMemberPerms()">
+    <div class="m-box m-sm" onclick="event.stopPropagation()">
+        <header class="m-hero">
+            <div class="m-av">🎛️</div>
+            <div class="m-ht">
+                <p class="m-name">صلاحيات العضو</p>
+                <p id="memberPerms_name" class="m-sub">—</p>
+            </div>
+            <button type="button" class="m-x" onclick="window.closeMemberPerms()">✕</button>
+        </header>
+        <div class="m-form m-scroll custom-scrollbar">
+            <p class="m-hint">ألغِ تفعيل الميزة لمنعها عن هذا العضو وحده. المزايا غير المعروضة غير متاحة أصلاً لأعضاء قائده.</p>
+            <div id="memberPerms_box" class="m-flist"></div>
         </div>
-        <div id="memberPerms_box" class="flex flex-col gap-2.5"></div>
-        <button id="memberPerms_save" class="w-full py-3 rounded-2xl font-black text-white text-sm border-b-4 active:translate-y-1 transition-all" style="background:linear-gradient(135deg,#d97706,#f59e0b); border-bottom-color:#78350f;">💾 حفظ</button>
+        <footer class="m-foot">
+            <button type="button" id="memberPerms_save" class="m-btn m-btn-warn">💾 حفظ الصلاحيات</button>
+            <button type="button" class="m-btn" onclick="window.closeMemberPerms()">إلغاء</button>
+        </footer>
     </div>
 </div>
 
 <!-- نافذة أعضاء القائد السريعة (مستقلة - تفتح فوق أي نافذة) -->
-<div id="leaderQuickRosterModal" class="hidden fixed inset-0 z-[256200] items-center justify-center p-4 lux-modal-backdrop modal-safe-area" onclick="window.closeLeaderQuickRosterModal()">
-    <div class="w-full max-w-4xl max-h-[88vh] overflow-y-auto custom-scrollbar rounded-[28px] relative member-detail-card" onclick="event.stopPropagation()">
-        <button onclick="window.closeLeaderQuickRosterModal()" class="member-detail-close">✕</button>
-
-        <div class="member-detail-hero" style="padding:22px 28px;">
-            <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0" style="background:linear-gradient(135deg,rgba(99,102,241,0.28),rgba(245,158,11,0.1)); border:1px solid rgba(99,102,241,0.4); box-shadow:0 0 16px rgba(99,102,241,0.2);">👥</div>
-            <div class="member-detail-hero-text flex-1">
-                <p class="member-detail-name" style="font-size:17px;">أعضاء الفريق</p>
-                <p class="member-detail-sub">التابع للقائد: <span id="leaderQuickRosterName" class="text-indigo-300">—</span></p>
+<div id="leaderQuickRosterModal" class="hidden fixed inset-0 z-[256200] items-center justify-center p-4 lux-modal-backdrop modal-safe-area m-overlay" onclick="window.closeLeaderQuickRosterModal()">
+    <div class="m-box m-lg" onclick="event.stopPropagation()">
+        <header class="m-hero">
+            <div class="m-av">👥</div>
+            <div class="m-ht">
+                <p class="m-name">أعضاء الفريق</p>
+                <p class="m-sub">التابع للقائد: <span id="leaderQuickRosterName">—</span></p>
             </div>
+            <button type="button" class="m-x" onclick="window.closeLeaderQuickRosterModal()">✕</button>
+        </header>
+        <div class="m-bar">
+            <span id="leaderQuickRosterCount" class="tm-chip">0 عضو</span>
+            <button type="button" data-feat="memberAdd" class="tm-btn tm-btn-main" onclick="window.openAddMemberModal()">➕ إضافة عضو</button>
         </div>
-        <div class="flex items-center justify-between gap-2" style="padding:14px 28px 0 28px;">
-            <span id="leaderQuickRosterCount" class="text-xs bg-indigo-500/25 text-indigo-300 px-3 py-1.5 rounded-full font-black border border-indigo-400/30 shrink-0">0 عضو</span>
-            <button data-feat="memberAdd" onclick="window.openAddMemberModal()" class="shrink-0 text-xs font-black px-3 py-1.5 rounded-full transition-all hover:brightness-110" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); color:#34d399;">➕ إضافة عضو</button>
-        </div>
-
-        <div class="p-6">
-            <div id="leaderQuickRosterEmpty" class="hidden text-center py-10 text-slate-500 text-sm font-bold">لا يوجد أعضاء بعد لهذا القائد</div>
-            <div id="leaderQuickRosterGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+        <div class="m-form m-scroll custom-scrollbar">
+            <div id="leaderQuickRosterEmpty" class="hidden m-empty">لا يوجد أعضاء بعد لهذا القائد</div>
+            <div id="leaderQuickRosterGrid" class="tm-grid"></div>
         </div>
     </div>
 </div>
+
+
+
 
 <div id="winReports" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
