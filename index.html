@@ -11225,6 +11225,277 @@ window.riskGlossRender = (listOnly) => {
 };
 
 
+
+
+
+// ===================== تقييم مخاطر — الدفعة 5: طبقة التعريب الثنائي + PDF ثنائي + استيراد المكتبة الموسعة =====================
+// أي نص ثابت عربي في واجهة تقييم المخاطر يُعرض بصيغة: English - عربي  (طبقة ترجمة مركزية تُدار من القاموس أدناه)
+
+window.RISK_TR = {
+    '↩ رجوع': '↩ Back - رجوع',
+    'تقييم مخاطر · تصاريح العمل': 'Risk Assessment · Permits to Work - تقييم مخاطر · تصاريح العمل',
+    '➕ طلب تصريح جديد': '➕ New Permit Request - طلب تصريح جديد',
+    '⚙️ إعدادات الشركة': '⚙️ Company Settings - إعدادات الشركة',
+    '📚 المكتبة': '📚 Library - المكتبة',
+    '📖 القاموس': '📖 Glossary - القاموس',
+    '📋 تصاريح العمل': '📋 Work Permits - تصاريح العمل',
+    '📋 طلب تصريح عمل': '📋 Work Permit Request - طلب تصريح عمل',
+    '📋 بطاقة التصريح': '📋 Permit Card - بطاقة التصريح',
+    '⚙️ إعدادات تصاريح الشركة': '⚙️ Company Permit Settings - إعدادات تصاريح الشركة',
+    'مدة صلاحية التصريح (بالساعات، من 1 إلى 168)': 'Permit validity (hours, 1 to 168) - مدة صلاحية التصريح (بالساعات، من 1 إلى 168)',
+    'حفظ': 'Save - حفظ',
+    'إلغاء': 'Cancel - إلغاء',
+    'تُطبَّق على كل قادة الشركة الحاليين وأعضائهم. إن أضفت قائداً جديداً لاحقاً فاحفظ الإعداد مرة أخرى ليشمله.': 'Applies to all current company leaders and their members. If you add a new leader later, save again to include them. - تُطبَّق على كل قادة الشركة الحاليين وأعضائهم. إن أضفت قائداً جديداً لاحقاً فاحفظ الإعداد مرة أخرى ليشمله.',
+    '📚 مكتبة أنواع العمل والشروط': '📚 Work Types & Conditions Library - مكتبة أنواع العمل والشروط',
+    'الكل': 'All - الكل',
+    'بانتظار اعتمادي': 'Awaiting my approval - بانتظار اعتمادي',
+    'سارية': 'Active - سارية',
+    'منتهية / مرفوضة': 'Expired / Rejected - منتهية / مرفوضة',
+    'لا توجد تصاريح في هذا العرض.': 'No permits in this view. - لا توجد تصاريح في هذا العرض.',
+    'لا توجد تصاريح بعد. اضغط «طلب تصريح جديد» للبدء.': 'No permits yet. Press "New Permit Request" to start. - لا توجد تصاريح بعد. اضغط «طلب تصريح جديد» للبدء.',
+    'كل الشركات': 'All companies - كل الشركات',
+    'كل تصاريح شركتك': 'All your company permits - كل تصاريح شركتك',
+    'تصاريح فريقك': 'Your team permits - تصاريح فريقك',
+    'تصاريحك': 'Your permits - تصاريحك',
+    '⚠️ تجاوز': '⚠️ Override - تجاوز',
+    '⏳ بانتظار اعتمادك': '⏳ Awaiting your approval - بانتظار اعتمادك',
+    'نوع العمل': 'Work Type - نوع العمل',
+    'المعلومات': 'Information - المعلومات',
+    'الشروط': 'Conditions - الشروط',
+    'المراجعة': 'Review - المراجعة',
+    'الجهة المخوّلة بالتصريح لهذا النوع:': 'Authorised issuer for this type: - الجهة المخوّلة بالتصريح لهذا النوع:',
+    'تلقائي عند اكتمال الشروط': 'Automatic once conditions are met - تلقائي عند اكتمال الشروط',
+    'القائد': 'Leader - القائد',
+    'مالك الشركة': 'Company Owner - مالك الشركة',
+    'المدير العام': 'General Manager - المدير العام',
+    'التالي ←': 'Next - التالي ←',
+    '→ السابق': '→ Previous - السابق',
+    '✅ إصدار التصريح': '✅ Issue Permit - إصدار التصريح',
+    '📨 إرسال للاعتماد': '📨 Submit for Approval - إرسال للاعتماد',
+    '📨 إرسال طلب التجاوز': '📨 Submit Override Request - إرسال طلب التجاوز',
+    '📍 الموقع الدقيق (مبنى، طابق، ورشة، نقطة محددة) *': '📍 Exact Location (building, floor, workshop, point) * - الموقع الدقيق (مبنى، طابق، ورشة، نقطة محددة)',
+    '🧰 القسم أو المهمة *': '🧰 Department or Task * - القسم أو المهمة',
+    '📝 وصف موجز للعمل': '📝 Brief Work Description - وصف موجز للعمل',
+    '👷 أسماء المنفذين': '👷 Workers - أسماء المنفذين',
+    '✅ متوفر': '✅ OK - متوفر',
+    '❌ غير متوفر': '❌ NOT OK - غير متوفر',
+    '— لا ينطبق': '— N/A - لا ينطبق',
+    'طلب تجاوز استثنائي': 'Request Exceptional Override - طلب تجاوز استثنائي',
+    '⚠️ طلب تجاوز استثنائي': '⚠️ Exceptional Override Request - طلب تجاوز استثنائي',
+    '⚠️ تجاوز استثنائي': '⚠️ Exceptional Override - تجاوز استثنائي',
+    'مستوى الخطورة': 'Risk Level - مستوى الخطورة',
+    'الموقع': 'Location - الموقع',
+    'المهمة': 'Task - المهمة',
+    'الوصف': 'Description - الوصف',
+    'المنفذون': 'Workers - المنفذون',
+    '✅ صلاحيتك تسمح بإصدار هذا التصريح مباشرة.': '✅ Your authority allows issuing this permit directly. - صلاحيتك تسمح بإصدار هذا التصريح مباشرة.',
+    'مقدّم الطلب': 'Requested by - مقدّم الطلب',
+    'تاريخ الطلب': 'Request Date - تاريخ الطلب',
+    'أُصدر': 'Issued - أُصدر',
+    'ينتهي': 'Expires - ينتهي',
+    'اعتمده': 'Approved by - اعتمده',
+    'رفضه': 'Rejected by - رفضه',
+    'سبب الرفض': 'Rejection Reason - سبب الرفض',
+    'تلقائي (اكتمال الشروط)': 'Automatic (conditions met) - تلقائي (اكتمال الشروط)',
+    '✅ اعتماد وإصدار': '✅ Approve & Issue - اعتماد وإصدار',
+    '❌ رفض': '❌ Reject - رفض',
+    '📄 تصدير / طباعة PDF': '📄 Export / Print PDF - تصدير / طباعة PDF',
+    'سبب الرفض (مطلوب عند الرفض)': 'Rejection reason (required) - سبب الرفض (مطلوب عند الرفض)',
+    '🔍 ابحث بالعربي أو English': '🔍 Search in English or Arabic - ابحث بالعربي أو English',
+    'جاري التحميل...': 'Loading... - جاري التحميل...',
+    'القاموس فارغ. يستورده المدير من حزمة المحتوى.': 'The glossary is empty. The manager imports it from the content pack. - القاموس فارغ. يستورده المدير من حزمة المحتوى.',
+    '➕ نوع عمل جديد': '➕ New Work Type - نوع عمل جديد',
+    '📦 استيراد حزمة محتوى (ملف JSON: أنواع العمل + الشروط + القاموس)': '📦 Import content pack (JSON files) - استيراد حزمة محتوى (ملفات JSON)',
+    'اسم نوع العمل (English - عربي) *': 'Work type name (English - Arabic) * - اسم نوع العمل *',
+    'الرمز (إيموجي)': 'Icon (emoji) - الرمز (إيموجي)',
+    'الشروط العامة (شرط في كل سطر، 3 على الأقل) *': 'General conditions (one per line, at least 3) * - الشروط العامة (شرط في كل سطر، 3 على الأقل)',
+    '🇯🇴 شروط إضافية للأردن (اختياري)': '🇯🇴 Extra Jordan conditions (optional) - شروط إضافية للأردن (اختياري)',
+    '🌍 شروط إضافية عالمية (اختياري)': '🌍 Extra international conditions (optional) - شروط إضافية عالمية (اختياري)',
+    'الترتيب في القائمة (رقم أصغر = أعلى)': 'List order (smaller = higher) - الترتيب في القائمة (رقم أصغر = أعلى)',
+    // رسائل التنبيه
+    'هذه الميزة غير مفعّلة في باقتك': 'This feature is not enabled in your package - هذه الميزة غير مفعّلة في باقتك',
+    'تعذر تحميل التصاريح، تحقق من الصلاحيات': 'Could not load permits, check permissions - تعذر تحميل التصاريح، تحقق من الصلاحيات',
+    'مكتبة أنواع العمل غير مهيّأة بعد، تواصل مع الإدارة': 'Work types library is not set up yet, contact management - مكتبة أنواع العمل غير مهيّأة بعد، تواصل مع الإدارة',
+    'اختر نوع العمل أولاً': 'Choose a work type first - اختر نوع العمل أولاً',
+    'الموقع والمهمة مطلوبان': 'Location and task are required - الموقع والمهمة مطلوبان',
+    'أجب عن كل الشروط قبل المتابعة': 'Answer all conditions before continuing - أجب عن كل الشروط قبل المتابعة',
+    'لا يمكن المتابعة قبل استيفاء الشروط غير المتوفرة': 'Cannot continue until unavailable conditions are met - لا يمكن المتابعة قبل استيفاء الشروط غير المتوفرة',
+    'أجب عن كل الشروط أولاً': 'Answer all conditions first - أجب عن كل الشروط أولاً',
+    'اكتب سبب التجاوز (10 أحرف على الأقل)': 'Write the override reason (at least 10 characters) - اكتب سبب التجاوز (10 أحرف على الأقل)',
+    'توجد شروط بلا إجابة': 'Some conditions are unanswered - توجد شروط بلا إجابة',
+    'توجد شروط غير مستوفاة': 'Some conditions are not met - توجد شروط غير مستوفاة',
+    'سبب التجاوز مطلوب': 'Override reason is required - سبب التجاوز مطلوب',
+    '📨 أُرسل الطلب للاعتماد': '📨 Request sent for approval - أُرسل الطلب للاعتماد',
+    'تعذر حفظ التصريح، تحقق من الصلاحيات': 'Could not save the permit, check permissions - تعذر حفظ التصريح، تحقق من الصلاحيات',
+    'لا تملك صلاحية اعتماد هذا التصريح': 'You are not authorised to approve this permit - لا تملك صلاحية اعتماد هذا التصريح',
+    'لا تملك صلاحية رفض هذا التصريح': 'You are not authorised to reject this permit - لا تملك صلاحية رفض هذا التصريح',
+    'سبب الرفض مطلوب': 'Rejection reason is required - سبب الرفض مطلوب',
+    'تم رفض التصريح': 'Permit rejected - تم رفض التصريح',
+    'تعذر الاعتماد، تحقق من الصلاحيات': 'Could not approve, check permissions - تعذر الاعتماد، تحقق من الصلاحيات',
+    'تعذر الرفض، تحقق من الصلاحيات': 'Could not reject, check permissions - تعذر الرفض، تحقق من الصلاحيات',
+    'المدة بين ساعة و168 ساعة': 'Duration must be between 1 and 168 hours - المدة بين ساعة و168 ساعة',
+    'تعذر الحفظ، تحقق من الصلاحيات': 'Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات',
+    'تعذر التبديل، تحقق من القواعد': 'Could not toggle, check the rules - تعذر التبديل، تحقق من القواعد',
+    '✅ تم تغيير المرجعية لجلسة المدير الحالية فقط': '✅ Reference changed for the manager current session only - تم تغيير المرجعية لجلسة المدير الحالية فقط',
+    '✅ حُفظ نوع العمل': '✅ Work type saved - حُفظ نوع العمل',
+    'اسم نوع العمل مطلوب': 'Work type name is required - اسم نوع العمل مطلوب',
+    'أدخل 3 شروط عامة على الأقل': 'Enter at least 3 general conditions - أدخل 3 شروط عامة على الأقل',
+    'المكتبة في Firestore فارغة وما تراه هو المكتبة الأولية المؤقتة. استورد حزمة المحتوى (الزر أدناه) أو المكتبة الأولية.': 'The Firestore library is empty; what you see is the temporary initial library. Import the content pack (button below) or the initial library. - المكتبة في Firestore فارغة وما تراه هو المكتبة الأولية المؤقتة. استورد حزمة المحتوى (الزر أدناه) أو المكتبة الأولية.',
+    'اسمح بالنوافذ المنبثقة لتصدير PDF': 'Allow pop-ups to export PDF - اسمح بالنوافذ المنبثقة لتصدير PDF',
+    'مستوى الخطورة غير صالح': 'Invalid risk level - مستوى الخطورة غير صالح',
+    'تعذر الحفظ، تحقق من القواعد': 'Could not save, check the rules - تعذر الحفظ، تحقق من القواعد',
+    'تعذر الحذف، تحقق من القواعد': 'Could not delete, check the rules - تعذر الحذف، تحقق من القواعد',
+    '✅ استُوردت المكتبة الأولية': '✅ Initial library imported - استُوردت المكتبة الأولية',
+    'تعذر الاستيراد، تحقق من القواعد': 'Import failed, check the rules - تعذر الاستيراد، تحقق من القواعد',
+    'الحزمة لا تحتوي بيانات صالحة': 'The pack has no valid data - الحزمة لا تحتوي بيانات صالحة',
+    'تم الحذف': 'Deleted - تم الحذف'
+};
+
+window.RISK_TR_RE = [
+    [/^(\d+) من (\d+) شروط مُجاب عنها$/, '$1 of $2 conditions answered - $&'],
+    [/^⛔ لا يمكن إصدار التصريح (?:أو إرساله )?قبل استيفاء (\d+) شرط غير متوفر\.$/, '⛔ The permit cannot be issued until $1 unavailable condition(s) are met. - $&'],
+    [/^⚠️ التجاوز الاستثنائي مفعّل لشركتك\. اكتب سبباً واضحاً؛ يُسجَّل باسمك ويراجعه (.+)\.$/, '⚠️ Exceptional override is enabled for your company. Write a clear reason; it is logged under your name and reviewed by $1. - $&'],
+    [/^📨 سيُرسل للاعتماد من: (.+)$/, '📨 Will be sent for approval to: $1 - $&'],
+    [/^السبب: (.*)$/, 'Reason - السبب: $1'],
+    [/^بانتظار اعتمادي \((\d+)\)$/, 'Awaiting my approval ($1) - $&'],
+    [/^خطورة (.+)$/, 'Risk - خطورة $1'],
+    [/^(\d+) متوفر · (\d+) لا ينطبق( ·)?$/, '$1 OK · $2 N/A$3 - $&'],
+    [/^(\d+) غير متوفر$/, '$1 NOT OK - $&'],
+    [/ · باقٍ /, ' · Left - باقٍ '],
+    [/^✅ صدر التصريح (.+)$/, '✅ Permit issued $1 - $&'],
+    [/^✅ تم اعتماد التصريح (.*)$/, '✅ Permit approved $1 - $&'],
+    [/^✅ حُفظت إعدادات التصاريح لقادة الشركة \((\d+)\)$/, '✅ Permit settings saved for $1 company leaders - $&'],
+    [/^🔓 فُعّل التجاوز الاستثنائي لشركة (.+)$/, '🔓 Exceptional override enabled for company $1 - $&'],
+    [/^🔒 عُطّل التجاوز الاستثنائي لشركة (.+)$/, '🔒 Exceptional override disabled for company $1 - $&'],
+    [/^⬇️ استيراد المكتبة الأولية \((\d+) أنواع\)$/, '⬇️ Import initial library ($1 types) - $&'],
+    [/^يُعرض أول 120 من (\d+)\. ضيّق البحث\.$/, 'Showing the first 120 of $1. Narrow your search. - $&'],
+    [/^ملف الحزمة غير صالح \(JSON\): (.+)$/, 'Invalid pack file (JSON): $1 - $&'],
+    [/^✅ استُوردت الحزمة: (.+)$/, '✅ Content pack imported: $1 - $&']
+];
+
+window.riskTr = (s) => {
+    if (typeof s !== 'string') return s;
+    const t = s.trim();
+    if (!t) return s;
+    if (Object.prototype.hasOwnProperty.call(window.RISK_TR, t)) { const r = window.RISK_TR[t]; return s.replace(t, () => r); }
+    for (const [re, rep] of window.RISK_TR_RE) {
+        if (re.test(t)) { const r = t.replace(re, rep); return s.replace(t, () => r); }
+    }
+    return s;
+};
+
+window.riskTrNode = (n) => {
+    if (!n) return;
+    if (n.nodeType === 3) {
+        const p = n.parentNode;
+        if (!p || /^(SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)) return;
+        const v = n.nodeValue, r = window.riskTr(v);
+        if (r !== v) n.nodeValue = r;
+    } else if (n.nodeType === 1) {
+        if (/^(SCRIPT|STYLE)$/.test(n.nodeName)) return;
+        ['placeholder', 'title'].forEach(a => {
+            const v = n.getAttribute && n.getAttribute(a);
+            if (v) { const r = window.riskTr(v); if (r !== v) n.setAttribute(a, r); }
+        });
+        n.childNodes.forEach(window.riskTrNode);
+    }
+};
+
+(() => {
+    const ids = ['winRiskPermits', 'riskWizModal', 'riskDetailModal', 'riskSettingsModal', 'riskLibModal', 'riskGlossModal', 'riskMemberFab'];
+    const obs = new MutationObserver(muts => muts.forEach(m => {
+        if (m.type === 'childList') m.addedNodes.forEach(window.riskTrNode);
+        else if (m.type === 'characterData') window.riskTrNode(m.target);
+    }));
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        window.riskTrNode(el);
+        obs.observe(el, { childList: true, subtree: true, characterData: true });
+    });
+})();
+
+if (!window._riskNotifWrapped) {
+    const _sn = window.showNotif;
+    window.showNotif = (m, ...rest) => _sn(typeof m === 'string' ? window.riskTr(m) : m, ...rest);
+    window._riskNotifWrapped = true;
+}
+
+// ---- PDF ثنائي اللغة ----
+window.riskPdf = (id) => {
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!p) return;
+    const lv = window.RISK_LEVELS[p.level] || window.RISK_LEVELS.low;
+    const s = window.riskStatus(p), sm = window.RISK_STATUS[s] || window.RISK_STATUS.pending;
+    window.riskMakeQR(window.riskQrText(p), 150, (qr) => {
+        const w = window.open('', '_blank');
+        if (!w) return window.showNotif('اسمح بالنوافذ المنبثقة لتصدير PDF', 'error');
+        const tr = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
+        const conds = (p.conditions || []).map((x, i) => `<tr><td>${i + 1}</td><td>${esc(x.text)}</td><td style="text-align:center">${x.status === 'ok' ? '✔ OK' : (x.status === 'no' ? '✘ NOT OK' : '— N/A')}</td></tr>`).join('');
+        w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(p.permitNo || 'Permit')}</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;margin:24px;color:#111}h1{margin:0 0 4px;font-size:21px}.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #f97316;padding-bottom:10px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px}th,td{border:1px solid #bbb;padding:5px 8px;text-align:right}th{background:#f3f4f6;width:32%}
+.st{display:inline-block;padding:3px 12px;border-radius:12px;background:${sm.color};color:#fff;font-weight:bold;font-size:13px}.sig{display:flex;gap:16px;margin-top:28px}.sig div{flex:1;border-top:1px solid #333;padding-top:6px;text-align:center;font-size:11px}
+.ov{border:2px solid #dc2626;padding:8px;margin-bottom:14px;font-size:12px}</style></head><body>
+<div class="hd"><div><h1>Permit to Work - تصريح عمل</h1><div>Permit No. - رقم التصريح: <b>${esc(p.permitNo || '')}</b> &nbsp; <span class="st">${sm.label}</span></div></div>${qr ? `<img src="${qr}" width="110" height="110">` : ''}</div>
+<table>${tr('Work Type - نوع العمل', esc(p.workTypeLabel || ''))}${tr('Risk Level - مستوى الخطورة', lv.label)}${tr('Location - الموقع', esc(p.location || '—'))}${tr('Department / Task - القسم / المهمة', esc(p.task || '—'))}${tr('Description - الوصف', esc(p.description || '—'))}${tr('Workers - المنفذون', esc(p.workers || '—'))}
+${tr('Requested by - مقدّم الطلب', esc(p.requesterName || '') + ' (' + (window.RISK_ROLE_LABEL[p.requesterRole] || '') + ')')}${tr('Request Date - تاريخ الطلب', window.riskFmt(p.createdAt))}${tr('Issued - تاريخ الإصدار', window.riskFmt(p.issuedAt))}${tr('Expires - ينتهي', window.riskFmt(p.expiresAt))}
+${tr('Approved by - المعتمِد', esc(p.approvedBy === 'auto' ? 'Automatic (conditions met) - تلقائي (اكتمال الشروط)' : (p.approvedBy || '—')))}</table>
+${p.overrideRequested ? `<div class="ov"><b>Exceptional Override - تجاوز استثنائي:</b> ${esc(p.overrideReason || '')}</div>` : ''}
+<table><tr><th style="width:36px">#</th><th>Condition - الشرط</th><th style="width:80px">Status - الحالة</th></tr>${conds}</table>
+<div class="sig"><div>Executor / Requester<br>المنفِّذ / مقدّم الطلب</div><div>Approver<br>المعتمِد</div><div>Safety Officer<br>مسؤول السلامة</div></div>
+</body></html>`);
+        w.document.close();
+        setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);
+    });
+};
+
+// ---- استيراد حزمة موسعة: v1 (أنواع + قاموس) و v2 (أخطار، تدقيق، تلقين، مصفوفة، قوالب) ----
+window.riskLibImportPack = async (input) => {
+    const files = input && input.files ? Array.from(input.files) : [];
+    if (!files.length || window.userRole !== 'master') return;
+    const base = (col, id) => doc(db, 'artifacts', appId, 'public', 'data', col, String(id));
+    const now = Date.now(), ops = [], stats = { types: 0, gloss: 0, hazards: 0, audit: 0, toolbox: 0, meta: 0 };
+    for (const f of files) {
+        let pack;
+        try { pack = JSON.parse(await f.text()); } catch (e) { input.value = ''; return window.showNotif('ملف الحزمة غير صالح (JSON): ' + f.name, 'error'); }
+        (Array.isArray(pack.types) ? pack.types : []).forEach(t => {
+            if (!t || !t.key || !t.label || !Array.isArray(t.conditions) || t.conditions.length < 3) return;
+            ops.push([base('risk_library', t.key), { label: String(t.label), icon: t.icon || '📋', level: window.RISK_LEVELS[t.level] ? t.level : 'medium', conditions: t.conditions, conditionsJo: Array.isArray(t.conditionsJo) ? t.conditionsJo : [], conditionsIntl: Array.isArray(t.conditionsIntl) ? t.conditionsIntl : [], order: Number(t.order) || 0, active: true, updatedAt: now }]); stats.types++;
+        });
+        (Array.isArray(pack.glossary) ? pack.glossary : []).forEach((g, i) => {
+            if (!g || !g.en || !g.ar) return;
+            const slug = String(g.en).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || ('t' + i);
+            ops.push([base('risk_glossary', (g.cat || 'g') + '-' + slug), { en: String(g.en), ar: String(g.ar), fr: String(g.fr || ''), cat: String(g.cat || 'general'), updatedAt: now }]); stats.gloss++;
+        });
+        (Array.isArray(pack.hazards) ? pack.hazards : []).forEach(h => { if (h && h.key && h.name) { ops.push([base('risk_hazards', h.key), Object.assign({}, h, { updatedAt: now })]); stats.hazards++; } });
+        (Array.isArray(pack.toolbox) ? pack.toolbox : []).forEach(t => { if (t && t.key && t.title) { ops.push([base('risk_toolbox', t.key), Object.assign({}, t, { updatedAt: now })]); stats.toolbox++; } });
+        if (pack.audit && Array.isArray(pack.audit.categories)) {
+            pack.audit.categories.forEach(c => { if (c && c.key && Array.isArray(c.items)) { ops.push([base('risk_audit', c.key), Object.assign({}, c, { updatedAt: now })]); stats.audit++; } });
+            if (pack.audit.scoring) { ops.push([base('risk_meta', 'auditScoring'), { data: pack.audit.scoring, updatedAt: now }]); stats.meta++; }
+        }
+        ['matrix', 'hierarchy', 'incidentClasses', 'incidentTemplate', 'references'].forEach(k => {
+            if (pack[k] !== undefined) { ops.push([base('risk_meta', k), { data: pack[k], updatedAt: now }]); stats.meta++; }
+        });
+    }
+    if (!ops.length) { input.value = ''; return window.showNotif('الحزمة لا تحتوي بيانات صالحة', 'error'); }
+    try {
+        for (let i = 0; i < ops.length; i += 400) {
+            const b = writeBatch(db);
+            ops.slice(i, i + 400).forEach(([r, d]) => b.set(r, d));
+            await b.commit();
+        }
+        window._risk.gloss = null;
+        window.showNotif(`✅ استُوردت الحزمة: ${stats.types} نوع عمل، ${stats.gloss} مصطلح، ${stats.hazards} خطر، ${stats.audit} محور تدقيق، ${stats.toolbox} موضوع، ${stats.meta} إعدادات`, 'success');
+        await window.riskLoadLibrary();
+        window.riskLibRender();
+    } catch (err) {
+        console.error('risk pack import', err);
+        window.showNotif('تعذر الاستيراد، تحقق من القواعد', 'error');
+    }
+    input.value = '';
+};
+
 // ===== Dark / Light Mode Engine =====
 window.toggleTheme = () => {
     const isLight = document.body.classList.toggle('light-mode');
