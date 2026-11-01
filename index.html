@@ -11496,6 +11496,701 @@ window.riskLibImportPack = async (input) => {
     input.value = '';
 };
 
+
+
+// ===================== تقييم مخاطر — الدفعة 7: الحوادث + الإجراءات التصحيحية والوقائية (CAPA) =====================
+window.RISK_INC_CLASSES = [['near_miss', 'Near Miss', 'حادث وشيك'], ['first_aid', 'First Aid Case', 'حالة إسعاف أولي'], ['medical', 'Medical Treatment Case', 'حالة علاج طبي'], ['restricted', 'Restricted Work Case', 'حالة عمل مقيّد'], ['lti', 'Lost Time Injury (LTI)', 'إصابة مع فقدان وقت عمل'], ['fatality', 'Fatality', 'وفاة'], ['property', 'Property Damage', 'ضرر بالممتلكات'], ['environmental', 'Environmental Incident', 'حادث بيئي'], ['dangerous', 'Dangerous Occurrence', 'واقعة خطرة']].map(x => ({ key: x[0], label: x[1] + ' - ' + x[2] }));
+window.RISK_INC_NEED = { near_miss: 'leader', first_aid: 'leader', medical: 'owner', restricted: 'owner', lti: 'owner', property: 'owner', environmental: 'owner', dangerous: 'owner', fatality: 'master' };
+window.RISK_INC_COLOR = { near_miss: '#38bdf8', first_aid: '#10b981', medical: '#eab308', restricted: '#f59e0b', lti: '#f97316', fatality: '#ef4444', property: '#a78bfa', environmental: '#34d399', dangerous: '#fb7185' };
+window.RISK_INC_INJURY = ['first_aid', 'medical', 'restricted', 'lti', 'fatality'];
+window.RISK_INC_STATUS = { reported: { label: 'Reported - تم الإبلاغ', color: '#eab308' }, investigating: { label: 'Investigating - قيد التحقيق', color: '#38bdf8' }, closed: { label: 'Closed - مغلق', color: '#10b981' } };
+window.RISK_RCA_CATS = { human: 'Human factors - عوامل بشرية', equipment: 'Equipment / Machinery - معدات وآلات', procedure: 'Procedure / Method - إجراءات وطرق العمل', training: 'Training / Competence - تدريب وكفاءة', environment: 'Work environment - بيئة العمل', management: 'Management / Supervision - إدارة وإشراف', design: 'Design / Maintenance - تصميم وصيانة' };
+window.RISK_CAPA_STATUS = { open: { label: 'Open - مفتوح', color: '#eab308' }, in_progress: { label: 'In Progress - قيد التنفيذ', color: '#38bdf8' }, done: { label: 'Done, to verify - منجز للتحقق', color: '#a78bfa' }, verified: { label: 'Verified - تم التحقق', color: '#10b981' }, cancelled: { label: 'Cancelled - ملغى', color: '#64748b' } };
+window.RISK_CTRL_LABELS = { elimination: 'Elimination - الإزالة', substitution: 'Substitution - الاستبدال', engineering: 'Engineering - هندسية', administrative: 'Administrative - إدارية', ppe: 'PPE - معدات الوقاية' };
+Object.assign(window._risk, { incidents: [], capas: [], incUnsubs: [], capaUnsubs: [], incFilter: 'all', capaFilter: 'all', inc: null, capaForm: null, errShown: {} });
+
+window.riskToday = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+window.riskIncClassLabel = (k) => (window.RISK_INC_CLASSES.find(x => x.key === k) || { label: k }).label;
+window.riskCapaOverdue = (c) => ['open', 'in_progress'].includes(c.status) && c.due && c.due < window.riskToday();
+
+// صلاحية مراجعة الحادث: نفس هرم الصلاحيات (قائد / مالك / مدير حسب تصنيف الحادث)
+window.riskIncCanReview = (i) => {
+    if (!i || !['reported', 'investigating'].includes(i.status)) return false;
+    const c = window.riskCtx();
+    if (c.role === 'master') return true;
+    if (i.needRole === 'leader') return c.role === 'leader' || c.role === 'owner';
+    if (i.needRole === 'owner') return c.role === 'owner';
+    return false;
+};
+window.riskCapaManager = () => ['master', 'owner', 'leader'].includes(window.riskCtx().role);
+
+// ---------- الاستماع (حسب الدور) ----------
+window.riskScopedListen = (colName, memberMode, setter, unsubKey) => {
+    (window._risk[unsubKey] || []).forEach(u => { try { u(); } catch (e) {} });
+    window._risk[unsubKey] = [];
+    const c = window.riskCtx();
+    if (c.role === 'member' && memberMode === 'none') { setter([]); return; }
+    const col = collection(db, 'artifacts', appId, 'public', 'data', colName), bucket = {};
+    const apply = (k, snap) => {
+        bucket[k] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const seen = {};
+        setter([].concat(...Object.values(bucket)).filter(x => seen[x.id] ? false : (seen[x.id] = true)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    };
+    const err = e => { console.warn(colName, e); if (!window._risk.errShown[colName]) { window._risk.errShown[colName] = true; window.showNotif('Could not load ' + colName + ', check rules - تعذر تحميل البيانات، تحقق من القواعد', 'error'); } };
+    const U = window._risk[unsubKey];
+    if (c.role === 'master') U.push(onSnapshot(col, s => apply('all', s), err));
+    else if (c.role === 'owner') Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 40).forEach(k => U.push(onSnapshot(query(col, where('leaderId', '==', k)), s => apply(k, s), err)));
+    else if (c.role === 'leader') U.push(onSnapshot(query(col, where('leaderId', '==', c.leaderId)), s => apply('l', s), err));
+    else U.push(onSnapshot(query(col, where('requesterId', '==', c.uid)), s => apply('m', s), err));
+};
+window.riskIncListen = () => {
+    window.riskScopedListen('risk_incidents', 'own', list => { window._risk.incidents = list; window.riskTabsRefresh(); if (window._risk.tab === 'inc') window.riskIncRender(); }, 'incUnsubs');
+    window.riskScopedListen('risk_capa', 'none', list => { window._risk.capas = list; window.riskTabsRefresh(); if (window._risk.tab === 'capa') window.riskCapaRender(); }, 'capaUnsubs');
+};
+const _riskUnlistenPrev7 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev7(); ['incUnsubs', 'capaUnsubs'].forEach(k => { (window._risk[k] || []).forEach(u => { try { u(); } catch (e) {} }); window._risk[k] = []; }); };
+
+const _riskShowPrev7 = window.riskOnShow;
+window.riskOnShow = async () => {
+    await _riskShowPrev7();
+    window.riskTabsInit();
+    window.riskIncListen();
+    try {
+        const s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_meta', 'incidentClasses'));
+        if (s.exists() && Array.isArray(s.data().data) && s.data().data.length) window.RISK_INC_CLASSES = s.data().data.map(x => ({ key: x.key, label: x.label }));
+    } catch (e) { console.warn('inc classes', e); }
+};
+
+// ---------- التبويبات الأربعة ----------
+const _riskTabsInitPrev = window.riskTabsInit;
+window.riskTabsInit = () => {
+    _riskTabsInitPrev();
+    const ra = document.getElementById('riskRaPanel'); if (!ra) return;
+    if (!document.getElementById('riskIncPanel')) {
+        const inc = document.createElement('div'); inc.id = 'riskIncPanel'; inc.className = 'flex-1 overflow-y-auto p-5 hidden';
+        ra.insertAdjacentElement('afterend', inc);
+        const cp = document.createElement('div'); cp.id = 'riskCapaPanel'; cp.className = 'flex-1 overflow-y-auto p-5 hidden';
+        inc.insertAdjacentElement('afterend', cp);
+    }
+};
+window.riskTabsRefresh = () => {
+    const tabs = document.getElementById('riskTabs'); if (!tabs) return;
+    const R = window._risk, role = window.riskCtx().role;
+    const nP = (R.permits || []).filter(p => window.riskCanApprove(p)).length;
+    const nA = (R.assessments || []).filter(a => window.riskCanApprove(a)).length;
+    const nI = (R.incidents || []).filter(i => window.riskIncCanReview(i)).length;
+    const nC = (R.capas || []).filter(c => window.riskCapaOverdue(c)).length;
+    const defs = [['permits', 'Permits - التصاريح', nP], ['ra', 'Risk Assessment - تقييم المخاطر', nA], ['inc', 'Incidents - الحوادث', nI]];
+    if (role !== 'member') defs.push(['capa', 'CAPA - الإجراءات التصحيحية', nC]);
+    tabs.innerHTML = defs.map(([k, l, n]) => { const on = R.tab === k; return `<button onclick="window.riskTabSet('${k}')" class="px-4 py-2 rounded-xl text-xs font-black whitespace-nowrap" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${on ? '#000' : '#cbd5e1'};border:1px solid ${on ? '#f97316' : 'rgba(255,255,255,0.12)'};">${l}${n ? ` <span class="px-1.5 rounded-full" style="background:#ef4444;color:#fff">${n}</span>` : ''}</button>`; }).join('');
+};
+window.riskTabSet = (k) => {
+    window._risk.tab = k;
+    [['permits', 'riskPermitsBox'], ['ra', 'riskRaPanel'], ['inc', 'riskIncPanel'], ['capa', 'riskCapaPanel']].forEach(([key, id]) => document.getElementById(id)?.classList.toggle('hidden', key !== k));
+    window.riskTabsRefresh();
+    if (k === 'ra') window.riskRaRender();
+    if (k === 'inc') window.riskIncRender();
+    if (k === 'capa') window.riskCapaRender();
+};
+
+// ---------- قائمة الحوادث ----------
+window.riskIncSetFilter = (f) => { window._risk.incFilter = f; window.riskIncRender(); };
+window.riskIncRender = () => {
+    const panel = document.getElementById('riskIncPanel'); if (!panel) return;
+    const all = window._risk.incidents || [], f = window._risk.incFilter;
+    const open = all.filter(i => i.status !== 'closed').length, mine = all.filter(i => window.riskIncCanReview(i)).length;
+    const serious = all.filter(i => ['lti', 'fatality'].includes(i.class)).length;
+    const stat = (label, n, color) => `<div class="rounded-2xl p-3 text-center" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-xl font-black" style="color:${color}">${n}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    const chips = [['all', 'All - الكل'], ['mine', 'Awaiting my action - بانتظار إجرائي' + (mine ? ' (' + mine + ')' : '')], ['open', 'Open - مفتوحة'], ['closed', 'Closed - مغلقة']];
+    const list = all.filter(i => f === 'all' ? true : (f === 'mine' ? window.riskIncCanReview(i) : (f === 'open' ? i.status !== 'closed' : i.status === 'closed')));
+    panel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">${stat('Total - الإجمالي', all.length, '#38bdf8')}${stat('Open - مفتوحة', open, '#eab308')}${stat('Awaiting my action - بانتظار إجرائي', mine, '#f97316')}${stat('LTI / Fatality - فقدان وقت / وفاة', serious, '#ef4444')}</div>
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <button onclick="window.riskIncNew()" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#ef4444,#f97316);">🚨 Report Incident - إبلاغ عن حادث</button>
+            <div class="flex flex-wrap gap-2">${chips.map(([k, l]) => `<button onclick="window.riskIncSetFilter('${k}')" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${f === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${f === k ? '#000' : '#94a3b8'};border:1px solid ${f === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('')}</div></div>
+        <div class="grid gap-3 md:grid-cols-2">${list.length ? list.map(i => {
+            const sm = window.RISK_INC_STATUS[i.status] || window.RISK_INC_STATUS.reported, col = window.RISK_INC_COLOR[i.class] || '#94a3b8', need = window.riskIncCanReview(i);
+            return `<div onclick="window.riskIncOpen('${i.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));border:1px solid ${need ? '#f97316' : sm.color + '55'};">
+                <div class="flex items-center justify-between mb-2"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}</span><span class="text-slate-500 text-[10px] font-mono">${esc(i.incNo || '')}</span></div>
+                <p class="text-[11px] font-black" style="color:${col}">● ${esc(window.riskIncClassLabel(i.class))}</p>
+                <p class="text-white font-black text-sm mt-1">📍 ${esc(i.location || '—')}</p>
+                <p class="text-slate-400 text-xs mt-1">${window.riskFmt(i.dateTime)}</p>
+                <p class="text-slate-500 text-[10px] mt-2">${esc(i.requesterName || '')} · ${window.RISK_ROLE_LABEL[i.requesterRole] || ''}</p>
+                ${need ? '<p class="text-orange-300 text-[11px] font-black mt-2">⏳ Awaiting your action - بانتظار إجرائك</p>' : ''}</div>`;
+        }).join('') : '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">No incidents in this view. - لا توجد حوادث في هذا العرض.</p>'}</div>`;
+};
+
+// ---------- نموذج الإبلاغ عن حادث ----------
+window.riskIncNew = () => {
+    if (!window.riskAllowed()) return window.showNotif('This feature is not enabled in your package - هذه الميزة غير مفعّلة في باقتك', 'error');
+    const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    window._risk.inc = { class: '', dt: now, location: '', task: '', permitId: '', hazardKey: '', injured: '', injFn: '', witnesses: '', informedWho: '', before: '', during: '', after: '', observed: '', heard: '', injuryDesc: '', firstAid: '', secured: false, securedNote: '', alerted: '', statements: '', attach: '', verified: false };
+    const m = document.getElementById('riskIncModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskIncFormRender();
+};
+window.riskIncFormClose = () => { const m = document.getElementById('riskIncModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.inc = null; };
+window.riskIncSet = (k, v) => { if (window._risk.inc) window._risk.inc[k] = v; };
+window.riskIncClassPick = (v) => { window._risk.inc.class = v; window.riskIncFormRender(); };
+
+window.riskIncFormRender = () => {
+    const f = window._risk.inc, body = document.getElementById('riskIncBody'); if (!f || !body) return;
+    const cls = 'erg-input lux-field-input text-right w-full mb-2';
+    const L = (t) => `<p class="text-slate-400 text-[11px] font-black mb-1">${t}</p>`;
+    const H = (t) => `<p class="text-orange-300 text-xs font-black mt-4 mb-2 pb-1" style="border-bottom:1px solid rgba(249,115,22,0.3)">${t}</p>`;
+    const inp = (k, ph) => `<input class="${cls}" value="${esc(f[k])}" ${ph ? `placeholder="${ph}"` : ''} oninput="window.riskIncSet('${k}',this.value)">`;
+    const ta = (k, rows) => `<textarea rows="${rows || 2}" class="${cls}" oninput="window.riskIncSet('${k}',this.value)">${esc(f[k])}</textarea>`;
+    const injury = window.RISK_INC_INJURY.includes(f.class);
+    const permits = (window._risk.permits || []).map(p => `<option value="${p.id}" ${f.permitId === p.id ? 'selected' : ''}>${esc(p.permitNo)} · ${esc(p.workTypeLabel || '')}</option>`).join('');
+    const hz = (window._risk.hazards || []).map(h => `<option value="${h.id}" ${f.hazardKey === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
+    body.innerHTML = `
+        ${H('1 · General information - معلومات أساسية')}
+        ${L('Incident classification - تصنيف الحادث *')}<select class="${cls}" onchange="window.riskIncClassPick(this.value)"><option value="">— Select - اختر —</option>${window.RISK_INC_CLASSES.map(c => `<option value="${c.key}" ${f.class === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
+        ${f.class ? `<p class="text-[11px] mb-2" style="color:${window.RISK_INC_COLOR[f.class] || '#94a3b8'}">Reviewed by - يراجعه: ${window.RISK_LEVELS[({ leader: 'medium', owner: 'high', master: 'critical' })[window.RISK_INC_NEED[f.class]]].who}</p>` : ''}
+        ${L('Date and time of the incident - تاريخ ووقت الحادث *')}<input type="datetime-local" class="${cls}" value="${esc(f.dt)}" onchange="window.riskIncSet('dt',this.value)">
+        ${L('Precise location (building, floor, workshop, zone) - المكان الدقيق *')}${inp('location')}
+        ${L('Department or task - القسم أو المهمة')}${inp('task')}
+        ${H('2 · Persons concerned - الأشخاص المعنيون')}
+        <p class="text-amber-300 text-[10px] mb-2">🛡️ Protect personal data; record only what the company procedure requires. - احمِ البيانات الشخصية ولا تذكر إلا ما تتطلبه إجراءات المؤسسة.</p>
+        ${L('Injured person (only necessary details) - المصاب (البيانات الضرورية فقط)')}${inp('injured')}
+        ${L('Function and task at the time - الوظيفة والمهمة وقت الحادث')}${inp('injFn')}
+        ${L('Witnesses and professional contact - الشهود ووسيلة التواصل المهنية')}${inp('witnesses')}
+        ${L('Responsible person informed - المسؤول الذي تم إبلاغه')}${inp('informedWho')}
+        ${H('3 · Description of facts - وصف ما حدث')}
+        <p class="text-slate-500 text-[10px] mb-2">✅ Precise: "The foot slipped on a wet floor at [time]" - جيد: «انزلقت القدم على أرض مبللة عند الساعة...» &nbsp; ❌ Avoid: "The worker was negligent" - تجنّب: «كان العامل مهملاً»</p>
+        ${L('Before the incident - ما جرى قبل الحادث')}${ta('before')}
+        ${L('During the incident * - ما جرى أثناء الحادث *')}${ta('during', 3)}
+        ${L('After the incident - ما جرى بعد الحادث')}${ta('after')}
+        ${L('Observed facts - الوقائع التي شوهدت')}${ta('observed')}
+        ${L('Heard or assumed (keep separate) - ما سُمع أو افتُرض (افصله)')}${ta('heard')}
+        ${H('4 · Injury and immediate measures - الإصابة والإجراءات الفورية')}
+        ${L('Factual injury description, no diagnosis ' + (injury ? '*' : '') + ' - وصف موضوعي للإصابة دون تشخيص ' + (injury ? '*' : ''))}${ta('injuryDesc')}
+        ${L('First aid / emergency help and time - الإسعافات أو النجدة ووقت طلبها')}${inp('firstAid')}
+        <label class="flex items-center gap-2 text-slate-300 text-xs font-black mb-2"><input type="checkbox" ${f.secured ? 'checked' : ''} onchange="window.riskIncSet('secured',this.checked)"> Area secured / danger removed - تم تأمين المكان أو إيقاف الخطر</label>
+        ${inp('securedNote', 'Details - تفاصيل')}
+        ${L('Who was alerted and when - من تم إبلاغه ومتى')}${inp('alerted')}
+        ${H('5 · Witnesses and attachments - الشهود والمرفقات')}
+        ${L('Witness statements (each in their own words) - إفادات الشهود بكلماتهم')}${ta('statements', 3)}
+        ${L('Photos / sketch / documents kept (reference) - الصور والمخططات والمستندات المحفوظة (مرجع)')}${inp('attach')}
+        <p class="text-amber-300 text-[10px] mb-2">⚠️ Do not alter the scene before documenting it, except to remove immediate danger. - لا تغيّر المشهد قبل توثيقه إلا لإزالة خطر فوري.</p>
+        ${H('6 · Link and verification - الربط والمراجعة')}
+        ${L('Related permit (optional) - التصريح المرتبط (اختياري)')}<select class="${cls}" onchange="window.riskIncSet('permitId',this.value)"><option value="">— None - بدون —</option>${permits}</select>
+        ${L('Related hazard (optional) - الخطر المرتبط (اختياري)')}<select class="${cls}" onchange="window.riskIncSet('hazardKey',this.value)"><option value="">— None - بدون —</option>${hz}</select>
+        <label class="flex items-start gap-2 text-slate-200 text-xs font-black mt-2"><input type="checkbox" class="mt-1" ${f.verified ? 'checked' : ''} onchange="window.riskIncSet('verified',this.checked)"> I verified dates, names and facts; unknown items are left blank, not guessed. - راجعتُ التواريخ والأسماء والوقائع، وتركت المجهول فارغاً دون تخمين.</label>
+        <div class="flex gap-2 mt-4"><button onclick="window.riskIncSubmit()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#ef4444,#f97316);">Submit report - إرسال التقرير</button>
+        <button onclick="window.riskIncFormClose()" class="flex-1 py-3 rounded-xl font-black text-sm text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);">Cancel - إلغاء</button></div>`;
+};
+
+window.riskIncSubmit = async () => {
+    const f = window._risk.inc; if (!f) return;
+    const E = (m) => window.showNotif(m, 'error');
+    if (!f.class) return E('Choose the incident classification - اختر تصنيف الحادث');
+    if (!f.dt) return E('Date and time are required - التاريخ والوقت مطلوبان');
+    if (!f.location.trim()) return E('Location is required - الموقع مطلوب');
+    if (f.during.trim().length < 10) return E('Describe what happened during the incident (10+ characters) - صف ما جرى أثناء الحادث (10 أحرف فأكثر)');
+    if (window.RISK_INC_INJURY.includes(f.class) && f.injuryDesc.trim().length < 5) return E('Injury description is required - وصف الإصابة مطلوب');
+    if (!f.verified) return E('Confirm that you verified the report - أكّد مراجعة التقرير');
+    const c = window.riskCtx(), now = Date.now(), p = (window._risk.permits || []).find(x => x.id === f.permitId), hz = (window._risk.hazards || []).find(x => x.id === f.hazardKey);
+    const data = {
+        incNo: 'INC-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: c.companyId, leaderId: c.leaderId, requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        class: f.class, needRole: window.RISK_INC_NEED[f.class], dateTime: new Date(f.dt).getTime(),
+        location: f.location.trim(), task: f.task.trim(), injured: f.injured.trim(), injFn: f.injFn.trim(), witnesses: f.witnesses.trim(), informedWho: f.informedWho.trim(),
+        before: f.before.trim(), during: f.during.trim(), after: f.after.trim(), observed: f.observed.trim(), heard: f.heard.trim(),
+        facts: [f.before, f.during, f.after].map(x => x.trim()).filter(Boolean).join('\n'),
+        injuryDesc: f.injuryDesc.trim(), firstAid: f.firstAid.trim(), secured: f.secured === true, securedNote: f.securedNote.trim(), alerted: f.alerted.trim(),
+        statements: f.statements.trim(), attach: f.attach.trim(), verified: true, status: 'reported', createdAt: now
+    };
+    if (p) { data.permitId = p.id; data.permitNo = p.permitNo; }
+    if (hz) { data.hazardKey = hz.id; data.hazard = hz.name; }
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_incidents'), data);
+        window.riskIncFormClose();
+        window.showNotif('✅ Incident reported ' + data.incNo + ' - تم الإبلاغ عن الحادث', 'success');
+    } catch (e) { console.error('inc submit', e); E('Could not save the report, check permissions - تعذر حفظ التقرير، تحقق من الصلاحيات'); }
+};
+
+// ---------- بطاقة الحادث + التحقيق + الإغلاق ----------
+window.riskIncOpen = (id) => {
+    const i = (window._risk.incidents || []).find(x => x.id === id); if (!i) return;
+    window._risk.incDetailId = id;
+    const sm = window.RISK_INC_STATUS[i.status] || window.RISK_INC_STATUS.reported, can = window.riskIncCanReview(i), col = window.RISK_INC_COLOR[i.class] || '#94a3b8';
+    const row = (k, v) => v ? `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left" style="white-space:pre-wrap">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>` : '';
+    const caps = (window._risk.capas || []).filter(c => c.sourceType === 'incident' && c.sourceId === id);
+    const cls = 'erg-input lux-field-input text-right w-full mb-2';
+    const whys = (i.whys || []);
+    const invForm = can && i.status === 'investigating' ? `<div class="rounded-xl p-3 mt-3" style="background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.3);">
+        <p class="text-sky-300 text-xs font-black mb-2">🔎 Root cause analysis - تحليل السبب الجذري</p>
+        <select id="riskInv_cat" class="${cls}"><option value="">— Root cause category - فئة السبب الجذري —</option>${Object.keys(window.RISK_RCA_CATS).map(k => `<option value="${k}" ${i.rootCauseCategory === k ? 'selected' : ''}>${window.RISK_RCA_CATS[k]}</option>`).join('')}</select>
+        ${[0, 1, 2, 3, 4].map(n => `<input id="riskInv_why${n}" class="${cls}" placeholder="Why ${n + 1}? - لماذا ${n + 1}؟" value="${esc(whys[n] || '')}">`).join('')}
+        <textarea id="riskInv_contrib" rows="2" class="${cls}" placeholder="Contributing factors - العوامل المساهمة">${esc(i.contributing || '')}</textarea>
+        <textarea id="riskInv_root" rows="2" class="${cls}" placeholder="Root cause summary * - ملخص السبب الجذري *">${esc(i.rootCause || '')}</textarea>
+        <button onclick="window.riskIncSaveInv('${id}')" class="w-full py-2.5 rounded-xl font-black text-xs text-black mb-2" style="background:linear-gradient(135deg,#38bdf8,#7dd3fc);">💾 Save investigation - حفظ التحقيق</button>
+        <button onclick="window.riskCapaNew('incident','${id}','${esc(i.incNo)}','${i.leaderId}')" class="w-full py-2.5 rounded-xl font-black text-xs text-black mb-2" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ Create corrective action (CAPA) - إنشاء إجراء تصحيحي</button>
+        <textarea id="riskInv_close" rows="2" class="${cls}" placeholder="Closure note - ملاحظة الإغلاق">${esc(i.closureNote || '')}</textarea>
+        <button onclick="window.riskIncClose('${id}')" class="w-full py-2.5 rounded-xl font-black text-xs text-black" style="background:linear-gradient(135deg,#10b981,#34d399);">✅ Close incident - إغلاق الحادث</button></div>` : '';
+    document.getElementById('riskIncDetailBody').innerHTML = `
+        <div class="text-center mb-3"><p class="text-slate-400 text-[11px] font-mono">${esc(i.incNo || '')}</p>
+        <span class="inline-block mt-1 text-xs px-3 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}</span>
+        <p class="text-xs font-black mt-2" style="color:${col}">● ${esc(window.riskIncClassLabel(i.class))}</p></div>
+        ${row('Date - التاريخ', window.riskFmt(i.dateTime))}${row('Location - الموقع', esc(i.location || ''))}${row('Task - المهمة', esc(i.task || ''))}
+        ${row('Reported by - مقدّم البلاغ', esc(i.requesterName || '') + ' · ' + (window.RISK_ROLE_LABEL[i.requesterRole] || ''))}
+        ${row('Injured - المصاب', esc(i.injured || ''))}${row('Function - الوظيفة', esc(i.injFn || ''))}${row('Witnesses - الشهود', esc(i.witnesses || ''))}${row('Informed - أُبلغ', esc(i.informedWho || ''))}
+        ${row('Before - قبل', esc(i.before || ''))}${row('During - أثناء', esc(i.during || ''))}${row('After - بعد', esc(i.after || ''))}
+        ${row('Observed - المشاهَد', esc(i.observed || ''))}${row('Heard / assumed - المسموع / المفترض', esc(i.heard || ''))}
+        ${row('Injury - الإصابة', esc(i.injuryDesc || ''))}${row('First aid - الإسعاف', esc(i.firstAid || ''))}${row('Area secured - تأمين المكان', i.secured ? '✅ ' + esc(i.securedNote || '') : '')}${row('Alerted - تم إبلاغ', esc(i.alerted || ''))}
+        ${row('Statements - الإفادات', esc(i.statements || ''))}${row('Attachments - المرفقات', esc(i.attach || ''))}
+        ${row('Permit - التصريح', esc(i.permitNo || ''))}${row('Hazard - الخطر', esc(i.hazard || ''))}
+        ${i.reviewedBy ? row('Reviewed by - راجعه', esc(i.reviewedBy)) : ''}
+        ${i.rootCauseCategory ? row('Root cause category - فئة السبب', window.RISK_RCA_CATS[i.rootCauseCategory] || '') : ''}${whys.length ? row('5 Whys - لماذا الخمسة', whys.map((w, n) => (n + 1) + '. ' + esc(w)).join('<br>')) : ''}
+        ${row('Contributing - العوامل المساهمة', esc(i.contributing || ''))}${row('Root cause - السبب الجذري', esc(i.rootCause || ''))}${row('Closure note - ملاحظة الإغلاق', esc(i.closureNote || ''))}
+        ${caps.length ? `<p class="text-slate-500 text-[11px] font-black mt-4 mb-1">Linked actions (CAPA) - الإجراءات المرتبطة</p>${caps.map(c => { const cm = window.RISK_CAPA_STATUS[c.status] || window.RISK_CAPA_STATUS.open; return `<div onclick="window.riskCapaOpen('${c.id}')" class="rounded-lg px-3 py-2 mb-1 cursor-pointer text-xs" style="background:rgba(255,255,255,0.04);border:1px solid ${cm.color}55;"><span style="color:${cm.color}" class="font-black">${cm.label}</span> · <span class="text-white">${esc(c.title)}</span></div>`; }).join('')}` : ''}
+        ${can && i.status === 'reported' ? `<button onclick="window.riskIncStart('${id}')" class="w-full mt-4 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#38bdf8,#7dd3fc);">🔎 Start investigation - بدء التحقيق</button>` : ''}
+        ${invForm}
+        <button onclick="window.riskIncPdf('${id}')" class="w-full mt-3 py-3 rounded-xl font-black text-sm text-cyan-200" style="background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.35);">📄 Export / Print report - تصدير / طباعة التقرير</button>`;
+    const m = document.getElementById('riskIncDetailModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+};
+window.riskIncCloseDetail = () => { const m = document.getElementById('riskIncDetailModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.incDetailId = null; };
+window.riskIncRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'risk_incidents', id);
+
+window.riskIncStart = async (id) => {
+    const i = (window._risk.incidents || []).find(x => x.id === id);
+    if (!window.riskIncCanReview(i)) return window.showNotif('You are not authorised - لا تملك الصلاحية', 'error');
+    const c = window.riskCtx();
+    try { await updateDoc(window.riskIncRef(id), { status: 'investigating', reviewedBy: c.name, reviewedByRole: c.role, reviewedAt: Date.now() }); window.showNotif('🔎 Investigation started - بدأ التحقيق', 'success'); window.riskIncCloseDetail(); }
+    catch (e) { console.error(e); window.showNotif('Could not update, check permissions - تعذر التحديث، تحقق من الصلاحيات', 'error'); }
+};
+window.riskIncInvData = () => {
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    return { rootCauseCategory: v('riskInv_cat'), whys: [0, 1, 2, 3, 4].map(n => v('riskInv_why' + n)).filter(Boolean), contributing: v('riskInv_contrib'), rootCause: v('riskInv_root') };
+};
+window.riskIncSaveInv = async (id) => {
+    const i = (window._risk.incidents || []).find(x => x.id === id);
+    if (!window.riskIncCanReview(i)) return window.showNotif('You are not authorised - لا تملك الصلاحية', 'error');
+    try { await updateDoc(window.riskIncRef(id), Object.assign({ status: 'investigating' }, window.riskIncInvData())); window.showNotif('💾 Investigation saved - حُفظ التحقيق', 'success'); setTimeout(() => window.riskIncOpen(id), 350); }
+    catch (e) { console.error(e); window.showNotif('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات', 'error'); }
+};
+window.riskIncClose = async (id) => {
+    const i = (window._risk.incidents || []).find(x => x.id === id);
+    if (!window.riskIncCanReview(i)) return window.showNotif('You are not authorised - لا تملك الصلاحية', 'error');
+    const inv = window.riskIncInvData();
+    if (!inv.rootCause) return window.showNotif('Root cause summary is required to close - ملخص السبب الجذري مطلوب للإغلاق', 'error');
+    const caps = (window._risk.capas || []).filter(c => c.sourceType === 'incident' && c.sourceId === id);
+    if (!['near_miss', 'first_aid'].includes(i.class) && !caps.length) return window.showNotif('Create at least one corrective action before closing - أنشئ إجراءً تصحيحياً واحداً على الأقل قبل الإغلاق', 'error');
+    if (caps.some(c => !['verified', 'cancelled'].includes(c.status))) return window.showNotif('All actions must be verified or cancelled before closing - يجب التحقق من كل الإجراءات أو إلغاؤها قبل الإغلاق', 'error');
+    try {
+        await updateDoc(window.riskIncRef(id), Object.assign({ status: 'closed', closedAt: Date.now(), closureNote: (document.getElementById('riskInv_close')?.value || '').trim() }, inv));
+        window.showNotif('✅ Incident closed - أُغلق الحادث', 'success'); window.riskIncCloseDetail();
+    } catch (e) { console.error(e); window.showNotif('Could not close, check permissions - تعذر الإغلاق، تحقق من الصلاحيات', 'error'); }
+};
+
+window.riskIncPdf = (id) => {
+    const i = (window._risk.incidents || []).find(x => x.id === id); if (!i) return;
+    const w = window.open('', '_blank'); if (!w) return window.showNotif('Allow pop-ups to export PDF - اسمح بالنوافذ المنبثقة لتصدير PDF', 'error');
+    const tr = (k, v) => v ? `<tr><th>${k}</th><td>${esc(v).replace(/\n/g, '<br>')}</td></tr>` : '';
+    const sec = (t) => `<tr><td colspan="2" style="background:#fff3e6;font-weight:bold">${t}</td></tr>`;
+    w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(i.incNo || 'Incident')}</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;margin:22px;color:#111}h1{margin:0 0 4px;font-size:20px}.hd{border-bottom:3px solid #ef4444;padding-bottom:8px;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #bbb;padding:5px 8px;text-align:right;vertical-align:top}th{background:#f3f4f6;width:30%}.sig{display:flex;gap:16px;margin-top:28px}.sig div{flex:1;border-top:1px solid #333;padding-top:6px;text-align:center;font-size:11px}small{color:#555}</style></head><body>
+<div class="hd"><h1>Work Accident Detailed Report - تقرير مفصل عن حادث عمل</h1><div>Ref - المرجع: <b>${esc(i.incNo || '')}</b> &nbsp; Class - التصنيف: ${esc(window.riskIncClassLabel(i.class))} &nbsp; Status - الحالة: ${(window.RISK_INC_STATUS[i.status] || {}).label || ''}</div></div>
+<table>${sec('1 · General Information - معلومات أساسية')}${tr('Date and time - التاريخ والوقت', window.riskFmt(i.dateTime))}${tr('Location - المكان', i.location)}${tr('Task - القسم أو المهمة', i.task)}${tr('Report date - تاريخ إعداد التقرير', window.riskFmt(i.createdAt))}${tr('Prepared by - أعدّه', (i.requesterName || '') + ' (' + (window.RISK_ROLE_LABEL[i.requesterRole] || '') + ')')}
+${sec('2 · Persons Concerned - الأشخاص المعنيون')}${tr('Injured person - المصاب', i.injured)}${tr('Function - الوظيفة', i.injFn)}${tr('Witnesses - الشهود', i.witnesses)}${tr('Informed - المسؤول المُبلَّغ', i.informedWho)}
+${sec('3 · Description of Facts - وصف ما حدث')}${tr('Before - قبل', i.before)}${tr('During - أثناء', i.during)}${tr('After - بعد', i.after)}${tr('Observed - المشاهَد', i.observed)}${tr('Heard / assumed - المسموع / المفترض', i.heard)}
+${sec('4 · Injury and Immediate Measures - الإصابة والإجراءات الفورية')}${tr('Injury - الإصابة', i.injuryDesc)}${tr('First aid - الإسعاف', i.firstAid)}${tr('Area secured - تأمين المكان', i.secured ? 'Yes - نعم. ' + (i.securedNote || '') : '')}${tr('Alerted - تم إبلاغ', i.alerted)}
+${sec('5 · Witnesses and Attachments - الشهود والمرفقات')}${tr('Statements - الإفادات', i.statements)}${tr('Attachments - المرفقات', i.attach)}
+${sec('6 · Investigation - التحقيق')}${tr('Root cause category - فئة السبب', window.RISK_RCA_CATS[i.rootCauseCategory] || '')}${tr('5 Whys - لماذا الخمسة', (i.whys || []).map((x, n) => (n + 1) + '. ' + x).join('\n'))}${tr('Contributing factors - العوامل المساهمة', i.contributing)}${tr('Root cause - السبب الجذري', i.rootCause)}${tr('Closure note - ملاحظة الإغلاق', i.closureNote)}${tr('Reviewed by - راجعه', i.reviewedBy)}</table>
+<p><small>This report documents facts and helps prevent recurrence; it does not alone determine legal responsibility. - التقرير يوثق الوقائع ويساعد على منع تكرار الحادث ولا يحدد المسؤولية القانونية وحده.</small></p>
+<div class="sig"><div>Reporter<br>مقدّم البلاغ</div><div>Reviewer<br>المراجِع</div><div>Safety Officer<br>مسؤول السلامة</div></div></body></html>`);
+    w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);
+};
+
+// ---------- الإجراءات التصحيحية والوقائية (CAPA) ----------
+window.riskCapaSetFilter = (f) => { window._risk.capaFilter = f; window.riskCapaRender(); };
+window.riskCapaRender = () => {
+    const panel = document.getElementById('riskCapaPanel'); if (!panel) return;
+    const all = window._risk.capas || [], f = window._risk.capaFilter;
+    const n = (fn) => all.filter(fn).length;
+    const stat = (label, v, color) => `<div class="rounded-2xl p-3 text-center" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-xl font-black" style="color:${color}">${v}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    const chips = [['all', 'All - الكل'], ['overdue', 'Overdue - متأخرة'], ['open', 'Open / In progress - مفتوحة'], ['done', 'Done, to verify - للتحقق'], ['verified', 'Verified - تم التحقق']];
+    const list = all.filter(c => f === 'all' ? true : (f === 'overdue' ? window.riskCapaOverdue(c) : (f === 'open' ? ['open', 'in_progress'].includes(c.status) : c.status === f)));
+    panel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">${stat('Total - الإجمالي', all.length, '#38bdf8')}${stat('Open - مفتوحة', n(c => ['open', 'in_progress'].includes(c.status)), '#eab308')}${stat('Overdue - متأخرة', n(c => window.riskCapaOverdue(c)), '#ef4444')}${stat('To verify - للتحقق', n(c => c.status === 'done'), '#a78bfa')}${stat('Verified - تم التحقق', n(c => c.status === 'verified'), '#10b981')}</div>
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <button onclick="window.riskCapaNew('manual','','','')" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ New Action - إجراء جديد</button>
+            <div class="flex flex-wrap gap-2">${chips.map(([k, l]) => `<button onclick="window.riskCapaSetFilter('${k}')" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${f === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${f === k ? '#000' : '#94a3b8'};border:1px solid ${f === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('')}</div></div>
+        <div class="grid gap-3 md:grid-cols-2">${list.length ? list.map(c => {
+            const sm = window.RISK_CAPA_STATUS[c.status] || window.RISK_CAPA_STATUS.open, od = window.riskCapaOverdue(c);
+            return `<div onclick="window.riskCapaOpen('${c.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));border:1px solid ${od ? '#ef4444' : sm.color + '55'};">
+                <div class="flex items-center justify-between mb-2"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}</span><span class="text-slate-500 text-[10px] font-mono">${esc(c.capaNo || '')}</span></div>
+                <p class="text-white font-black text-sm">${esc(c.title || '')}</p>
+                <p class="text-slate-400 text-xs mt-1">👤 ${esc(c.owner || '—')} · 📅 <span style="color:${od ? '#f87171' : '#94a3b8'}">${esc(c.due || '—')}${od ? ' ⚠️' : ''}</span></p>
+                <div class="flex items-center gap-2 mt-2">${window.riskRaBadge(c.priority)} <span class="text-slate-500 text-[10px]">${esc(c.sourceNo || (c.sourceType === 'manual' ? 'Manual - يدوي' : ''))}</span></div></div>`;
+        }).join('') : '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">No actions in this view. - لا توجد إجراءات في هذا العرض.</p>'}</div>`;
+};
+
+window.riskCapaNew = (srcType, srcId, srcNo, leaderId) => {
+    if (!window.riskCapaManager()) return window.showNotif('Only leaders and above create actions - الإجراءات ينشئها القائد فما فوق', 'error');
+    window._risk.capaForm = { srcType, srcId, srcNo, leaderId: leaderId || window.riskCtx().leaderId, title: '', description: '', type: 'corrective', controlLevel: 'administrative', priority: 'medium', owner: '', due: '' };
+    window.riskIncCloseDetail();
+    const m = document.getElementById('riskCapaModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskCapaFormRender();
+};
+window.riskCapaFormClose = () => { const m = document.getElementById('riskCapaModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.capaForm = null; };
+window.riskCapaSet = (k, v) => { if (window._risk.capaForm) window._risk.capaForm[k] = v; };
+window.riskCapaFormRender = () => {
+    const f = window._risk.capaForm, body = document.getElementById('riskCapaBody'); if (!f || !body) return;
+    const cls = 'erg-input lux-field-input text-right w-full mb-2', L = (t) => `<p class="text-slate-400 text-[11px] font-black mb-1">${t}</p>`;
+    body.innerHTML = `${f.srcNo ? `<p class="text-cyan-200 text-xs font-black mb-2">Source - المصدر: ${esc(f.srcNo)}</p>` : ''}
+        ${L('Action title - عنوان الإجراء *')}<input class="${cls}" value="${esc(f.title)}" oninput="window.riskCapaSet('title',this.value)">
+        ${L('Details - التفاصيل')}<textarea rows="3" class="${cls}" oninput="window.riskCapaSet('description',this.value)">${esc(f.description)}</textarea>
+        <div class="flex gap-2"><div class="flex-1">${L('Type - النوع')}<select class="${cls}" onchange="window.riskCapaSet('type',this.value)"><option value="corrective" ${f.type === 'corrective' ? 'selected' : ''}>Corrective - تصحيحي</option><option value="preventive" ${f.type === 'preventive' ? 'selected' : ''}>Preventive - وقائي</option></select></div>
+        <div class="flex-1">${L('Priority - الأولوية')}<select class="${cls}" onchange="window.riskCapaSet('priority',this.value)">${Object.keys(window.RISK_LEVELS).map(k => `<option value="${k}" ${f.priority === k ? 'selected' : ''}>${window.RISK_LEVELS[k].label}</option>`).join('')}</select></div></div>
+        ${L('Control level (hierarchy of controls) - مستوى الضبط (تسلسل الضوابط)')}<select class="${cls}" onchange="window.riskCapaSet('controlLevel',this.value)">${Object.keys(window.RISK_CTRL_LABELS).map(k => `<option value="${k}" ${f.controlLevel === k ? 'selected' : ''}>${window.RISK_CTRL_LABELS[k]}</option>`).join('')}</select>
+        <div class="flex gap-2"><div class="flex-1">${L('Responsible person - المسؤول عن التنفيذ *')}<input class="${cls}" value="${esc(f.owner)}" oninput="window.riskCapaSet('owner',this.value)"></div>
+        <div class="flex-1">${L('Due date - الموعد النهائي *')}<input type="date" class="${cls}" value="${esc(f.due)}" onchange="window.riskCapaSet('due',this.value)"></div></div>
+        <div class="flex gap-2 mt-3"><button onclick="window.riskCapaSubmit()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">Create - إنشاء</button>
+        <button onclick="window.riskCapaFormClose()" class="flex-1 py-3 rounded-xl font-black text-sm text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);">Cancel - إلغاء</button></div>`;
+};
+window.riskCapaSubmit = async () => {
+    const f = window._risk.capaForm; if (!f) return;
+    if (!f.title.trim()) return window.showNotif('Action title is required - عنوان الإجراء مطلوب', 'error');
+    if (!f.owner.trim() || !f.due) return window.showNotif('Responsible person and due date are required - المسؤول والموعد مطلوبان', 'error');
+    const c = window.riskCtx();
+    const data = {
+        capaNo: 'CA-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: c.companyId, leaderId: f.leaderId, creatorId: c.uid, creatorName: c.name, creatorRole: c.role,
+        sourceType: f.srcType, sourceId: f.srcId, sourceNo: f.srcNo,
+        title: f.title.trim(), description: f.description.trim(), type: f.type, controlLevel: f.controlLevel, priority: f.priority,
+        owner: f.owner.trim(), due: f.due, status: 'open', createdAt: Date.now()
+    };
+    try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_capa'), data); window.riskCapaFormClose(); window.showNotif('✅ Action created ' + data.capaNo + ' - أُنشئ الإجراء', 'success'); }
+    catch (e) { console.error('capa submit', e); window.showNotif('Could not save the action, check permissions - تعذر حفظ الإجراء، تحقق من الصلاحيات', 'error'); }
+};
+
+window.riskCapaOpen = (id) => {
+    const c = (window._risk.capas || []).find(x => x.id === id); if (!c) return;
+    window._risk.capaDetailId = id;
+    const sm = window.RISK_CAPA_STATUS[c.status] || window.RISK_CAPA_STATUS.open, od = window.riskCapaOverdue(c), role = window.riskCtx().role;
+    const row = (k, v) => v ? `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left" style="white-space:pre-wrap">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>` : '';
+    const cls = 'erg-input lux-field-input text-right w-full mb-2', btn = (label, fn, bg, fg) => `<button onclick="${fn}" class="w-full py-2.5 rounded-xl font-black text-xs mb-2" style="background:${bg};color:${fg || '#000'};">${label}</button>`;
+    const verifyOk = !['high', 'critical'].includes(c.priority) || role === 'owner' || role === 'master';
+    let actions = '';
+    if (window.riskCapaManager() && !['verified', 'cancelled'].includes(c.status)) {
+        if (c.status === 'open') actions += btn('▶️ Start - بدء التنفيذ', `window.riskCapaStep('${id}','in_progress')`, 'linear-gradient(135deg,#38bdf8,#7dd3fc)');
+        if (['open', 'in_progress'].includes(c.status)) actions += `<textarea id="riskCapa_note" rows="2" class="${cls}" placeholder="Completion note (what was done) - ملاحظة الإنجاز (ما الذي نُفِّذ)">${esc(c.completionNote || '')}</textarea>` + btn('✔️ Mark done - تم الإنجاز', `window.riskCapaStep('${id}','done')`, 'linear-gradient(135deg,#a78bfa,#c4b5fd)');
+        if (c.status === 'done') {
+            if (verifyOk) actions += `<textarea id="riskCapa_note" rows="2" class="${cls}" placeholder="Effectiveness check - التحقق من فعالية الإجراء *"></textarea>` + btn('✅ Verify effectiveness - تحقق وإغلاق', `window.riskCapaStep('${id}','verified')`, 'linear-gradient(135deg,#10b981,#34d399)');
+            else actions += '<p class="text-amber-300 text-[11px] font-black mb-2">High/Critical actions are verified by the company owner. - التحقق من الإجراءات العالية والحرجة يتم من مالك الشركة.</p>';
+            actions += btn('↩️ Reopen - إعادة فتح', `window.riskCapaStep('${id}','in_progress')`, 'rgba(255,255,255,0.08)', '#e2e8f0');
+        }
+        actions += `<textarea id="riskCapa_cancel" rows="1" class="${cls}" placeholder="Cancel reason - سبب الإلغاء"></textarea>` + btn('🚫 Cancel action - إلغاء الإجراء', `window.riskCapaStep('${id}','cancelled')`, 'rgba(239,68,68,0.18)', '#fecaca');
+    }
+    document.getElementById('riskCapaDetailBody').innerHTML = `
+        <div class="text-center mb-3"><p class="text-slate-400 text-[11px] font-mono">${esc(c.capaNo || '')}</p><span class="inline-block mt-1 text-xs px-3 py-1 rounded-full font-black" style="background:${sm.color}26;color:${sm.color}">${sm.label}${od ? ' · ⚠️ Overdue - متأخر' : ''}</span></div>
+        ${row('Title - العنوان', esc(c.title || ''))}${row('Details - التفاصيل', esc(c.description || ''))}
+        ${row('Type - النوع', c.type === 'preventive' ? 'Preventive - وقائي' : 'Corrective - تصحيحي')}${row('Control level - مستوى الضبط', window.RISK_CTRL_LABELS[c.controlLevel] || '')}
+        ${row('Priority - الأولوية', window.riskRaBadge(c.priority))}${row('Responsible - المسؤول', esc(c.owner || ''))}${row('Due - الموعد', esc(c.due || ''))}
+        ${row('Source - المصدر', esc(c.sourceNo || (c.sourceType === 'manual' ? 'Manual - يدوي' : '')))}${row('Created by - أنشأه', esc(c.creatorName || ''))}
+        ${row('Completion - الإنجاز', esc(c.completionNote || ''))}${row('Effectiveness check - فعالية الإجراء', esc(c.verifyNote || ''))}${c.verifiedBy ? row('Verified by - تحقق منه', esc(c.verifiedBy)) : ''}${row('Cancel reason - سبب الإلغاء', esc(c.cancelReason || ''))}
+        <div class="mt-4">${actions}</div>`;
+    const m = document.getElementById('riskCapaDetailModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+};
+window.riskCapaCloseDetail = () => { const m = document.getElementById('riskCapaDetailModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.capaDetailId = null; };
+window.riskCapaStep = async (id, to) => {
+    const c = (window._risk.capas || []).find(x => x.id === id); if (!c || !window.riskCapaManager()) return;
+    const me = window.riskCtx(), now = Date.now(), v = (el) => (document.getElementById(el)?.value || '').trim();
+    const upd = { status: to };
+    if (to === 'in_progress') upd.startedAt = c.startedAt || now;
+    if (to === 'done') { if (v('riskCapa_note').length < 5) return window.showNotif('Describe what was done (5+ characters) - صف ما تم تنفيذه (5 أحرف فأكثر)', 'error'); upd.completionNote = v('riskCapa_note'); upd.completedAt = now; }
+    if (to === 'verified') {
+        if (['high', 'critical'].includes(c.priority) && !['owner', 'master'].includes(me.role)) return window.showNotif('Only the owner verifies high/critical actions - التحقق للمالك فقط', 'error');
+        if (v('riskCapa_note').length < 5) return window.showNotif('Effectiveness check is required - التحقق من الفعالية مطلوب', 'error');
+        upd.verifyNote = v('riskCapa_note'); upd.verifiedAt = now; upd.verifiedBy = me.name;
+    }
+    if (to === 'cancelled') { if (v('riskCapa_cancel').length < 3) return window.showNotif('Cancel reason is required - سبب الإلغاء مطلوب', 'error'); upd.cancelReason = v('riskCapa_cancel'); upd.cancelledAt = now; }
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_capa', id), upd); window.showNotif('✅ Action updated - تم تحديث الإجراء', 'success'); window.riskCapaCloseDetail(); }
+    catch (e) { console.error('capa step', e); window.showNotif('Could not update, check permissions - تعذر التحديث، تحقق من الصلاحيات', 'error'); }
+};
+
+
+
+
+
+// ===================== تقييم مخاطر — الدفعة 8: التفتيش والتدقيق + لوحة المؤشرات =====================
+window.RISK_AU_RATING = { compliant: { label: 'Compliant - مطابق', color: '#10b981' }, improve: { label: 'Needs improvement - يحتاج تحسين', color: '#eab308' }, non_compliant: { label: 'Non-compliant - غير مطابق', color: '#ef4444' } };
+window.RISK_AU_KIND = { audit: 'EHS Compliance Audit - تدقيق امتثال', inspection: 'Site Inspection - تفتيش ميداني' };
+Object.assign(window._risk, { audits: [], auUnsubs: [], auditCats: [], auFilter: 'all', au: null, tabInit: false });
+
+window.riskAuRate = (score) => score === null ? '' : (score >= 90 ? 'compliant' : (score >= 75 ? 'improve' : 'non_compliant'));
+window.riskAuBadge = (score) => { if (score === null || score === undefined) return '<span class="text-slate-500 text-[10px]">—</span>'; const r = window.RISK_AU_RATING[window.riskAuRate(score)]; return `<span class="px-2 py-0.5 rounded-full text-[10px] font-black" style="background:${r.color}26;color:${r.color}">${score}% · ${r.label}</span>`; };
+
+// ---------- التحميل والاستماع ----------
+window.riskLoadAuditCats = async () => {
+    try {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'risk_audit'));
+        window._risk.auditCats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => c.letter && Array.isArray(c.items)).sort((a, b) => String(a.letter).localeCompare(String(b.letter)));
+    } catch (e) { console.warn('audit cats', e); window._risk.auditCats = []; }
+};
+window.riskAuListen = () => window.riskScopedListen('risk_audits', 'none', list => { window._risk.audits = list; window.riskTabsRefresh(); if (window._risk.tab === 'audit') window.riskAuRender(); }, 'auUnsubs');
+const _riskUnlistenPrev8 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev8(); (window._risk.auUnsubs || []).forEach(u => { try { u(); } catch (e) {} }); window._risk.auUnsubs = []; };
+const _riskShowPrev8 = window.riskOnShow;
+window.riskOnShow = async () => { await _riskShowPrev8(); window.riskAuListen(); window.riskLoadAuditCats(); };
+
+// ---------- التبويبات الستة (اللوحة أولاً لغير الأعضاء) ----------
+const _riskTabsInitPrev8 = window.riskTabsInit;
+window.riskTabsInit = () => {
+    if (!window._risk.tabInit) { window._risk.tabInit = true; if (window.riskCtx().role !== 'member') window._risk.tab = 'dash'; }
+    _riskTabsInitPrev8();
+    const cp = document.getElementById('riskCapaPanel'); if (!cp) return;
+    if (!document.getElementById('riskAuPanel')) {
+        const au = document.createElement('div'); au.id = 'riskAuPanel'; au.className = 'flex-1 overflow-y-auto p-5 hidden'; cp.insertAdjacentElement('afterend', au);
+        const ds = document.createElement('div'); ds.id = 'riskDashPanel'; ds.className = 'flex-1 overflow-y-auto p-5 hidden'; au.insertAdjacentElement('afterend', ds);
+    }
+    window.riskTabSet(window._risk.tab);
+};
+window.riskTabsRefresh = () => {
+    const tabs = document.getElementById('riskTabs'); if (!tabs) return;
+    const R = window._risk, role = window.riskCtx().role, mgr = role !== 'member';
+    const nP = (R.permits || []).filter(p => window.riskCanApprove(p)).length;
+    const nA = (R.assessments || []).filter(a => window.riskCanApprove(a)).length;
+    const nI = (R.incidents || []).filter(i => window.riskIncCanReview(i)).length;
+    const nC = (R.capas || []).filter(c => window.riskCapaOverdue(c)).length;
+    const defs = [];
+    if (mgr) defs.push(['dash', 'Dashboard - اللوحة', 0]);
+    defs.push(['permits', 'Permits - التصاريح', nP], ['ra', 'Risk Assessment - تقييم المخاطر', nA], ['inc', 'Incidents - الحوادث', nI]);
+    if (mgr) defs.push(['audit', 'Audit - التدقيق والتفتيش', 0], ['capa', 'CAPA - الإجراءات التصحيحية', nC]);
+    tabs.innerHTML = defs.map(([k, l, n]) => { const on = R.tab === k; return `<button onclick="window.riskTabSet('${k}')" class="px-4 py-2 rounded-xl text-xs font-black whitespace-nowrap" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${on ? '#000' : '#cbd5e1'};border:1px solid ${on ? '#f97316' : 'rgba(255,255,255,0.12)'};">${l}${n ? ` <span class="px-1.5 rounded-full" style="background:#ef4444;color:#fff">${n}</span>` : ''}</button>`; }).join('');
+    if (R.tab === 'dash') window.riskDashRender();
+};
+window.riskTabSet = (k) => {
+    if (k === 'dash' && window.riskCtx().role === 'member') k = 'permits';
+    window._risk.tab = k;
+    [['dash', 'riskDashPanel'], ['permits', 'riskPermitsBox'], ['ra', 'riskRaPanel'], ['inc', 'riskIncPanel'], ['audit', 'riskAuPanel'], ['capa', 'riskCapaPanel']].forEach(([key, id]) => document.getElementById(id)?.classList.toggle('hidden', key !== k));
+    window.riskTabsRefresh();
+    if (k === 'ra') window.riskRaRender();
+    if (k === 'inc') window.riskIncRender();
+    if (k === 'capa') window.riskCapaRender();
+    if (k === 'audit') window.riskAuRender();
+    if (k === 'dash') window.riskDashRender();
+};
+
+// ---------- قائمة التدقيقات ----------
+window.riskAuSetFilter = (f) => { window._risk.auFilter = f; window.riskAuRender(); };
+window.riskAuRender = () => {
+    const panel = document.getElementById('riskAuPanel'); if (!panel) return;
+    const all = window._risk.audits || [], f = window._risk.auFilter, caps = window._risk.capas || [];
+    const scored = all.filter(a => a.score !== null && a.score !== undefined);
+    const avg = scored.length ? Math.round(scored.reduce((s, a) => s + a.score, 0) / scored.length * 10) / 10 : null;
+    const openFind = all.reduce((n, a) => n + (a.items || []).filter(it => it.s === 'no' && !caps.some(c => c.sourceType === 'audit' && c.sourceId === a.id && c.sourceNo === a.refNo + ' #' + it.key && ['verified', 'cancelled'].includes(c.status))).length, 0);
+    const stat = (label, v, color) => `<div class="rounded-2xl p-3 text-center" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-xl font-black" style="color:${color}">${v}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    const chips = [['all', 'All - الكل'], ['non_compliant', 'Non-compliant - غير مطابقة'], ['improve', 'Needs improvement - تحتاج تحسين'], ['compliant', 'Compliant - مطابقة']];
+    const list = all.filter(a => f === 'all' ? true : window.riskAuRate(a.score) === f);
+    panel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">${stat('Audits - التدقيقات', all.length, '#38bdf8')}${stat('Avg compliance - متوسط الامتثال', avg === null ? '—' : avg + '%', '#10b981')}${stat('Open findings - ملاحظات مفتوحة', openFind, '#f97316')}${stat('Non-compliant - غير مطابقة', all.filter(a => window.riskAuRate(a.score) === 'non_compliant').length, '#ef4444')}</div>
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <button onclick="window.riskAuNew()" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#38bdf8,#10b981);">☑ New Audit / Inspection - تدقيق أو تفتيش جديد</button>
+            <div class="flex flex-wrap gap-2">${chips.map(([k, l]) => `<button onclick="window.riskAuSetFilter('${k}')" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${f === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${f === k ? '#000' : '#94a3b8'};border:1px solid ${f === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('')}</div></div>
+        <div class="grid gap-3 md:grid-cols-2">${list.length ? list.map(a => `<div onclick="window.riskAuOpen('${a.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));border:1px solid rgba(255,255,255,0.12);">
+            <div class="flex items-center justify-between mb-2">${window.riskAuBadge(a.score)}<span class="text-slate-500 text-[10px] font-mono">${esc(a.refNo || '')}</span></div>
+            <p class="text-white font-black text-sm">${esc(a.project || '')}</p>
+            <p class="text-slate-400 text-[11px] mt-1">${window.RISK_AU_KIND[a.kind] || ''} · ${window.riskFmt(a.auditAt)}</p>
+            <p class="text-slate-400 text-xs mt-1">✅ ${a.okCount} · ❌ ${a.noCount} · ➖ ${a.naCount} ${a.status === 'reviewed' ? '· 🔒 Reviewed - تمت المراجعة' : ''}</p>
+            <p class="text-slate-500 text-[10px] mt-2">${esc(a.auditorName || '')} · ${window.RISK_ROLE_LABEL[a.auditorRole] || ''}</p></div>`).join('') : '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">No audits in this view. - لا توجد تدقيقات في هذا العرض.</p>'}</div>`;
+};
+
+// ---------- نموذج التدقيق / التفتيش ----------
+window.riskAuNew = () => {
+    if (!window.riskCapaManager()) return window.showNotif('Only leaders and above run audits - التدقيق للقائد فما فوق', 'error');
+    if (!window._risk.auditCats.length) return window.showNotif('Audit checklist not found: import risk_pack_v2.json first - قائمة التدقيق غير موجودة: استورد الحزمة v2 أولاً', 'error');
+    const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16), cats = {}, open = {};
+    window._risk.auditCats.forEach(c => { cats[c.letter] = true; });
+    open[window._risk.auditCats[0].letter] = true;
+    window._risk.au = { kind: 'audit', h: { project: '', principal: '', contractor: '', activity: '', auditAt: now, contractorRep: '', workers: '' }, cats, open, items: {}, observations: '' };
+    const m = document.getElementById('riskAuModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+    window.riskAuFormRender();
+};
+window.riskAuFormClose = () => { const m = document.getElementById('riskAuModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.au = null; };
+window.riskAuSetH = (k, v) => { if (window._risk.au) window._risk.au.h[k] = v; };
+window.riskAuKind = (k) => { const a = window._risk.au; a.kind = k; window._risk.auditCats.forEach(c => { a.cats[c.letter] = (k === 'audit'); }); window.riskAuFormRender(); };
+window.riskAuCat = (l, on) => { window._risk.au.cats[l] = on; window.riskAuFormRender(); };
+window.riskAuToggle = (l) => { const a = window._risk.au; a.open[l] = !a.open[l]; window.riskAuFormRender(); };
+window.riskAuAns = (key, s) => { const a = window._risk.au; (a.items[key] = a.items[key] || { s: '', obs: '', act: '' }).s = s; window.riskAuFormRender(); };
+window.riskAuTxt = (key, k, v) => { const a = window._risk.au; (a.items[key] = a.items[key] || { s: '', obs: '', act: '' })[k] = v; };
+window.riskAuAllOk = (l) => {
+    const a = window._risk.au, c = window._risk.auditCats.find(x => x.letter === l); if (!c) return;
+    c.items.forEach((t, n) => { const key = l + (n + 1); const it = (a.items[key] = a.items[key] || { s: '', obs: '', act: '' }); if (!it.s) it.s = 'ok'; });
+    window.riskAuFormRender();
+};
+window.riskAuCalc = () => {
+    const a = window._risk.au; let ok = 0, no = 0, na = 0, un = 0; const per = {};
+    window._risk.auditCats.filter(c => a.cats[c.letter]).forEach(c => {
+        let o = 0, n = 0, x = 0, u = 0;
+        c.items.forEach((t, i) => { const s = (a.items[c.letter + (i + 1)] || {}).s; if (s === 'ok') o++; else if (s === 'no') n++; else if (s === 'na') x++; else u++; });
+        per[c.letter] = { o, n, x, u, total: c.items.length, score: (o + n) ? Math.round(o / (o + n) * 1000) / 10 : null };
+        ok += o; no += n; na += x; un += u;
+    });
+    return { ok, no, na, un, total: ok + no + na + un, score: (ok + no) ? Math.round(ok / (ok + no) * 1000) / 10 : null, per };
+};
+window.riskAuFormRender = () => {
+    const a = window._risk.au, body = document.getElementById('riskAuBody'); if (!a || !body) return;
+    const cls = 'erg-input lux-field-input text-right w-full mb-2', L = (t) => `<p class="text-slate-400 text-[11px] font-black mb-1">${t}</p>`;
+    const c = window.riskAuCalc();
+    const hi = (k, label, type) => `${L(label)}<input ${type ? `type="${type}"` : ''} class="${cls}" value="${esc(a.h[k])}" ${type ? `onchange` : 'oninput'}="window.riskAuSetH('${k}',this.value)">`;
+    const kindBtn = (k, l) => `<button onclick="window.riskAuKind('${k}')" class="flex-1 py-2 rounded-xl text-xs font-black" style="background:${a.kind === k ? '#38bdf8' : 'rgba(255,255,255,0.06)'};color:${a.kind === k ? '#000' : '#cbd5e1'};border:1px solid ${a.kind === k ? '#38bdf8' : 'rgba(255,255,255,0.12)'};">${l}</button>`;
+    const catChecks = window._risk.auditCats.map(x => `<label class="flex items-center gap-2 text-[11px] text-slate-300 font-bold mb-1"><input type="checkbox" ${a.cats[x.letter] ? 'checked' : ''} onchange="window.riskAuCat('${x.letter}',this.checked)"> ${x.letter} · ${esc(x.title)}</label>`).join('');
+    const optBtn = (key, s, label, col, cur) => `<button onclick="window.riskAuAns('${key}','${s}')" class="px-2.5 py-1 rounded-lg text-[11px] font-black" style="background:${cur === s ? col : 'rgba(255,255,255,0.06)'};color:${cur === s ? '#000' : '#94a3b8'};border:1px solid ${cur === s ? col : 'rgba(255,255,255,0.1)'};">${label}</button>`;
+    const sections = window._risk.auditCats.filter(x => a.cats[x.letter]).map(cat => {
+        const p = c.per[cat.letter], isOpen = !!a.open[cat.letter];
+        return `<div class="rounded-2xl mt-3" style="background:rgba(255,255,255,0.04);border:1px solid rgba(56,189,248,0.3);">
+            <button onclick="window.riskAuToggle('${cat.letter}')" class="w-full flex items-center justify-between px-3 py-3"><span class="text-[11px] text-slate-400">${p.o + p.n + p.x}/${p.total} ${p.score === null ? '' : '· ' + p.score + '%'} ${isOpen ? '▲' : '▼'}</span><span class="text-white text-xs font-black text-right">${cat.letter} · ${esc(cat.title)}</span></button>
+            ${isOpen ? `<div class="px-3 pb-3">${cat.items.map((t, n) => {
+                const key = cat.letter + (n + 1), it = a.items[key] || { s: '', obs: '', act: '' };
+                return `<div class="py-2" style="border-top:1px solid rgba(255,255,255,0.06)"><p class="text-white text-[12px] font-bold mb-2 leading-relaxed">${n + 1}. ${esc(t)}</p>
+                    <div class="flex gap-2 justify-end">${optBtn(key, 'ok', '✅ OK - مطابق', '#10b981', it.s)}${optBtn(key, 'no', '❌ NOT OK - غير مطابق', '#ef4444', it.s)}${optBtn(key, 'na', '➖ N/A', '#94a3b8', it.s)}</div>
+                    ${it.s === 'no' ? `<input class="${cls} mt-2" placeholder="Observation / finding * - الملاحظة *" value="${esc(it.obs)}" oninput="window.riskAuTxt('${key}','obs',this.value)"><input class="${cls}" placeholder="Corrective action (if required) - الإجراء التصحيحي" value="${esc(it.act)}" oninput="window.riskAuTxt('${key}','act',this.value)">` : ''}</div>`;
+            }).join('')}<button onclick="window.riskAuAllOk('${cat.letter}')" class="w-full mt-2 py-2 rounded-xl text-[11px] font-black text-emerald-200" style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);">All unanswered = OK - كل غير المُجاب = مطابق</button></div>` : ''}</div>`;
+    }).join('');
+    body.innerHTML = `
+        <div class="flex gap-2 mb-3">${kindBtn('audit', 'EHS Audit - تدقيق')}${kindBtn('inspection', 'Inspection - تفتيش')}</div>
+        <p class="text-slate-500 text-[10px] mb-1">Categories to include - المحاور المشمولة</p><div class="mb-3">${catChecks}</div>
+        <p class="text-orange-300 text-xs font-black mb-2 pb-1" style="border-bottom:1px solid rgba(249,115,22,0.3)">Project & Audit Information - بيانات المشروع والتدقيق</p>
+        ${hi('project', 'Project / Site - المشروع / الموقع *')}${hi('principal', 'Principal Employer - صاحب العمل الرئيسي')}${hi('contractor', 'Contractor / Agency - المقاول / الجهة')}${hi('activity', 'Work Activity / Location - النشاط / الموقع')}
+        ${hi('auditAt', 'Audit Date & Time - تاريخ ووقت التدقيق *', 'datetime-local')}${hi('contractorRep', 'Contractor Representative - ممثل المقاول')}${hi('workers', 'No. of Workers Present - عدد العاملين الحاضرين')}
+        ${sections}
+        ${L('Overall observations & recommendations - الملاحظات العامة والتوصيات')}<textarea rows="3" class="${cls} mt-3" oninput="window._risk.au.observations=this.value">${esc(a.observations)}</textarea>
+        <div class="rounded-xl p-3 mt-2" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.3);"><p class="text-xs text-slate-200 font-black">✅ ${c.ok} &nbsp; ❌ ${c.no} &nbsp; ➖ ${c.na} &nbsp; ⏳ ${c.un} unanswered - غير مُجاب</p>
+        <p class="text-[11px] text-slate-400 mt-1">Compliance - نسبة الامتثال = OK ÷ (OK + NOT OK) × 100: ${window.riskAuBadge(c.score)}</p></div>
+        <div class="flex gap-2 mt-4"><button onclick="window.riskAuSubmit()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#38bdf8,#10b981);">Submit - إرسال</button>
+        <button onclick="window.riskAuFormClose()" class="flex-1 py-3 rounded-xl font-black text-sm text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);">Cancel - إلغاء</button></div>`;
+};
+window.riskAuSubmit = async () => {
+    const a = window._risk.au; if (!a) return;
+    const E = (m) => window.showNotif(m, 'error'), c = window.riskAuCalc(), ctx = window.riskCtx();
+    if (!a.h.project.trim()) return E('Project / site is required - المشروع أو الموقع مطلوب');
+    if (!a.h.auditAt) return E('Audit date is required - تاريخ التدقيق مطلوب');
+    if (!c.total) return E('Select at least one category - اختر محوراً واحداً على الأقل');
+    if (c.un) return E(`Answer all items (${c.un} left) - أجب عن كل البنود (${c.un} متبقٍ)`);
+    const items = [];
+    for (const cat of window._risk.auditCats.filter(x => a.cats[x.letter])) {
+        for (let n = 0; n < cat.items.length; n++) {
+            const key = cat.letter + (n + 1), it = a.items[key];
+            if (it.s === 'no' && it.obs.trim().length < 3) return E(`Item ${key}: observation is required for NOT OK - البند ${key}: الملاحظة مطلوبة عند عدم المطابقة`);
+            items.push({ key, cat: cat.letter, n: n + 1, text: cat.items[n], s: it.s, obs: (it.obs || '').trim(), act: (it.act || '').trim() });
+        }
+    }
+    const data = {
+        refNo: (a.kind === 'audit' ? 'AUD-' : 'INS-') + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: ctx.companyId, leaderId: ctx.leaderId, auditorId: ctx.uid, auditorName: ctx.name, auditorRole: ctx.role, kind: a.kind,
+        project: a.h.project.trim(), principal: a.h.principal.trim(), contractor: a.h.contractor.trim(), activity: a.h.activity.trim(),
+        auditAt: new Date(a.h.auditAt).getTime(), contractorRep: a.h.contractorRep.trim(), workers: a.h.workers.trim(),
+        items, cats: window._risk.auditCats.filter(x => a.cats[x.letter]).map(x => x.letter),
+        okCount: c.ok, noCount: c.no, naCount: c.na, total: c.total, score: c.score, rating: window.riskAuRate(c.score),
+        observations: a.observations.trim(), status: 'completed', createdAt: Date.now()
+    };
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_audits'), data);
+        window.riskAuFormClose();
+        window.showNotif('✅ Saved ' + data.refNo + ' - ' + (c.score === null ? 'N/A' : c.score + '%'), 'success');
+    } catch (e) { console.error('au submit', e); E('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات'); }
+};
+
+// ---------- بطاقة التدقيق + إنشاء إجراء من البنود غير المطابقة + المراجعة + PDF ----------
+window.riskAuCapaFor = (a, key) => (window._risk.capas || []).find(c => c.sourceType === 'audit' && c.sourceId === a.id && c.sourceNo === a.refNo + ' #' + key);
+window.riskAuOpen = (id) => {
+    const a = (window._risk.audits || []).find(x => x.id === id); if (!a) return;
+    window._risk.auDetailId = id;
+    const role = window.riskCtx().role, rt = window.RISK_AU_RATING[window.riskAuRate(a.score)] || {};
+    const row = (k, v) => v ? `<div class="flex justify-between gap-3 py-1.5" style="border-bottom:1px solid rgba(255,255,255,0.06)"><span class="text-white text-xs font-bold text-left">${v}</span><span class="text-slate-500 text-xs font-black shrink-0">${k}</span></div>` : '';
+    const cats = window._risk.auditCats;
+    const groups = (a.cats || []).map(l => {
+        const its = (a.items || []).filter(i => i.cat === l), ct = cats.find(c => c.letter === l), o = its.filter(i => i.s === 'ok').length, n = its.filter(i => i.s === 'no').length;
+        return `<div class="mt-3"><p class="text-sky-300 text-xs font-black mb-1">${l} · ${esc(ct ? ct.title : '')} <span class="text-slate-500">(${(o + n) ? Math.round(o / (o + n) * 1000) / 10 + '%' : '—'})</span></p>
+            ${its.map(i => {
+                const cp = i.s === 'no' ? window.riskAuCapaFor(a, i.key) : null, cm = cp ? (window.RISK_CAPA_STATUS[cp.status] || {}) : null;
+                return `<div class="py-1.5 text-[11px]" style="border-top:1px solid rgba(255,255,255,0.05)"><span style="color:${i.s === 'ok' ? '#34d399' : (i.s === 'no' ? '#f87171' : '#94a3b8')}">${i.s === 'ok' ? '✅' : (i.s === 'no' ? '❌' : '➖')}</span> <span class="text-slate-300">${i.n}. ${esc(i.text)}</span>
+                    ${i.s === 'no' ? `<p class="text-rose-300 mt-1">${esc(i.obs)}${i.act ? ' → ' + esc(i.act) : ''}</p>${cp ? `<p onclick="window.riskAuCloseDetail();window.riskCapaOpen('${cp.id}')" class="mt-1 cursor-pointer font-black" style="color:${cm.color}">🛠️ ${cm.label}</p>` : (window.riskCapaManager() ? `<button onclick="window.riskAuCapa('${a.id}','${i.key}')" class="mt-1 px-2 py-1 rounded-lg text-[10px] font-black text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ Create action - إنشاء إجراء</button>` : '')}` : ''}</div>`;
+            }).join('')}</div>`;
+    }).join('');
+    document.getElementById('riskAuDetailBody').innerHTML = `
+        <div class="text-center mb-3"><p class="text-slate-400 text-[11px] font-mono">${esc(a.refNo || '')}</p><div class="mt-1">${window.riskAuBadge(a.score)}</div></div>
+        ${row('Type - النوع', window.RISK_AU_KIND[a.kind] || '')}${row('Project / Site - المشروع', esc(a.project || ''))}${row('Principal Employer - صاحب العمل', esc(a.principal || ''))}${row('Contractor - المقاول', esc(a.contractor || ''))}${row('Activity / Location - النشاط', esc(a.activity || ''))}
+        ${row('Date - التاريخ', window.riskFmt(a.auditAt))}${row('Auditor - المدقق', esc(a.auditorName || '') + ' · ' + (window.RISK_ROLE_LABEL[a.auditorRole] || ''))}${row('Contractor rep. - ممثل المقاول', esc(a.contractorRep || ''))}${row('Workers present - العاملون', esc(a.workers || ''))}
+        ${row('Result - النتيجة', `✅ ${a.okCount} · ❌ ${a.noCount} · ➖ ${a.naCount}`)}${row('Observations - الملاحظات العامة', esc(a.observations || ''))}${a.status === 'reviewed' ? row('Reviewed by - راجعه', esc(a.reviewedBy || '')) : ''}
+        ${groups}
+        ${a.status === 'completed' && ['owner', 'master'].includes(role) ? `<button onclick="window.riskAuReview('${a.id}')" class="w-full mt-4 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#10b981,#34d399);">🔒 Management review sign-off - اعتماد مراجعة الإدارة</button>` : ''}
+        <button onclick="window.riskAuPdf('${a.id}')" class="w-full mt-3 py-3 rounded-xl font-black text-sm text-cyan-200" style="background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.35);">📄 Export / Print PDF - تصدير / طباعة PDF</button>`;
+    const m = document.getElementById('riskAuDetailModal'); m?.classList.remove('hidden'); m?.classList.add('flex');
+};
+window.riskAuCloseDetail = () => { const m = document.getElementById('riskAuDetailModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.auDetailId = null; };
+window.riskAuCapa = (id, key) => {
+    const a = (window._risk.audits || []).find(x => x.id === id), it = a && (a.items || []).find(i => i.key === key); if (!it) return;
+    window.riskAuCloseDetail();
+    window.riskCapaNew('audit', id, a.refNo + ' #' + key, a.leaderId);
+    const f = window._risk.capaForm; if (!f) return;
+    f.title = ('Fix: ' + it.text).slice(0, 140); f.description = [it.obs, it.act].filter(Boolean).join('\n'); f.priority = 'medium';
+    window.riskCapaFormRender();
+};
+window.riskAuReview = async (id) => {
+    const c = window.riskCtx();
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_audits', id), { status: 'reviewed', reviewedBy: c.name, reviewedAt: Date.now() }); window.showNotif('🔒 Reviewed - تمت المراجعة', 'success'); window.riskAuCloseDetail(); }
+    catch (e) { console.error(e); window.showNotif('Could not sign off, check permissions - تعذر الاعتماد، تحقق من الصلاحيات', 'error'); }
+};
+window.riskAuPdf = (id) => {
+    const a = (window._risk.audits || []).find(x => x.id === id); if (!a) return;
+    const w = window.open('', '_blank'); if (!w) return window.showNotif('Allow pop-ups to export PDF - اسمح بالنوافذ المنبثقة لتصدير PDF', 'error');
+    const rt = window.RISK_AU_RATING[window.riskAuRate(a.score)] || { label: '', color: '#999' };
+    const blocks = (a.cats || []).map(l => {
+        const ct = window._risk.auditCats.find(c => c.letter === l), its = (a.items || []).filter(i => i.cat === l);
+        return `<tr><td colspan="5" style="background:#e0f2fe;font-weight:bold">${l} · ${esc(ct ? ct.title : '')}</td></tr>` + its.map(i => `<tr><td>${i.n}</td><td>${esc(i.text)}</td><td style="text-align:center">${i.s === 'ok' ? '✔' : ''}${i.s === 'no' ? '✘' : ''}${i.s === 'na' ? '—' : ''}</td><td>${esc(i.obs || '')}</td><td>${esc(i.act || '')}</td></tr>`).join('');
+    }).join('');
+    w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(a.refNo || 'Audit')}</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;margin:20px;color:#111}h1{margin:0 0 4px;font-size:19px}.hd{border-bottom:3px solid #0ea5e9;padding-bottom:8px;margin-bottom:10px}table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:10.5px}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right;vertical-align:top}th{background:#f3f4f6}.sum{display:flex;gap:10px;margin-bottom:10px}.sum div{flex:1;border:1px solid #bbb;padding:6px;text-align:center;font-size:12px}.sig{display:flex;gap:16px;margin-top:24px}.sig div{flex:1;border-top:1px solid #333;padding-top:6px;text-align:center;font-size:11px}</style></head><body>
+<div class="hd"><h1>${window.RISK_AU_KIND[a.kind] || 'Audit'}</h1><div>Ref - المرجع: <b>${esc(a.refNo || '')}</b></div></div>
+<table><tr><th style="width:20%">Project / Site - المشروع</th><td>${esc(a.project || '')}</td><th style="width:20%">Audit Date & Time - التاريخ</th><td>${window.riskFmt(a.auditAt)}</td></tr>
+<tr><th>Principal Employer - صاحب العمل</th><td>${esc(a.principal || '—')}</td><th>EHS Auditor - المدقق</th><td>${esc(a.auditorName || '')}</td></tr>
+<tr><th>Contractor / Agency - المقاول</th><td>${esc(a.contractor || '—')}</td><th>Contractor Representative - ممثل المقاول</th><td>${esc(a.contractorRep || '—')}</td></tr>
+<tr><th>Work Activity / Location - النشاط</th><td>${esc(a.activity || '—')}</td><th>No. of Workers - عدد العاملين</th><td>${esc(a.workers || '—')}</td></tr></table>
+<table><tr><th>#</th><th>Audit Checklist Item - بند التدقيق</th><th style="width:50px">OK / NOT OK / N/A</th><th style="width:22%">Observations / Findings - الملاحظات</th><th style="width:20%">Corrective Action - الإجراء التصحيحي</th></tr>${blocks}</table>
+<div class="sum"><div>OK - مطابق<br><b>${a.okCount}</b></div><div>NOT OK - غير مطابق<br><b>${a.noCount}</b></div><div>N/A<br><b>${a.naCount}</b></div><div>Total Checkpoints - الإجمالي<br><b>${a.total}</b></div><div>Compliance - الامتثال<br><b style="color:${rt.color}">${a.score}%</b><br>${rt.label}</div></div>
+<table><tr><th style="width:25%">Overall Observations & Recommendations - الملاحظات والتوصيات</th><td>${esc(a.observations || '—')}</td></tr><tr><th>Score formula - المعادلة</th><td>OK ÷ (OK + NOT OK) × 100</td></tr></table>
+<div class="sig"><div>Auditor Signature<br>توقيع المدقق<br>${esc(a.auditorName || '')}</div><div>Contractor Representative Signature<br>توقيع ممثل المقاول<br>${esc(a.contractorRep || '')}</div><div>Project EHS / Management Review<br>مراجعة الإدارة<br>${esc(a.reviewedBy || '')}</div></div></body></html>`);
+    w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 600);
+};
+
+// ---------- لوحة المؤشرات ----------
+window.riskDashBar = (label, v, max, color) => `<div class="flex items-center gap-2 my-1.5"><span class="text-[11px] text-slate-300 font-bold w-28 shrink-0 text-left">${label}</span><div class="flex-1 h-2.5 rounded-full" style="background:rgba(255,255,255,0.07)"><div class="h-2.5 rounded-full" style="width:${max ? Math.max(v ? 4 : 0, Math.round(v / max * 100)) : 0}%;background:${color}"></div></div><span class="text-[11px] text-white font-black w-7">${v}</span></div>`;
+window.riskDashRender = () => {
+    const panel = document.getElementById('riskDashPanel'); if (!panel) return;
+    const R = window._risk, now = Date.now(), card = (t) => `<div class="rounded-2xl p-4" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);">${t}</div>`;
+    const kpi = (label, v, color, tab) => `<div ${tab ? `onclick="window.riskTabSet('${tab}')"` : ''} class="rounded-2xl p-3 text-center ${tab ? 'cursor-pointer' : ''}" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-2xl font-black" style="color:${color}">${v}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    const permits = R.permits || [], ras = R.assessments || [], incs = R.incidents || [], caps = R.capas || [], aus = R.audits || [];
+    const activeP = permits.filter(p => window.riskStatus(p) === 'approved').length;
+    const awaiting = permits.filter(p => window.riskCanApprove(p)).length + ras.filter(a => window.riskCanApprove(a)).length + incs.filter(i => window.riskIncCanReview(i)).length;
+    const reviewDue = ras.filter(a => window.riskRaStatus(a) === 'review_due').length;
+    const overdue = caps.filter(c => window.riskCapaOverdue(c));
+    const openInc = incs.filter(i => i.status !== 'closed').length;
+    const scored = aus.filter(a => a.score !== null && a.score !== undefined), avg = scored.length ? Math.round(scored.reduce((s, a) => s + a.score, 0) / scored.length * 10) / 10 : null;
+    const lti = incs.filter(i => ['lti', 'fatality'].includes(i.class)).sort((a, b) => b.dateTime - a.dateTime)[0];
+    const days = lti ? Math.floor((now - lti.dateTime) / 86400000) : null;
+    const levels = ['low', 'medium', 'high', 'critical'], raBy = {}; levels.forEach(l => raBy[l] = ras.filter(a => a.status !== 'rejected' && a.residualLevel === l).length);
+    const months = [], mNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let k = 5; k >= 0; k--) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - k); months.push({ y: d.getFullYear(), m: d.getMonth(), label: mNames[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2), n: 0 }); }
+    incs.forEach(i => { const d = new Date(i.dateTime); const t = months.find(x => x.y === d.getFullYear() && x.m === d.getMonth()); if (t) t.n++; });
+    const maxM = Math.max(1, ...months.map(x => x.n)), maxR = Math.max(1, ...levels.map(l => raBy[l]));
+    const capaBy = {}; Object.keys(window.RISK_CAPA_STATUS).forEach(k => capaBy[k] = caps.filter(c => c.status === k).length); const maxC = Math.max(1, ...Object.values(capaBy));
+    const last = aus.slice(0, 8).reverse();
+    panel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            ${kpi('Active permits - تصاريح سارية', activeP, '#10b981', 'permits')}${kpi('Awaiting my action - بانتظار إجرائي', awaiting, '#f97316')}${kpi('Open incidents - حوادث مفتوحة', openInc, '#ef4444', 'inc')}${kpi('Overdue actions - إجراءات متأخرة', overdue.length, '#ef4444', 'capa')}
+            ${kpi('Assessments due review - تقييمات مستحقة', reviewDue, '#eab308', 'ra')}${kpi('Avg audit compliance - متوسط الامتثال', avg === null ? '—' : avg + '%', '#38bdf8', 'audit')}${kpi('Risk assessments - تقييمات المخاطر', ras.length, '#a78bfa', 'ra')}${kpi('Days since last LTI/fatality - أيام منذ آخر إصابة جسيمة', days === null ? '—' : days, days !== null && days < 30 ? '#ef4444' : '#10b981')}</div>
+        <div class="grid gap-3 md:grid-cols-2">
+            ${card(`<p class="text-white text-xs font-black mb-2">Residual risk profile - توزيع الخطر المتبقي</p>${levels.map(l => window.riskDashBar(window.RISK_LEVELS[l].label, raBy[l], maxR, window.RISK_LEVELS[l].color)).join('')}`)}
+            ${card(`<p class="text-white text-xs font-black mb-2">Incidents, last 6 months - الحوادث آخر 6 أشهر</p>${months.map(x => window.riskDashBar(x.label, x.n, maxM, '#ef4444')).join('')}`)}
+            ${card(`<p class="text-white text-xs font-black mb-2">Actions (CAPA) status - حالة الإجراءات</p>${Object.keys(capaBy).map(k => window.riskDashBar(window.RISK_CAPA_STATUS[k].label.split(' - ')[0], capaBy[k], maxC, window.RISK_CAPA_STATUS[k].color)).join('')}`)}
+            ${card(`<p class="text-white text-xs font-black mb-2">Audit compliance, latest - الامتثال في آخر التدقيقات</p>${last.length ? `<div class="flex items-end gap-2 h-24">${last.map(a => `<div class="flex-1 flex flex-col items-center justify-end" title="${esc(a.refNo)}"><span class="text-[9px] text-slate-300 font-black">${a.score}</span><div style="width:100%;height:${Math.max(4, a.score)}%;background:${(window.RISK_AU_RATING[window.riskAuRate(a.score)] || {}).color};border-radius:4px 4px 0 0"></div></div>`).join('')}</div>` : '<p class="text-slate-600 text-xs">No audits yet - لا توجد تدقيقات بعد</p>'}`)}</div>
+        ${overdue.length ? card(`<p class="text-rose-300 text-xs font-black mb-2">⚠️ Overdue actions - إجراءات متأخرة</p>${overdue.slice(0, 5).map(c => `<div onclick="window.riskCapaOpen('${c.id}')" class="text-xs text-slate-200 py-1 cursor-pointer" style="border-top:1px solid rgba(255,255,255,0.06)">${esc(c.title)} <span class="text-slate-500">· ${esc(c.owner || '')} · ${esc(c.due || '')}</span></div>`).join('')}`).replace('class="rounded-2xl p-4"', 'class="rounded-2xl p-4 mt-3"') : ''}`;
+};
+
+
 // ===== Dark / Light Mode Engine =====
 window.toggleTheme = () => {
     const isLight = document.body.classList.toggle('light-mode');
@@ -18613,6 +19308,77 @@ body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#ee
         <div id="riskGlossList" class="overflow-y-auto flex-1"></div>
     </div>
 </div>
+
+
+
+
+<!-- ===== تقييم مخاطر — الدفعة 7: نوافذ الحوادث والإجراءات التصحيحية (CAPA) ===== -->
+<div id="riskIncModal" class="hidden fixed inset-0 z-[10050] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskIncFormClose()">
+    <div class="w-full max-w-xl rounded-[24px] p-5 text-right max-h-[94vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(239,68,68,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-2">
+            <button onclick="window.riskIncFormClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">🚨 Incident Report - تقرير حادث</p>
+        </div>
+        <div id="riskIncBody"></div>
+    </div>
+</div>
+
+<div id="riskIncDetailModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskIncCloseDetail()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(239,68,68,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskIncCloseDetail()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📋 Incident Card - بطاقة الحادث</p>
+        </div>
+        <div id="riskIncDetailBody"></div>
+    </div>
+</div>
+
+<div id="riskCapaModal" class="hidden fixed inset-0 z-[10065] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskCapaFormClose()">
+    <div class="w-full max-w-md rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskCapaFormClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">➕ Corrective / Preventive Action - إجراء تصحيحي / وقائي</p>
+        </div>
+        <div id="riskCapaBody"></div>
+    </div>
+</div>
+
+<div id="riskCapaDetailModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskCapaCloseDetail()">
+    <div class="w-full max-w-md rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskCapaCloseDetail()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">🛠️ Action Card - بطاقة الإجراء</p>
+        </div>
+        <div id="riskCapaDetailBody"></div>
+    </div>
+</div>
+
+
+
+
+
+<!-- ===== تقييم مخاطر — الدفعة 8: نافذتا التدقيق/التفتيش ===== -->
+<div id="riskAuModal" class="hidden fixed inset-0 z-[10050] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskAuFormClose()">
+    <div class="w-full max-w-xl rounded-[24px] p-5 text-right max-h-[94vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(56,189,248,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskAuFormClose()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">☑ Audit / Inspection - تدقيق / تفتيش</p>
+        </div>
+        <div id="riskAuBody"></div>
+    </div>
+</div>
+
+<div id="riskAuDetailModal" class="hidden fixed inset-0 z-[10060] items-center justify-center p-4" style="background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);" onclick="window.riskAuCloseDetail()">
+    <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(56,189,248,0.35);" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-3">
+            <button onclick="window.riskAuCloseDetail()" class="text-slate-400 text-lg px-2">✕</button>
+            <p class="text-white font-black text-base">📑 Audit Card - بطاقة التدقيق</p>
+        </div>
+        <div id="riskAuDetailBody"></div>
+    </div>
+</div>
+
+
 
 <div id="winSubs" class="app-window bg-[#080b12] text-right" style="padding:0;">
     <div class="w-full h-full flex flex-col">
