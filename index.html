@@ -6446,7 +6446,7 @@ window.mapShowReports = async () => {
             const keys = (await window.getMyScopeKeys()) || [window.activeKey];
             const parts = [];
             for (let i = 0; i < keys.length; i += 30) {
-                parts.push(await getDocs(query(emergencyColl, where('parentKey', 'in', keys.slice(i, i + 30)))));
+                for (const _k of keys.slice(i, i + 30)) parts.push(await getDocs(query(emergencyColl, where('parentKey', '==', _k))));
             }
             snap = { forEach: (fn) => parts.forEach(p => p.forEach(fn)) };
         } else {
@@ -7157,9 +7157,10 @@ window.refreshCompanyScope = async () => {
     for (let i = 0; i < keys.length; i += 30) chunks.push(keys.slice(i, i + 30));
     const start = (coll, handler) => {
         if (!handler) return [];
-        const parts = chunks.map(() => []);
-        return chunks.map((chunk, idx) => onSnapshot(
-        query(collection(db, 'artifacts', appId, 'public', 'data', coll), ...(coll === 'team_keys' ? [where('nsId', '==', window.myCompanyId)] : []), where('parentKey', 'in', chunk)),
+        const ch = coll === 'reports' ? keys.map(k => [k]) : chunks;
+        const parts = ch.map(() => []);
+        return ch.map((chunk, idx) => onSnapshot(
+        query(collection(db, 'artifacts', appId, 'public', 'data', coll), ...(coll === 'team_keys' ? [where('nsId', '==', window.myCompanyId), where('parentKey', 'in', chunk)] : [where('parentKey', '==', chunk[0])])),
             (snap) => {
                 parts[idx] = snap.docs;
                 handler({ docs: parts.flat(), docChanges: () => snap.docChanges() });
@@ -7191,7 +7192,7 @@ window._myScopeKeys = await window.getMyScopeKeys();
 const reportsListenerRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
 const reportsListenerQuery = (window.userRole === 'master')
     ? query(reportsListenerRef)
-    : query(reportsListenerRef, where('parentKey', 'in', window._myScopeKeys.slice(0, 30)));
+    : query(teamRef, where("parentKey", "==", window.activeKey)))
 window._reportsUnsub = onSnapshot(reportsListenerQuery, window._reportsHandler = (snapshot) => {
     
     snapshot.docChanges().forEach((change) => {
@@ -7272,7 +7273,7 @@ const filteredReports = window.userRole === 'master'
     });
 
     // شركة فيها أكثر من 30 قائداً: ربط المستمعين على دفعات
-    if (window.isCompanyOwner === true && (window._myScopeKeys || []).length > 30) window.refreshCompanyScope?.();
+    if (window.isCompanyOwner === true) window.refreshCompanyScope?.();
     window.watchCompanyLeaders?.(); // تحديث لحظي عند إضافة/حذف قادة الشركة
 
     // 5. مزامنة المشتركين (للمدير فقط)
@@ -12191,6 +12192,678 @@ window.riskDashRender = () => {
 };
 
 
+
+
+// ===================== تقييم مخاطر — الدفعة 9: الصور والمرفقات (بدون Firebase Storage) =====================
+// تُضغط الصورة في المتصفح (حد أقصى 1280px، JPEG، حتى ~280KB) وتُحفظ كوثيقة في risk_photos مرتبطة بالحادث أو التدقيق أو الإجراء.
+window.RISK_PHOTO_MAX = 6;
+window.RISK_PHOTO_LIMIT = 280000;
+window._risk.photos = {};
+
+window.riskPhotoSafe = (s) => typeof s === 'string' && /^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(s);
+
+window.riskCompressImage = (file) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+        try {
+            let scale = Math.min(1, 1280 / Math.max(img.width, img.height)), q = 0.7;
+            for (let n = 0; n < 9; n++) {
+                const c = document.createElement('canvas');
+                c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                const out = c.toDataURL('image/jpeg', q);
+                if (out.length <= window.RISK_PHOTO_LIMIT) { URL.revokeObjectURL(url); return resolve({ data: out, w: c.width, h: c.height }); }
+                if (q > 0.45) q -= 0.1; else scale *= 0.8;
+            }
+            URL.revokeObjectURL(url); reject(new Error('too large'));
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+});
+
+// الاستعلام يطابق ما تثبته القواعد: العضو يرى صوره فقط، والقائد/المالك صور قائده، والمدير الكل
+window.riskPhotoQuery = (id, leaderId) => {
+    const c = window.riskCtx(), col = collection(db, 'artifacts', appId, 'public', 'data', 'risk_photos');
+    if (c.role === 'master') return query(col, where('parentId', '==', id));
+    if (c.role === 'member') return query(col, where('parentId', '==', id), where('uploaderId', '==', c.uid));
+    return query(col, where('parentId', '==', id), where('leaderId', '==', leaderId));
+};
+
+window.riskPhotoSection = (type, id, leaderId, canAdd) => `<div class="mt-4 rounded-xl p-3" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);">
+    <div class="flex items-center justify-between mb-2">${canAdd ? `<button onclick="window.riskPhotoAdd('${type}','${id}','${leaderId}')" class="px-3 py-1.5 rounded-lg text-[11px] font-black text-black" style="background:linear-gradient(135deg,#38bdf8,#7dd3fc);">📷 Add photo - إضافة صورة</button>` : '<span></span>'}<p class="text-slate-300 text-xs font-black">Photos - الصور</p></div>
+    <div id="riskPh_${type}_${id}" class="flex flex-wrap gap-2"><span class="text-slate-500 text-[11px]">Loading... - جاري التحميل...</span></div></div>`;
+
+window.riskPhotoLoad = async (type, id, leaderId) => {
+    const key = type + '_' + id;
+    try {
+        const snap = await getDocs(window.riskPhotoQuery(id, leaderId));
+        window._risk.photos[key] = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.parentType === type && window.riskPhotoSafe(p.data)).sort((a, b) => Number(a.slot) - Number(b.slot));
+    } catch (e) { console.warn('photos load', e); window._risk.photos[key] = []; }
+    const box = document.getElementById('riskPh_' + key); if (!box) return;
+    const me = window.riskCtx(), list = window._risk.photos[key];
+    box.innerHTML = list.length ? list.map(p => `<div style="position:relative"><img src="${p.data}" onclick="window.riskPhotoView('${type}','${id}','${p.slot}')" style="width:76px;height:76px;object-fit:cover;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.15)">${(p.uploaderId === me.uid || me.role === 'master') ? `<button onclick="window.riskPhotoDel('${type}','${id}','${p.slot}','${leaderId}')" style="position:absolute;top:-6px;left:-6px;width:20px;height:20px;border-radius:50%;background:#ef4444;color:#fff;font-size:11px;font-weight:900">✕</button>` : ''}</div>`).join('')
+        : '<span class="text-slate-500 text-[11px]">No photos - لا توجد صور</span>';
+};
+
+window.riskPhotoAdd = (type, id, leaderId) => {
+    const key = type + '_' + id, items = window._risk.photos[key] || [];
+    if (items.length >= window.RISK_PHOTO_MAX) return window.showNotif('Maximum ' + window.RISK_PHOTO_MAX + ' photos - الحد الأقصى ' + window.RISK_PHOTO_MAX + ' صور', 'error');
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        window.showNotif('Processing photo... - جاري معالجة الصورة...', 'success');
+        try {
+            const r = await window.riskCompressImage(f), used = items.map(x => String(x.slot));
+            const free = ['1', '2', '3', '4', '5', '6'].find(s => !used.includes(s));
+            if (!free) return window.showNotif('Maximum photos reached - اكتمل عدد الصور', 'error');
+            const c = window.riskCtx();
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_photos', id + '_' + free), {
+                parentType: type, parentId: id, leaderId, slot: free, uploaderId: c.uid, uploaderName: c.name, uploaderRole: c.role,
+                caption: '', data: r.data, w: r.w, h: r.h, createdAt: Date.now()
+            });
+            window.showNotif('✅ Photo added - أُضيفت الصورة', 'success');
+            window.riskPhotoLoad(type, id, leaderId);
+        } catch (e) {
+            console.error('photo add', e);
+            window.showNotif('Could not add the photo (size or permissions) - تعذر إضافة الصورة (الحجم أو الصلاحيات)', 'error');
+        }
+    };
+    inp.click();
+};
+
+window.riskPhotoDel = (type, id, slot, leaderId) => {
+    window.showConfirm('Delete photo - حذف الصورة', 'This photo will be deleted permanently. - ستُحذف الصورة نهائياً.', async () => {
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_photos', id + '_' + slot));
+            window.showNotif('Deleted - تم الحذف', 'success');
+            window.riskPhotoLoad(type, id, leaderId);
+        } catch (e) { console.error(e); window.showNotif('Could not delete, check permissions - تعذر الحذف، تحقق من الصلاحيات', 'error'); }
+    });
+};
+
+window.riskPhotoView = (type, id, slot) => {
+    const p = (window._risk.photos[type + '_' + id] || []).find(x => String(x.slot) === String(slot));
+    if (!p || !window.riskPhotoSafe(p.data)) return;
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10090;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;';
+    ov.onclick = () => ov.remove();
+    const im = document.createElement('img'); im.src = p.data; im.style.cssText = 'max-width:100%;max-height:82vh;border-radius:12px;';
+    const cap = document.createElement('p'); cap.style.cssText = 'color:#cbd5e1;font-size:12px;margin-top:10px;font-weight:700;';
+    cap.textContent = (p.uploaderName || '') + ' · ' + window.riskFmt(p.createdAt);
+    ov.appendChild(im); ov.appendChild(cap); document.body.appendChild(ov);
+};
+
+// ---------- إضافة قسم الصور إلى بطاقات الحادث والتدقيق والإجراء ----------
+const _riskIncOpenPrev9 = window.riskIncOpen;
+window.riskIncOpen = (id) => {
+    _riskIncOpenPrev9(id);
+    const i = (window._risk.incidents || []).find(x => x.id === id), c = window.riskCtx(); if (!i) return;
+    const canAdd = i.requesterId === c.uid || c.role !== 'member';
+    document.getElementById('riskIncDetailBody')?.insertAdjacentHTML('beforeend', window.riskPhotoSection('incident', id, i.leaderId, canAdd));
+    window.riskPhotoLoad('incident', id, i.leaderId);
+};
+const _riskAuOpenPrev9 = window.riskAuOpen;
+window.riskAuOpen = (id) => {
+    _riskAuOpenPrev9(id);
+    const a = (window._risk.audits || []).find(x => x.id === id); if (!a) return;
+    document.getElementById('riskAuDetailBody')?.insertAdjacentHTML('beforeend', window.riskPhotoSection('audit', id, a.leaderId, window.riskCapaManager()));
+    window.riskPhotoLoad('audit', id, a.leaderId);
+};
+const _riskCapaOpenPrev9 = window.riskCapaOpen;
+window.riskCapaOpen = (id) => {
+    _riskCapaOpenPrev9(id);
+    const c = (window._risk.capas || []).find(x => x.id === id); if (!c) return;
+    document.getElementById('riskCapaDetailBody')?.insertAdjacentHTML('beforeend', window.riskPhotoSection('capa', id, c.leaderId, window.riskCapaManager()));
+    window.riskPhotoLoad('capa', id, c.leaderId);
+};
+
+
+
+
+// ===================== تقييم مخاطر — الدفعة 10: التدريب + معدات الوقاية + الطوارئ =====================
+window.RISK_TRAIN_COURSES = ['Fire Fighting - مكافحة الحريق', 'First Aid - الإسعافات الأولية', 'Chemical Safety & SDS - السلامة الكيميائية وصحائف السلامة', 'Working at Height - العمل على الارتفاعات', 'Confined Space Entry - دخول الأماكن المغلقة', 'Electrical Safety & LOTO - السلامة الكهربائية والعزل', 'Lifting & Rigging - الرفع والربط', 'Manual Handling - المناولة اليدوية', 'Hot Work - الأعمال الساخنة', 'Defensive Driving - القيادة الدفاعية', 'Site Safety Induction - التعريف بسلامة الموقع', 'Emergency Response & Evacuation - الاستجابة للطوارئ والإخلاء', 'Risk Assessment / JSA - تقييم المخاطر', 'Incident Investigation (RCA) - التحقيق في الحوادث', 'ISO 45001 Awareness - التوعية بآيزو 45001', 'Internal Auditor Training - تدريب المدقق الداخلي', 'PPE Use & Care - استخدام معدات الوقاية والعناية بها', 'Toolbox Talk - الحديث القصير قبل العمل'];
+// الأرقام = فترة فحص/مراجعة مقترحة بالأشهر (قابلة للتعديل؛ تعليمات الشركة المصنِّعة هي المرجع)
+window.RISK_PPE_ITEMS = { 'Safety Helmet - خوذة سلامة': 36, 'Safety Footwear - حذاء سلامة': 12, 'Safety Gloves - قفازات': 3, 'Safety Glasses / Goggles - نظارات واقية': 12, 'Face Shield - واقي وجه': 12, 'Hearing Protection - واقيات سمع': 12, 'Respirator / Mask - كمامة تنفس': 6, 'Hi-Vis Vest - سترة عاكسة': 12, 'Full-Body Harness - حزام سلامة كامل': 6, 'Lanyard / Lifeline - حبل ربط': 6, 'Flame-Resistant Coverall - بدلة مقاومة للهب': 12, 'Chemical Suit - بدلة كيميائية': 12, 'Welding Helmet - خوذة لحام': 24 };
+window.RISK_PLAN_TYPES = ['Fire - الحريق', 'Evacuation - الإخلاء', 'Chemical Spill / Leak - تسرب كيميائي', 'Medical Emergency - طارئ طبي', 'Explosion - انفجار', 'Earthquake / Natural Disaster - زلزال / كارثة طبيعية', 'Power Failure - انقطاع الكهرباء', 'Security Threat - تهديد أمني', 'Environmental Release - تسرب بيئي'];
+window.RISK_DRILL_TYPES = ['Fire Evacuation Drill - تمرين إخلاء حريق', 'Chemical Spill Drill - تمرين تسرب كيميائي', 'Medical Emergency Drill - تمرين طارئ طبي', 'Table-top Exercise - تمرين محاكاة نظرية', 'Full-scale Emergency Drill - تمرين طوارئ شامل'];
+Object.assign(window._risk, { reg: { training: [], ppe: [], emergency: [] }, trUnsubs: [], ppeUnsubs: [], emUnsubs: [], regForm: null, emView: 'plan', trFilter: 'all', ppeFilter: 'all' });
+
+// ---------- أدوات التاريخ والحالة ----------
+window.riskAddMonths = (ymd, n) => { const d = new Date(ymd + 'T00:00:00'); d.setMonth(d.getMonth() + Number(n)); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+window.riskDaysTo = (ymd) => ymd ? Math.floor((new Date(ymd + 'T00:00:00') - new Date(window.riskToday() + 'T00:00:00')) / 86400000) : null;
+window.riskDueState = (ymd) => { const d = window.riskDaysTo(ymd); if (d === null) return { k: 'valid', label: 'Valid - ساري', color: '#10b981', days: null }; if (d < 0) return { k: 'expired', label: 'Expired - منتهٍ', color: '#ef4444', days: d }; if (d <= 30) return { k: 'expiring', label: 'Expiring - ينتهي قريباً', color: '#eab308', days: d }; return { k: 'valid', label: 'Valid - ساري', color: '#10b981', days: d }; };
+window.riskTrState = (r) => window.riskDueState(r.expiresAt || '');
+window.riskPpeState = (r) => (r.state === 'replaced' || r.state === 'returned') ? { k: 'inactive', label: (r.state === 'replaced' ? 'Replaced - استُبدلت' : 'Returned - أُعيدت'), color: '#64748b', days: null } : (r.state === 'damaged' ? { k: 'damaged', label: 'Damaged - تالفة', color: '#ef4444', days: null } : window.riskDueState(r.nextDue || ''));
+window.riskPlanState = (r) => window.riskDueState(r.reviewDue || '');
+window.riskRegCanCreate = () => { const r = window.riskCtx().role; return r === 'leader' || r === 'owner'; };
+
+// ---------- التبويبات (سجل موحد يسهّل إضافة أي تبويب لاحقاً) ----------
+window.RISK_TABS = [
+    { k: 'dash', label: 'Dashboard - اللوحة', panel: 'riskDashPanel', mgr: true, render: 'riskDashRender' },
+    { k: 'permits', label: 'Permits - التصاريح', panel: 'riskPermitsBox', badge: () => (window._risk.permits || []).filter(p => window.riskCanApprove(p)).length },
+    { k: 'ra', label: 'Risk Assessment - تقييم المخاطر', panel: 'riskRaPanel', render: 'riskRaRender', badge: () => (window._risk.assessments || []).filter(a => window.riskCanApprove(a)).length },
+    { k: 'inc', label: 'Incidents - الحوادث', panel: 'riskIncPanel', render: 'riskIncRender', badge: () => (window._risk.incidents || []).filter(i => window.riskIncCanReview(i)).length },
+    { k: 'audit', label: 'Audit - التدقيق والتفتيش', panel: 'riskAuPanel', mgr: true, render: 'riskAuRender' },
+    { k: 'capa', label: 'CAPA - الإجراءات التصحيحية', panel: 'riskCapaPanel', mgr: true, render: 'riskCapaRender', badge: () => (window._risk.capas || []).filter(c => window.riskCapaOverdue(c)).length },
+    { k: 'training', label: 'Training - التدريب', panel: 'riskTrPanel', mgr: true, render: 'riskTrRender', badge: () => (window._risk.reg.training || []).filter(r => window.riskTrState(r).k === 'expired').length },
+    { k: 'ppe', label: 'PPE - معدات الوقاية', panel: 'riskPpePanel', mgr: true, render: 'riskPpeRender', badge: () => (window._risk.reg.ppe || []).filter(r => ['expired', 'damaged'].includes(window.riskPpeState(r).k)).length },
+    { k: 'emergency', label: 'Emergency - الطوارئ', panel: 'riskEmPanel', render: 'riskEmRender', badge: () => (window._risk.reg.emergency || []).filter(r => r.kind === 'plan' && window.riskPlanState(r).k === 'expired').length }
+];
+const _riskTabsInitPrev10 = window.riskTabsInit;
+window.riskTabsInit = () => {
+    _riskTabsInitPrev10();
+    const anchor = document.getElementById('riskDashPanel'); if (!anchor) return;
+    let prev = anchor;
+    window.RISK_TABS.forEach(t => {
+        if (document.getElementById(t.panel)) { prev = document.getElementById(t.panel); return; }
+        const el = document.createElement('div'); el.id = t.panel; el.className = 'flex-1 overflow-y-auto p-5 hidden';
+        prev.insertAdjacentElement('afterend', el); prev = el;
+    });
+    window.riskTabSet(window._risk.tab);
+};
+window.riskTabsRefresh = () => {
+    const tabs = document.getElementById('riskTabs'); if (!tabs) return;
+    const mgr = window.riskCtx().role !== 'member', cur = window._risk.tab;
+    tabs.innerHTML = window.RISK_TABS.filter(t => mgr || !t.mgr).map(t => {
+        const n = t.badge ? t.badge() : 0, on = cur === t.k;
+        return `<button onclick="window.riskTabSet('${t.k}')" class="px-4 py-2 rounded-xl text-xs font-black whitespace-nowrap" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${on ? '#000' : '#cbd5e1'};border:1px solid ${on ? '#f97316' : 'rgba(255,255,255,0.12)'};">${t.label}${n ? ` <span class="px-1.5 rounded-full" style="background:#ef4444;color:#fff">${n}</span>` : ''}</button>`;
+    }).join('');
+    if (cur === 'dash') window.riskDashRender();
+};
+window.riskTabSet = (k) => {
+    const mgr = window.riskCtx().role !== 'member', tab = window.RISK_TABS.find(t => t.k === k);
+    if (!tab || (tab.mgr && !mgr)) k = 'permits';
+    window._risk.tab = k;
+    window.RISK_TABS.forEach(t => document.getElementById(t.panel)?.classList.toggle('hidden', t.k !== k));
+    window.riskTabsRefresh();
+    const t = window.RISK_TABS.find(x => x.k === k);
+    if (t && t.render && typeof window[t.render] === 'function') window[t.render]();
+};
+
+// ---------- الاستماع ----------
+const _riskUnlistenPrev10 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev10(); ['trUnsubs', 'ppeUnsubs', 'emUnsubs'].forEach(k => { (window._risk[k] || []).forEach(u => { try { u(); } catch (e) {} }); window._risk[k] = []; }); };
+window.riskRegListen = () => {
+    const c = window.riskCtx(), setter = (k, tab) => (list) => { window._risk.reg[k] = list; window.riskTabsRefresh(); if (window._risk.tab === tab) window.riskRegRenderAll(); };
+    window.riskScopedListen('risk_training', 'none', setter('training', 'training'), 'trUnsubs');
+    window.riskScopedListen('risk_ppe', 'none', setter('ppe', 'ppe'), 'ppeUnsubs');
+    if (c.role !== 'member') { window.riskScopedListen('risk_emergency', 'none', setter('emergency', 'emergency'), 'emUnsubs'); return; }
+    (window._risk.emUnsubs || []).forEach(u => { try { u(); } catch (e) {} }); window._risk.emUnsubs = [];
+    const col = collection(db, 'artifacts', appId, 'public', 'data', 'risk_emergency'), bucket = {};
+    ['plan', 'contact'].forEach(kind => window._risk.emUnsubs.push(onSnapshot(query(col, where('leaderId', '==', c.leaderId), where('kind', '==', kind)), snap => {
+        bucket[kind] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        window._risk.reg.emergency = [].concat(...Object.values(bucket)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        window.riskTabsRefresh(); if (window._risk.tab === 'emergency') window.riskRegRenderAll();
+    }, e => console.warn('emergency', e))));
+};
+const _riskShowPrev10 = window.riskOnShow;
+window.riskOnShow = async () => { await _riskShowPrev10(); window.riskRegListen(); };
+window.riskRegRenderAll = () => { window.riskTrRender(); window.riskPpeRender(); window.riskEmRender(); };
+
+// ---------- مواصفات النماذج ----------
+window.riskRegSpec = (reg, kind) => {
+    const T = (k, label, extra) => Object.assign({ k, label, type: 'text' }, extra || {});
+    if (reg === 'training') return { col: 'risk_training', pre: 'TR', title: 'Training Record - سجل تدريب', fields: [T('person', 'Person - الشخص *', { req: 1 }), T('personRole', 'Job title - المسمى الوظيفي'), T('course', 'Course - الدورة *', { type: 'combo', options: window.RISK_TRAIN_COURSES, req: 1 }), T('provider', 'Provider / trainer - الجهة المدرِّبة'), T('trainedAt', 'Training date - تاريخ التدريب *', { type: 'date', req: 1 }), T('validMonths', 'Validity in months (0 = no expiry) - الصلاحية بالأشهر (0 = بلا انتهاء)', { type: 'number' }), T('certNo', 'Certificate no. - رقم الشهادة'), T('notes', 'Notes - ملاحظات', { type: 'area' })] };
+    if (reg === 'ppe') return { col: 'risk_ppe', pre: 'PPE', title: 'PPE Record - سجل معدة وقاية', fields: [T('person', 'Issued to - سُلّمت إلى *', { req: 1 }), T('item', 'Item - المعدة *', { type: 'combo', options: Object.keys(window.RISK_PPE_ITEMS), req: 1 }), T('serial', 'Serial / batch - الرقم التسلسلي'), T('issuedAt', 'Issue date - تاريخ التسليم *', { type: 'date', req: 1 }), T('nextDue', 'Next inspection / replacement (suggested, editable) - الفحص أو الاستبدال القادم (مقترح وقابل للتعديل)', { type: 'date' }), T('state', 'State - الحالة', { type: 'select', options: [['issued', 'Issued - مسلّمة'], ['damaged', 'Damaged - تالفة'], ['replaced', 'Replaced - استُبدلت'], ['returned', 'Returned - أُعيدت']] }), T('lastInspected', 'Last inspected - آخر فحص', { type: 'date' }), T('notes', 'Notes - ملاحظات', { type: 'area' })] };
+    if (kind === 'contact') return { col: 'risk_emergency', pre: 'EM', kind, title: 'Emergency Contact - جهة اتصال طوارئ', fields: [T('name', 'Name / entity - الاسم أو الجهة *', { req: 1 }), T('roleTitle', 'Role - الصفة'), T('phone', 'Phone - الهاتف *', { req: 1 }), T('notes', 'Notes - ملاحظات', { type: 'area' })] };
+    if (kind === 'plan') return { col: 'risk_emergency', pre: 'EM', kind, title: 'Emergency Plan - خطة طوارئ', fields: [T('planType', 'Plan type - نوع الخطة *', { type: 'combo', options: window.RISK_PLAN_TYPES, req: 1 }), T('title', 'Title - العنوان *', { req: 1 }), T('steps', 'Steps / procedure - الخطوات والإجراءات *', { type: 'area', rows: 6, req: 1 }), T('assembly', 'Assembly point - نقطة التجمع'), T('responsible', 'Responsible person - المسؤول'), T('version', 'Version - الإصدار'), T('reviewedAt', 'Last reviewed - آخر مراجعة *', { type: 'date', req: 1 })] };
+    return { col: 'risk_emergency', pre: 'EM', kind: 'drill', title: 'Emergency Drill - تمرين طوارئ', fields: [T('drillType', 'Drill type - نوع التمرين *', { type: 'combo', options: window.RISK_DRILL_TYPES, req: 1 }), T('drillAt', 'Drill date - تاريخ التمرين *', { type: 'date', req: 1 }), T('participants', 'Participants - عدد المشاركين', { type: 'number' }), T('durationMin', 'Duration (min) - المدة بالدقائق', { type: 'number' }), T('findings', 'Findings & lessons - الملاحظات والدروس', { type: 'area', rows: 4 }), T('notes', 'Notes - ملاحظات', { type: 'area' })] };
+};
+
+// ---------- النموذج العام ----------
+window.riskRegEnsureModal = () => {
+    let m = document.getElementById('riskRegModal'); if (m) return m;
+    m = document.createElement('div'); m.id = 'riskRegModal';
+    m.className = 'hidden fixed inset-0 items-center justify-center p-4'; m.style.cssText = 'z-index:10055;background:rgba(4,6,12,0.85);backdrop-filter:blur(6px);';
+    m.onclick = () => window.riskRegClose();
+    m.innerHTML = '<div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[94vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.35);" onclick="event.stopPropagation()"><div class="flex items-center justify-between mb-3"><button onclick="window.riskRegClose()" class="text-slate-400 text-lg px-2">✕</button><p id="riskRegTitle" class="text-white font-black text-base"></p></div><div id="riskRegBody"></div></div>';
+    document.body.appendChild(m); return m;
+};
+window.riskRegNew = (reg, kind) => {
+    if (!window.riskRegCanCreate()) return window.showNotif('Only leaders and owners add records - إضافة السجلات للقائد ومالك الشركة', 'error');
+    const spec = window.riskRegSpec(reg, kind), v = {};
+    spec.fields.forEach(f => { v[f.k] = f.type === 'number' ? '' : ''; });
+    if (reg === 'ppe') v.state = 'issued';
+    ['trainedAt', 'issuedAt', 'reviewedAt', 'drillAt'].forEach(k => { if (k in v) v[k] = window.riskToday(); });
+    window._risk.regForm = { reg, kind, id: '', v, pubAll: false };
+    window.riskRegFormRender();
+};
+window.riskRegOpen = (reg, id) => {
+    const r = (window._risk.reg[reg] || []).find(x => x.id === id); if (!r) return;
+    const spec = window.riskRegSpec(reg, r.kind), v = {};
+    spec.fields.forEach(f => { v[f.k] = r[f.k] === undefined ? '' : r[f.k]; });
+    window._risk.regForm = { reg, kind: r.kind, id, v, rec: r, pubAll: false };
+    window.riskRegFormRender();
+};
+window.riskRegClose = () => { const m = document.getElementById('riskRegModal'); m?.classList.add('hidden'); m?.classList.remove('flex'); window._risk.regForm = null; };
+window.riskRegSet = (k, val) => {
+    const f = window._risk.regForm; if (!f) return; f.v[k] = val;
+    if (f.reg === 'ppe' && (k === 'item' || k === 'issuedAt') && !f.id) { const m = window.RISK_PPE_ITEMS[f.v.item]; if (m && f.v.issuedAt) { f.v.nextDue = window.riskAddMonths(f.v.issuedAt, m); const el = document.getElementById('riskReg_nextDue'); if (el) el.value = f.v.nextDue; } }
+};
+window.riskRegFormRender = () => {
+    const f = window._risk.regForm; if (!f) return;
+    const spec = window.riskRegSpec(f.reg, f.kind), m = window.riskRegEnsureModal(), c = window.riskCtx();
+    const canEdit = window.riskRegCanCreate() && (!f.id || (f.rec && (f.rec.leaderId === c.leaderId || c.role === 'owner')));
+    const cls = 'erg-input lux-field-input text-right w-full mb-2', dis = canEdit ? '' : 'disabled';
+    document.getElementById('riskRegTitle').textContent = spec.title;
+    const inputs = spec.fields.map(fd => {
+        const val = esc(f.v[fd.k]), id = 'riskReg_' + fd.k, L = `<p class="text-slate-400 text-[11px] font-black mb-1">${fd.label}</p>`;
+        if (fd.type === 'area') return L + `<textarea id="${id}" rows="${fd.rows || 2}" ${dis} class="${cls}" oninput="window.riskRegSet('${fd.k}',this.value)">${val}</textarea>`;
+        if (fd.type === 'select') return L + `<select id="${id}" ${dis} class="${cls}" onchange="window.riskRegSet('${fd.k}',this.value)">${fd.options.map(o => `<option value="${o[0]}" ${f.v[fd.k] === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select>`;
+        if (fd.type === 'combo') return L + `<input id="${id}" list="${id}_dl" ${dis} class="${cls}" value="${val}" oninput="window.riskRegSet('${fd.k}',this.value)" onchange="window.riskRegSet('${fd.k}',this.value)"><datalist id="${id}_dl">${fd.options.map(o => `<option value="${esc(o)}">`).join('')}</datalist>`;
+        return L + `<input id="${id}" type="${fd.type}" ${dis} class="${cls}" value="${val}" oninput="window.riskRegSet('${fd.k}',this.value)" onchange="window.riskRegSet('${fd.k}',this.value)">`;
+    }).join('');
+    let actions = '';
+    if (f.id && canEdit && f.reg === 'ppe') actions += `<button onclick="window.riskPpeInspect('${f.id}')" class="w-full py-2.5 rounded-xl font-black text-xs text-black mb-2" style="background:linear-gradient(135deg,#38bdf8,#7dd3fc);">🔎 Mark inspected today - تم الفحص اليوم</button>`;
+    if (f.id && canEdit && f.kind === 'drill') actions += `<button onclick="window.riskDrillCapa('${f.id}')" class="w-full py-2.5 rounded-xl font-black text-xs text-black mb-2" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ Create action from findings - إنشاء إجراء من الملاحظات</button>`;
+    if (!f.id && c.role === 'owner' && ['plan', 'contact'].includes(f.kind)) actions += `<label class="flex items-center gap-2 text-slate-300 text-xs font-black mb-2"><input type="checkbox" onchange="window._risk.regForm.pubAll=this.checked"> Publish to all company leaders - نشر لكل قادة الشركة</label>`;
+    m.querySelector('#riskRegBody').innerHTML = inputs + actions + (canEdit ? `<div class="flex gap-2 mt-2"><button onclick="window.riskRegSave()" class="flex-1 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">Save - حفظ</button>${f.id ? `<button onclick="window.riskRegDelete()" class="px-4 py-3 rounded-xl font-black text-sm text-rose-200" style="background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);">🗑️</button>` : ''}</div>` : '<p class="text-slate-500 text-[11px] mt-2">Read only - للقراءة فقط</p>');
+    m.classList.remove('hidden'); m.classList.add('flex');
+};
+window.riskRegSave = async () => {
+    const f = window._risk.regForm; if (!f) return;
+    const spec = window.riskRegSpec(f.reg, f.kind), c = window.riskCtx(), E = (m) => window.showNotif(m, 'error');
+    for (const fd of spec.fields) if (fd.req && !String(f.v[fd.k] || '').trim()) return E('Required field missing - حقل مطلوب ناقص: ' + fd.label.replace('*', '').trim());
+    const data = {};
+    spec.fields.forEach(fd => { const x = f.v[fd.k]; data[fd.k] = fd.type === 'number' ? (x === '' || x === null ? 0 : Number(x) || 0) : String(x === undefined ? '' : x).trim(); });
+    if (f.reg === 'training') data.expiresAt = (data.validMonths > 0 && data.trainedAt) ? window.riskAddMonths(data.trainedAt, data.validMonths) : '';
+    if (f.kind === 'plan') data.reviewDue = window.riskAddMonths(data.reviewedAt, 12);
+    const col = collection(db, 'artifacts', appId, 'public', 'data', spec.col), now = Date.now();
+    try {
+        if (f.id) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', spec.col, f.id), Object.assign({}, data, { updatedAt: now }));
+        } else {
+            const base = () => Object.assign({ refNo: spec.pre + '-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(), companyId: c.companyId, creatorId: c.uid, creatorName: c.name, creatorRole: c.role, createdAt: now }, spec.kind ? { kind: spec.kind } : {}, data);
+            const keys = (f.pubAll && c.role === 'owner') ? Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 40) : [c.leaderId];
+            if (keys.length === 1) await addDoc(col, Object.assign(base(), { leaderId: keys[0] }));
+            else { const b = writeBatch(db); keys.forEach(k => b.set(doc(col), Object.assign(base(), { leaderId: k }))); await b.commit(); }
+        }
+        window.showNotif('✅ Saved - تم الحفظ', 'success'); window.riskRegClose();
+    } catch (e) { console.error('reg save', e); E('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات'); }
+};
+window.riskRegDelete = () => {
+    const f = window._risk.regForm; if (!f || !f.id) return;
+    const spec = window.riskRegSpec(f.reg, f.kind), id = f.id;
+    window.showConfirm('Delete record - حذف السجل', 'This record will be deleted permanently. - سيُحذف السجل نهائياً.', async () => {
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', spec.col, id)); window.showNotif('Deleted - تم الحذف', 'success'); window.riskRegClose(); }
+        catch (e) { console.error(e); window.showNotif('Could not delete, check permissions - تعذر الحذف، تحقق من الصلاحيات', 'error'); }
+    });
+};
+window.riskPpeInspect = async (id) => {
+    const r = (window._risk.reg.ppe || []).find(x => x.id === id); if (!r) return;
+    const months = window.RISK_PPE_ITEMS[r.item] || 6, today = window.riskToday();
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ppe', id), { lastInspected: today, nextDue: window.riskAddMonths(today, months), updatedAt: Date.now() }); window.showNotif('✅ Inspection recorded - سُجّل الفحص', 'success'); window.riskRegClose(); }
+    catch (e) { console.error(e); window.showNotif('Could not update, check permissions - تعذر التحديث، تحقق من الصلاحيات', 'error'); }
+};
+window.riskDrillCapa = (id) => {
+    const r = (window._risk.reg.emergency || []).find(x => x.id === id); if (!r) return;
+    window.riskRegClose();
+    window.riskCapaNew('drill', id, 'DRILL ' + (r.drillAt || ''), r.leaderId);
+    const f = window._risk.capaForm; if (!f) return;
+    f.title = ('Drill finding: ' + (r.drillType || '')).slice(0, 140); f.description = r.findings || ''; window.riskCapaFormRender();
+};
+
+// ---------- قوائم التبويبات ----------
+window.riskRegListHtml = (reg, list, stateFn, cardFn, filterKey, chips, newBtn) => {
+    const f = window._risk[filterKey], rows = list.filter(r => f === 'all' ? true : (f === 'attention' ? ['expired', 'expiring', 'damaged'].includes(stateFn(r).k) : stateFn(r).k === f));
+    const cnt = (k) => list.filter(r => stateFn(r).k === k).length;
+    const stat = (label, v, color) => `<div class="rounded-2xl p-3 text-center" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-xl font-black" style="color:${color}">${v}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    return `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">${stat('Total - الإجمالي', list.length, '#38bdf8')}${stat('Valid - سارية', cnt('valid'), '#10b981')}${stat('Expiring ≤30d - تنتهي قريباً', cnt('expiring'), '#eab308')}${stat('Expired / Damaged - منتهية أو تالفة', cnt('expired') + cnt('damaged'), '#ef4444')}</div>
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">${window.riskRegCanCreate() ? newBtn : '<span></span>'}<div class="flex flex-wrap gap-2">${chips.map(([k, l]) => `<button onclick="window._risk.${filterKey}='${k}';window.riskRegRenderAll()" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${f === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${f === k ? '#000' : '#94a3b8'};border:1px solid ${f === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('')}</div></div>
+        <div class="grid gap-3 md:grid-cols-2">${rows.length ? rows.map(cardFn).join('') : '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">No records. - لا توجد سجلات.</p>'}</div>`;
+};
+window.riskDueText = (st) => st.days === null ? '' : (st.days < 0 ? `${-st.days} d overdue - متأخر ${-st.days} يوماً` : `${st.days} d left - باقٍ ${st.days} يوماً`);
+window.riskTrRender = () => {
+    const p = document.getElementById('riskTrPanel'); if (!p) return;
+    p.innerHTML = window.riskRegListHtml('training', window._risk.reg.training || [], window.riskTrState, (r) => { const st = window.riskTrState(r); return `<div onclick="window.riskRegOpen('training','${r.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:rgba(255,255,255,0.05);border:1px solid ${st.color}66;"><div class="flex justify-between mb-2"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${st.color}26;color:${st.color}">${st.label}</span><span class="text-slate-500 text-[10px] font-mono">${esc(r.refNo || '')}</span></div><p class="text-white font-black text-sm">${esc(r.person)}</p><p class="text-sky-300 text-xs mt-1">🎓 ${esc(r.course)}</p><p class="text-slate-400 text-[11px] mt-1">${esc(r.trainedAt || '')}${r.expiresAt ? ' → ' + esc(r.expiresAt) : ''} ${esc(window.riskDueText(st))}</p></div>`; },
+        'trFilter', [['all', 'All - الكل'], ['attention', 'Needs attention - تحتاج متابعة'], ['valid', 'Valid - سارية'], ['expired', 'Expired - منتهية']], `<button onclick="window.riskRegNew('training')" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#a78bfa,#38bdf8);">🎓 New Training Record - سجل تدريب جديد</button>`);
+};
+window.riskPpeRender = () => {
+    const p = document.getElementById('riskPpePanel'); if (!p) return;
+    p.innerHTML = window.riskRegListHtml('ppe', window._risk.reg.ppe || [], window.riskPpeState, (r) => { const st = window.riskPpeState(r); return `<div onclick="window.riskRegOpen('ppe','${r.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:rgba(255,255,255,0.05);border:1px solid ${st.color}66;"><div class="flex justify-between mb-2"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${st.color}26;color:${st.color}">${st.label}</span><span class="text-slate-500 text-[10px] font-mono">${esc(r.refNo || '')}</span></div><p class="text-white font-black text-sm">⛑️ ${esc(r.item)}</p><p class="text-slate-300 text-xs mt-1">👤 ${esc(r.person)}${r.serial ? ' · #' + esc(r.serial) : ''}</p><p class="text-slate-400 text-[11px] mt-1">${r.nextDue ? 'Due - الموعد: ' + esc(r.nextDue) + ' ' + esc(window.riskDueText(st)) : ''}</p></div>`; },
+        'ppeFilter', [['all', 'All - الكل'], ['attention', 'Needs attention - تحتاج متابعة'], ['valid', 'Valid - سارية'], ['expired', 'Overdue - متأخرة']], `<button onclick="window.riskRegNew('ppe')" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#fbbf24,#f97316);">⛑️ New PPE Record - سجل معدة جديد</button>`);
+};
+window.riskEmRender = () => {
+    const p = document.getElementById('riskEmPanel'); if (!p) return;
+    const v = window._risk.emView, all = window._risk.reg.emergency || [], list = all.filter(r => r.kind === v), can = window.riskRegCanCreate(), member = window.riskCtx().role === 'member';
+    const views = [['plan', 'Plans - الخطط'], ['contact', 'Contacts - الجهات'], ['drill', 'Drills - التمارين']].filter(x => !(member && x[0] === 'drill'));
+    const lastDrill = all.filter(r => r.kind === 'drill').sort((a, b) => String(b.drillAt).localeCompare(String(a.drillAt)))[0];
+    const card = (r) => {
+        if (r.kind === 'plan') { const st = window.riskPlanState(r); return `<div onclick="window.riskRegOpen('emergency','${r.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:rgba(255,255,255,0.05);border:1px solid ${st.color}66;"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${st.color}26;color:${st.color}">${st.k === 'valid' ? 'Reviewed - مراجَعة' : (st.k === 'expiring' ? 'Review soon - مراجعة قريبة' : 'Review overdue - مراجعة متأخرة')}</span><p class="text-white font-black text-sm mt-2">🚨 ${esc(r.title)}</p><p class="text-sky-300 text-xs mt-1">${esc(r.planType)}</p><p class="text-slate-400 text-[11px] mt-1">📍 ${esc(r.assembly || '—')} · v${esc(r.version || '1')} · ${esc(r.reviewedAt || '')}</p></div>`; }
+        if (r.kind === 'contact') return `<div onclick="window.riskRegOpen('emergency','${r.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);"><p class="text-white font-black text-sm">📞 ${esc(r.name)}</p><p class="text-slate-400 text-xs mt-1">${esc(r.roleTitle || '')}</p><p class="text-emerald-300 text-sm font-black mt-1" dir="ltr">${esc(r.phone)}</p></div>`;
+        return `<div onclick="window.riskRegOpen('emergency','${r.id}')" class="rounded-2xl p-4 cursor-pointer" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);"><p class="text-white font-black text-sm">🧯 ${esc(r.drillType)}</p><p class="text-slate-400 text-xs mt-1">${esc(r.drillAt || '')} · ${r.participants || 0} participants - مشارك · ${r.durationMin || 0} min</p>${r.findings ? `<p class="text-amber-200 text-[11px] mt-1">${esc(r.findings).slice(0, 90)}</p>` : ''}</div>`;
+    };
+    const newLbl = { plan: '➕ New Plan - خطة جديدة', contact: '➕ New Contact - جهة جديدة', drill: '➕ Log Drill - تسجيل تمرين' }[v];
+    p.innerHTML = `${!member ? `<div class="rounded-2xl p-3 mb-3" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.3);"><p class="text-xs text-slate-200 font-black">Last drill - آخر تمرين: ${lastDrill ? esc(lastDrill.drillAt) + ' (' + Math.abs(window.riskDaysTo(lastDrill.drillAt)) + ' d ago - منذ ' + Math.abs(window.riskDaysTo(lastDrill.drillAt)) + ' يوماً)' : 'None recorded - لا يوجد'}</p></div>` : ''}
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">${can ? `<button onclick="window.riskRegNew('emergency','${v}')" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#ef4444,#f97316);">${newLbl}</button>` : '<span></span>'}<div class="flex flex-wrap gap-2">${views.map(([k, l]) => `<button onclick="window._risk.emView='${k}';window.riskEmRender()" class="px-3 py-1.5 rounded-full text-[11px] font-black" style="background:${v === k ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${v === k ? '#000' : '#94a3b8'};border:1px solid ${v === k ? '#f97316' : 'rgba(255,255,255,0.1)'};">${l}</button>`).join('')}</div></div>
+        <div class="grid gap-3 md:grid-cols-2">${list.length ? list.map(card).join('') : '<p class="text-center text-slate-600 text-sm py-12 md:col-span-2">No records. - لا توجد سجلات.</p>'}</div>`;
+};
+// تمرير نوع الطوارئ عند فتح النموذج
+const _riskRegNewPrev = window.riskRegNew;
+window.riskRegNew = (reg, kind) => _riskRegNewPrev(reg, reg === 'emergency' ? kind : undefined);
+
+// ---------- ملحق اللوحة ----------
+const _riskDashPrev10 = window.riskDashRender;
+window.riskDashRender = () => {
+    _riskDashPrev10();
+    const panel = document.getElementById('riskDashPanel'); if (!panel || window.riskCtx().role === 'member') return;
+    const R = window._risk.reg, tr = (R.training || []).map(window.riskTrState), pp = (R.ppe || []).map(window.riskPpeState), pl = (R.emergency || []).filter(r => r.kind === 'plan').map(window.riskPlanState);
+    const n = (a, ...ks) => a.filter(x => ks.includes(x.k)).length;
+    const k = (label, v, color, tab) => `<div onclick="window.riskTabSet('${tab}')" class="rounded-2xl p-3 text-center cursor-pointer" style="background:${color}1a;border:1px solid ${color}40;"><p class="text-2xl font-black" style="color:${color}">${v}</p><p class="text-[10px] font-black text-slate-300 mt-1">${label}</p></div>`;
+    panel.insertAdjacentHTML('beforeend', `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">${k('Training expired - تدريبات منتهية', n(tr, 'expired'), '#ef4444', 'training')}${k('Training expiring ≤30d - تدريبات تنتهي قريباً', n(tr, 'expiring'), '#eab308', 'training')}${k('PPE overdue/damaged - معدات متأخرة أو تالفة', n(pp, 'expired', 'damaged'), '#ef4444', 'ppe')}${k('Emergency plans overdue review - خطط طوارئ تحتاج مراجعة', n(pl, 'expired'), '#f97316', 'emergency')}</div>`);
+};
+
+
+
+
+
+// ===================== تقييم مخاطر — الدفعة 11: التلميع (حدود الامتثال لكل شركة + الصور في PDF) =====================
+
+// ---------- 1) حدود الامتثال القابلة للتعديل لكل شركة ----------
+window._risk.auditGood = 90;
+window._risk.auditWarn = 75;
+window.riskAuRate = (score) => (score === null || score === undefined) ? '' : (score >= window._risk.auditGood ? 'compliant' : (score >= window._risk.auditWarn ? 'improve' : 'non_compliant'));
+
+const _riskLoadCtxPrev11 = window.riskLoadCtx;
+window.riskLoadCtx = async () => {
+    await _riskLoadCtxPrev11();
+    window._risk.auditGood = 90; window._risk.auditWarn = 75;
+    const c = window.riskCtx(); if (c.role === 'master' || !c.leaderId) return;
+    try {
+        const s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', c.leaderId));
+        if (s.exists()) {
+            const d = s.data();
+            if (typeof d.auditGood === 'number' && typeof d.auditWarn === 'number' && d.auditWarn >= 1 && d.auditWarn < d.auditGood && d.auditGood <= 100) { window._risk.auditGood = d.auditGood; window._risk.auditWarn = d.auditWarn; }
+        }
+    } catch (e) { console.warn('audit thresholds', e); }
+};
+
+const _riskOpenSettingsPrev11 = window.riskOpenSettings;
+window.riskOpenSettings = async () => {
+    await _riskOpenSettingsPrev11();
+    const sel = document.getElementById('riskSet_jur');
+    if (sel && !document.getElementById('riskSet_good')) {
+        const w = document.createElement('div');
+        w.innerHTML = `<p class="text-slate-400 text-xs font-black mb-1">Audit compliance thresholds % (Compliant ≥ / Needs improvement ≥) - حدود الامتثال في التدقيق (مطابق ≥ / يحتاج تحسين ≥)</p>
+            <div class="flex gap-2 mb-4"><input id="riskSet_good" type="number" min="2" max="100" class="erg-input lux-field-input text-right flex-1"><input id="riskSet_warn" type="number" min="1" max="99" class="erg-input lux-field-input text-right flex-1"></div>`;
+        sel.insertAdjacentElement('afterend', w);
+    }
+    const g = document.getElementById('riskSet_good'), wn = document.getElementById('riskSet_warn');
+    if (g) g.value = window._risk.auditGood; if (wn) wn.value = window._risk.auditWarn;
+};
+
+window.riskSaveSettings = async () => {
+    const c = window.riskCtx(), jur = document.getElementById('riskSet_jur')?.value || 'jo';
+    if (!window.RISK_JUR_LABEL[jur]) return;
+    if (c.role === 'master') {
+        window._risk.jurisdiction = jur;
+        window.showNotif('✅ Reference changed for this manager session only - تم تغيير المرجعية لجلسة المدير الحالية فقط', 'success');
+        window.riskCloseSettings(); return;
+    }
+    if (c.role !== 'owner') return;
+    const h = Number(document.getElementById('riskSet_hours')?.value);
+    const good = Number(document.getElementById('riskSet_good')?.value) || 90, warn = Number(document.getElementById('riskSet_warn')?.value) || 75;
+    if (!h || h < 1 || h > 168) return window.showNotif('Duration must be between 1 and 168 hours - المدة بين ساعة و168 ساعة', 'error');
+    if (!(warn >= 1 && warn < good && good <= 100)) return window.showNotif('Thresholds: improvement must be lower than compliant (max 100) - حد التحسين أقل من حد المطابقة (الأقصى 100)', 'error');
+    const keys = Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 400);
+    try {
+        const batch = writeBatch(db);
+        keys.forEach(k => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', k), { validityHours: h, jurisdiction: jur, auditGood: good, auditWarn: warn, updatedAt: Date.now() }, { merge: true }));
+        await batch.commit();
+        Object.assign(window._risk, { validityHours: h, jurisdiction: jur, auditGood: good, auditWarn: warn });
+        window.showNotif('✅ Settings saved for ' + keys.length + ' company leaders - حُفظت الإعدادات لقادة الشركة', 'success');
+        window.riskCloseSettings();
+        if (window._risk.tab === 'audit') window.riskAuRender();
+    } catch (e) { console.error('risk settings', e); window.showNotif('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات', 'error'); }
+};
+
+// ---------- 2) إدراج الصور كملحق في ملفات PDF للحادث والتدقيق ----------
+window.riskPhotoAnnex = (photos) => `<div style="page-break-before:always;font-family:Tahoma,Arial,sans-serif;direction:rtl;padding:0 20px"><h2 style="border-bottom:3px solid #0ea5e9;padding-bottom:6px">Photos - الصور</h2><div style="display:flex;flex-wrap:wrap;gap:10px">${photos.map(p => `<figure style="margin:0;width:48%;page-break-inside:avoid"><img src="${p.data}" style="width:100%;border:1px solid #bbb"><figcaption style="font-size:10px;color:#555">${esc(p.uploaderName || '')} · ${window.riskFmt(p.createdAt)}</figcaption></figure>`).join('')}</div></div>`;
+
+(() => {
+    const wrap = (fnName, type, listKey) => {
+        const orig = window[fnName]; if (typeof orig !== 'function') return;
+        window[fnName] = async (id) => {
+            const realOpen = window.open.bind(window);
+            const w = realOpen('', '_blank'); // تُفتح النافذة فوراً (ضمن نقرة المستخدم) لتجنب حظر النوافذ المنبثقة
+            if (!w) return window.showNotif('Allow pop-ups to export PDF - اسمح بالنوافذ المنبثقة لتصدير PDF', 'error');
+            const rec = (window._risk[listKey] || []).find(x => x.id === id);
+            if (rec) { try { await window.riskPhotoLoad(type, id, rec.leaderId); } catch (e) {} }
+            const photos = ((window._risk.photos || {})[type + '_' + id] || []).filter(p => window.riskPhotoSafe(p.data));
+            const d = w.document, realClose = d.close.bind(d);
+            d.close = () => { if (photos.length) d.write(window.riskPhotoAnnex(photos)); realClose(); };
+            const saved = window.open;
+            window.open = () => { window.open = saved; return w; };
+            try { orig(id); } finally { window.open = saved; }
+        };
+    };
+    wrap('riskIncPdf', 'incident', 'incidents');
+    wrap('riskAuPdf', 'audit', 'audits');
+})();
+
+
+// ===================== تقييم مخاطر — الدفعة 12: فحص التدريب عند طلب التصريح (استرشادي) =====================
+// الدورات المطلوبة لكل نوع عمل (أسماء تطابق بداية اسم الدورة في سجل التدريب)
+window.RISK_TYPE_COURSES = {
+    height: ['Working at Height'], scaffold: ['Working at Height'], roof: ['Working at Height'],
+    lifting: ['Lifting & Rigging'], electrical: ['Electrical Safety'], hot: ['Hot Work', 'Fire Fighting'],
+    confined: ['Confined Space'], chemical: ['Chemical Safety'], manual: ['Manual Handling'],
+    vehicle: ['Defensive Driving'], general: ['Site Safety Induction']
+};
+window.riskNameNorm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+window.riskSplitWorkers = (txt) => String(txt || '').split(/[,،;\n]+/).map(window.riskNameNorm).filter(x => x.length >= 3);
+window.riskNameMatch = (a, b) => !!a && !!b && (a === b || (a.length >= 3 && b.includes(a)) || (b.length >= 3 && a.includes(b)));
+
+window.riskTrainCheckHtml = (typeKey, workersTxt) => {
+    const req = window.RISK_TYPE_COURSES[typeKey]; if (!req) return '';
+    const names = window.riskSplitWorkers(workersTxt), recs = window._risk.reg.training || [];
+    if (!names.length) return '<p class="text-slate-500 text-[11px]">Enter worker names to check their training. - اكتب أسماء المنفذين لفحص تدريبهم.</p>';
+    let bad = 0;
+    const lines = names.map(n => {
+        const mine = recs.filter(r => window.riskNameMatch(n, window.riskNameNorm(r.person)));
+        const parts = req.map(course => {
+            const hit = mine.filter(r => String(r.course || '').toLowerCase().startsWith(course.toLowerCase())).sort((a, b) => String(b.trainedAt).localeCompare(String(a.trainedAt)))[0];
+            if (!hit) { bad++; return `<span style="color:#fbbf24">❓ ${esc(course)} - no record - لا يوجد سجل</span>`; }
+            const st = window.riskTrState(hit);
+            if (st.k === 'expired') { bad++; return `<span style="color:#f87171">❌ ${esc(course)} - expired ${esc(hit.expiresAt)} - منتهٍ</span>`; }
+            if (st.k === 'expiring') return `<span style="color:#fbbf24">⚠️ ${esc(course)} - ${esc(hit.expiresAt)}</span>`;
+            return `<span style="color:#34d399">✅ ${esc(course)}${hit.expiresAt ? ' - ' + esc(hit.expiresAt) : ''}</span>`;
+        }).join('<br>');
+        return `<div class="py-1.5" style="border-top:1px solid rgba(255,255,255,0.06)"><p class="text-white text-[11px] font-black">👷 ${esc(n)}</p><p class="text-[11px] leading-relaxed">${parts}</p></div>`;
+    }).join('');
+    return lines + (bad ? '<p class="text-amber-300 text-[10px] font-black mt-2">⚠️ Advisory only: names are matched by text, and this does not block issuing. - استرشادي فقط: المطابقة بالاسم النصي، ولا يمنع الإصدار.</p>' : '');
+};
+
+const _riskWizRenderPrev12 = window.riskWizRender;
+window.riskWizRender = () => {
+    _riskWizRenderPrev12();
+    const w = window._risk.wiz; if (!w || w.step !== 2) return;
+    const role = window.riskCtx().role; if (role === 'member') return; // العضو لا يقرأ سجلات التدريب
+    const body = document.getElementById('riskWizBody'), inp = document.getElementById('riskF_workers');
+    if (!body || !inp || !window.RISK_TYPE_COURSES[w.typeKey]) return;
+    body.insertAdjacentHTML('beforeend', `<div class="rounded-xl p-3 mt-2" style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.35);"><p class="text-violet-200 text-xs font-black mb-1">🎓 Training check (advisory) - فحص التدريب (استرشادي)</p><div id="riskTrainCheck"></div></div>`);
+    const upd = () => { const el = document.getElementById('riskTrainCheck'); if (el) el.innerHTML = window.riskTrainCheckHtml(w.typeKey, inp.value); };
+    inp.addEventListener('input', upd); upd();
+};
+
+
+// ===================== تقييم مخاطر — الدفعة 13: ربط السجلات بحسابات الأعضاء + سجلاتي + فحص التدريب الموثوق =====================
+Object.assign(window._risk, { my: { training: [], ppe: [] }, myUnsubs: [], trainBlock: false });
+
+// ---------- 1) اختيار عضو الفريق في سجلات التدريب والمعدات ----------
+window.riskMemberOptions = () => [['', '— Not linked / free text - غير مرتبط (نص حر) —']].concat((window.teamMembers || []).map(m => [m.id, m.memberName || m.id]));
+const _riskRegSpecPrev13 = window.riskRegSpec;
+window.riskRegSpec = (reg, kind) => {
+    const spec = _riskRegSpecPrev13(reg, kind);
+    if (reg === 'training' || reg === 'ppe') spec.fields = [{ k: 'personId', label: 'Team member (optional, links the record to their account) - عضو الفريق (اختياري، يربط السجل بحسابه)', type: 'select', options: window.riskMemberOptions() }].concat(spec.fields);
+    return spec;
+};
+const _riskRegSetPrev13 = window.riskRegSet;
+window.riskRegSet = (k, val) => {
+    _riskRegSetPrev13(k, val);
+    const f = window._risk.regForm; if (!f || k !== 'personId') return;
+    const m = (window.teamMembers || []).find(x => x.id === val);
+    if (m) { f.v.person = m.memberName || ''; f.leaderOverride = m.parentKey || ''; const el = document.getElementById('riskReg_person'); if (el) el.value = f.v.person; }
+    else f.leaderOverride = '';
+};
+// حفظ السجل: عند ربطه بعضو يُسجَّل تحت قائد ذلك العضو ليراه قائده ومالك الشركة
+window.riskRegSave = async () => {
+    const f = window._risk.regForm; if (!f) return;
+    const spec = window.riskRegSpec(f.reg, f.kind), c = window.riskCtx(), E = (m) => window.showNotif(m, 'error');
+    for (const fd of spec.fields) if (fd.req && !String(f.v[fd.k] || '').trim()) return E('Required field missing - حقل مطلوب ناقص: ' + fd.label.replace('*', '').trim());
+    const data = {};
+    spec.fields.forEach(fd => { const x = f.v[fd.k]; data[fd.k] = fd.type === 'number' ? (x === '' || x === null ? 0 : Number(x) || 0) : String(x === undefined ? '' : x).trim(); });
+    if (f.reg === 'training') data.expiresAt = (data.validMonths > 0 && data.trainedAt) ? window.riskAddMonths(data.trainedAt, data.validMonths) : '';
+    if (f.kind === 'plan') data.reviewDue = window.riskAddMonths(data.reviewedAt, 12);
+    const col = collection(db, 'artifacts', appId, 'public', 'data', spec.col), now = Date.now();
+    try {
+        if (f.id) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', spec.col, f.id), Object.assign({}, data, { updatedAt: now }));
+        } else {
+            const base = () => Object.assign({ refNo: spec.pre + '-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(), companyId: c.companyId, creatorId: c.uid, creatorName: c.name, creatorRole: c.role, createdAt: now }, spec.kind ? { kind: spec.kind } : {}, data);
+            const own = (['training', 'ppe'].includes(f.reg) && f.leaderOverride) ? f.leaderOverride : c.leaderId;
+            const keys = (f.pubAll && c.role === 'owner') ? Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 40) : [own];
+            if (keys.length === 1) await addDoc(col, Object.assign(base(), { leaderId: keys[0] }));
+            else { const b = writeBatch(db); keys.forEach(k => b.set(doc(col), Object.assign(base(), { leaderId: k }))); await b.commit(); }
+        }
+        window.showNotif('✅ Saved - تم الحفظ', 'success'); window.riskRegClose();
+    } catch (e) { console.error('reg save', e); E('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات'); }
+};
+
+// ---------- 2) سجلاتي (للعضو): تدريباته ومعداته ----------
+const _riskUnlistenPrev13 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev13(); (window._risk.myUnsubs || []).forEach(u => { try { u(); } catch (e) {} }); window._risk.myUnsubs = []; };
+window.riskMyListen = () => {
+    const c = window.riskCtx(); if (c.role !== 'member') return;
+    (window._risk.myUnsubs || []).forEach(u => { try { u(); } catch (e) {} }); window._risk.myUnsubs = [];
+    [['risk_training', 'training'], ['risk_ppe', 'ppe']].forEach(([col, key]) => window._risk.myUnsubs.push(onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', col), where('personId', '==', c.uid)), snap => {
+        window._risk.my[key] = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        window.riskTabsRefresh(); if (window._risk.tab === 'myrec') window.riskMyRender();
+    }, e => console.warn('my records', e))));
+};
+const _riskShowPrev13 = window.riskOnShow;
+window.riskOnShow = async () => { await _riskShowPrev13(); window.riskMyListen(); };
+window.RISK_TABS.push({ k: 'myrec', label: 'My Records - سجلاتي', panel: 'riskMyPanel', memberOnly: true, render: 'riskMyRender', badge: () => (window._risk.my.training || []).filter(r => window.riskTrState(r).k === 'expired').length + (window._risk.my.ppe || []).filter(r => ['expired', 'damaged'].includes(window.riskPpeState(r).k)).length });
+window.riskTabVisible = (t) => { const mgr = window.riskCtx().role !== 'member'; return t.memberOnly ? !mgr : (!t.mgr || mgr); };
+window.riskTabsRefresh = () => {
+    const tabs = document.getElementById('riskTabs'); if (!tabs) return;
+    const cur = window._risk.tab;
+    tabs.innerHTML = window.RISK_TABS.filter(window.riskTabVisible).map(t => {
+        const n = t.badge ? t.badge() : 0, on = cur === t.k;
+        return `<button onclick="window.riskTabSet('${t.k}')" class="px-4 py-2 rounded-xl text-xs font-black whitespace-nowrap" style="background:${on ? '#f97316' : 'rgba(255,255,255,0.06)'};color:${on ? '#000' : '#cbd5e1'};border:1px solid ${on ? '#f97316' : 'rgba(255,255,255,0.12)'};">${t.label}${n ? ` <span class="px-1.5 rounded-full" style="background:#ef4444;color:#fff">${n}</span>` : ''}</button>`;
+    }).join('');
+    if (cur === 'dash') window.riskDashRender();
+};
+window.riskTabSet = (k) => {
+    const tab = window.RISK_TABS.find(t => t.k === k);
+    if (!tab || !window.riskTabVisible(tab)) k = 'permits';
+    window._risk.tab = k;
+    window.RISK_TABS.forEach(t => document.getElementById(t.panel)?.classList.toggle('hidden', t.k !== k));
+    window.riskTabsRefresh();
+    const t = window.RISK_TABS.find(x => x.k === k);
+    if (t && t.render && typeof window[t.render] === 'function') window[t.render]();
+};
+window.riskMyRender = () => {
+    const p = document.getElementById('riskMyPanel'); if (!p) return;
+    const tr = window._risk.my.training || [], pp = window._risk.my.ppe || [];
+    p.innerHTML = `<p class="text-sky-300 text-xs font-black mb-2">🎓 My training - تدريباتي</p>
+        <div class="grid gap-3 md:grid-cols-2 mb-5">${tr.length ? tr.map(r => { const st = window.riskTrState(r); return `<div class="rounded-2xl p-4" style="background:rgba(255,255,255,0.05);border:1px solid ${st.color}66;"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${st.color}26;color:${st.color}">${st.label}</span><p class="text-white font-black text-sm mt-2">${esc(r.course)}</p><p class="text-slate-400 text-[11px] mt-1">${esc(r.trainedAt || '')}${r.expiresAt ? ' → ' + esc(r.expiresAt) : ''} ${esc(window.riskDueText(st))}</p></div>`; }).join('') : '<p class="text-slate-600 text-sm md:col-span-2">No records linked to you. - لا توجد سجلات مرتبطة بك.</p>'}</div>
+        <p class="text-amber-300 text-xs font-black mb-2">⛑️ My PPE - معداتي</p>
+        <div class="grid gap-3 md:grid-cols-2">${pp.length ? pp.map(r => { const st = window.riskPpeState(r); return `<div class="rounded-2xl p-4" style="background:rgba(255,255,255,0.05);border:1px solid ${st.color}66;"><span class="text-[10px] px-2.5 py-1 rounded-full font-black" style="background:${st.color}26;color:${st.color}">${st.label}</span><p class="text-white font-black text-sm mt-2">${esc(r.item)}</p><p class="text-slate-400 text-[11px] mt-1">${r.serial ? '#' + esc(r.serial) + ' · ' : ''}${r.nextDue ? 'Due - الموعد: ' + esc(r.nextDue) + ' ' + esc(window.riskDueText(st)) : ''}</p></div>`; }).join('') : '<p class="text-slate-600 text-sm md:col-span-2">No records linked to you. - لا توجد سجلات مرتبطة بك.</p>'}</div>`;
+};
+
+// ---------- 3) فحص تدريب موثوق (يعتمد المعرّف عند اختيار العضو) + منفذون من الفريق + خيار المنع ----------
+window.riskTrainEval = (typeKey, workersTxt) => {
+    const req = window.RISK_TYPE_COURSES[typeKey]; if (!req) return null;
+    const recs = window._risk.reg.training || [], members = window.teamMembers || [];
+    const rows = window.riskSplitWorkers(workersTxt).map(n => {
+        const m = members.find(x => window.riskNameNorm(x.memberName) === n);
+        const mine = recs.filter(r => (m && r.personId === m.id) || window.riskNameMatch(n, window.riskNameNorm(r.person)));
+        const items = req.map(course => {
+            const hit = mine.filter(r => String(r.course || '').toLowerCase().startsWith(course.toLowerCase())).sort((a, b) => String(b.trainedAt).localeCompare(String(a.trainedAt)))[0];
+            if (!hit) return { course, st: 'none' };
+            const st = window.riskTrState(hit);
+            return { course, st: st.k === 'expired' ? 'expired' : (st.k === 'expiring' ? 'expiring' : 'ok'), exp: hit.expiresAt };
+        });
+        return { name: n, linked: !!m, items };
+    });
+    return { rows, bad: rows.reduce((a, r) => a + r.items.filter(i => ['none', 'expired'].includes(i.st)).length, 0), unlinked: rows.filter(r => !r.linked).length };
+};
+window.riskTrainCheckHtml = (typeKey, workersTxt) => {
+    const ev = window.riskTrainEval(typeKey, workersTxt); if (!ev) return '';
+    if (!ev.rows.length) return '<p class="text-slate-500 text-[11px]">Enter worker names to check their training. - اكتب أسماء المنفذين لفحص تدريبهم.</p>';
+    const line = (i) => i.st === 'none' ? `<span style="color:#fbbf24">❓ ${esc(i.course)} - no record - لا يوجد سجل</span>` : (i.st === 'expired' ? `<span style="color:#f87171">❌ ${esc(i.course)} - expired ${esc(i.exp)} - منتهٍ</span>` : (i.st === 'expiring' ? `<span style="color:#fbbf24">⚠️ ${esc(i.course)} - ${esc(i.exp)}</span>` : `<span style="color:#34d399">✅ ${esc(i.course)}${i.exp ? ' - ' + esc(i.exp) : ''}</span>`));
+    return ev.rows.map(r => `<div class="py-1.5" style="border-top:1px solid rgba(255,255,255,0.06)"><p class="text-white text-[11px] font-black">👷 ${esc(r.name)} ${r.linked ? '🔗' : ''}</p><p class="text-[11px] leading-relaxed">${r.items.map(line).join('<br>')}</p></div>`).join('')
+        + `<p class="text-amber-300 text-[10px] font-black mt-2">${window._risk.trainBlock ? '⛔ Company rule: permits are blocked when training is missing or expired, or a worker is not from the team list. - قاعدة الشركة: يُمنع الإرسال عند نقص التدريب أو لعامل من خارج قائمة الفريق.' : '⚠️ Advisory only; 🔗 = linked to a team account. - استرشادي فقط؛ 🔗 = مرتبط بحساب في الفريق.'}</p>`;
+};
+const _riskWizRenderPrev13 = window.riskWizRender;
+window.riskWizRender = () => {
+    _riskWizRenderPrev13();
+    const w = window._risk.wiz; if (!w || w.step !== 2 || window.riskCtx().role === 'member') return;
+    const inp = document.getElementById('riskF_workers'), ms = window.teamMembers || [];
+    if (!inp || !ms.length || document.getElementById('riskWorkerPick')) return;
+    inp.insertAdjacentHTML('afterend', `<details id="riskWorkerPick" class="mb-3 rounded-xl p-2" style="background:rgba(34,211,238,0.07);border:1px solid rgba(34,211,238,0.3);"><summary class="text-cyan-200 text-[11px] font-black cursor-pointer">👥 Pick from team - اختيار من الفريق (${ms.length})</summary><div class="max-h-40 overflow-y-auto mt-2">${ms.map(m => `<label class="flex items-center gap-2 text-[11px] text-slate-200 py-1"><input type="checkbox" onchange="window.riskPickWorker('${m.id}',this.checked)"> ${esc(m.memberName || m.id)}</label>`).join('')}</div></details>`);
+};
+window.riskPickWorker = (id, on) => {
+    const m = (window.teamMembers || []).find(x => x.id === id), inp = document.getElementById('riskF_workers'); if (!m || !inp) return;
+    const name = (m.memberName || '').trim(), norm = window.riskNameNorm, list = inp.value.split(/[,،;\n]+/).map(s => s.trim()).filter(Boolean).filter(s => norm(s) !== norm(name));
+    if (on) list.push(name);
+    inp.value = list.join('، '); inp.dispatchEvent(new Event('input'));
+};
+const _riskWizNextPrev13 = window.riskWizNext;
+window.riskWizNext = () => {
+    const w = window._risk.wiz;
+    if (w && w.step === 2 && window._risk.trainBlock && window.riskCtx().role !== 'member' && window.RISK_TYPE_COURSES[w.typeKey]) {
+        const ev = window.riskTrainEval(w.typeKey, (document.getElementById('riskF_workers') || {}).value || '');
+        if (!ev || !ev.rows.length) return window.showNotif('Training rule: list the workers from the team - قاعدة التدريب: حدّد المنفذين من الفريق', 'error');
+        if (ev.unlinked || ev.bad) return window.showNotif('Training rule: ' + ev.bad + ' missing/expired item(s), ' + ev.unlinked + ' worker(s) outside the team list - قاعدة التدريب: ' + ev.bad + ' دورة ناقصة أو منتهية و' + ev.unlinked + ' منفذ خارج الفريق', 'error');
+    }
+    _riskWizNextPrev13();
+};
+// المعتمِد يرى فحص التدريب في بطاقة التصريح
+const _riskOpenPermitPrev13 = window.riskOpenPermit;
+window.riskOpenPermit = (id) => {
+    _riskOpenPermitPrev13(id);
+    const p = (window._risk.permits || []).find(x => x.id === id);
+    if (!p || window.riskCtx().role === 'member' || !window.RISK_TYPE_COURSES[p.workTypeKey] || !p.workers) return;
+    document.getElementById('riskDetailBody')?.insertAdjacentHTML('beforeend', `<div class="rounded-xl p-3 mt-3" style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.35);"><p class="text-violet-200 text-xs font-black mb-1">🎓 Training check - فحص التدريب</p>${window.riskTrainCheckHtml(p.workTypeKey, p.workers)}</div>`);
+};
+
+// ---------- إعداد المنع لكل شركة ----------
+const _riskLoadCtxPrev13 = window.riskLoadCtx;
+window.riskLoadCtx = async () => {
+    await _riskLoadCtxPrev13();
+    window._risk.trainBlock = false;
+    const c = window.riskCtx(); if (c.role === 'master' || !c.leaderId) return;
+    try { const s = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', c.leaderId)); if (s.exists() && s.data().trainBlock === true) window._risk.trainBlock = true; } catch (e) { console.warn('trainBlock', e); }
+};
+const _riskOpenSettingsPrev13 = window.riskOpenSettings;
+window.riskOpenSettings = async () => {
+    await _riskOpenSettingsPrev13();
+    const warn = document.getElementById('riskSet_warn');
+    if (warn && !document.getElementById('riskSet_block')) warn.parentElement.insertAdjacentHTML('afterend', '<label class="flex items-start gap-2 text-slate-300 text-xs font-black mb-4"><input id="riskSet_block" type="checkbox" class="mt-1"> Block permit requests when workers lack valid training (workers must be picked from the team) - منع طلب التصريح عند نقص تدريب المنفذين (يلزم اختيارهم من الفريق)</label>');
+    const b = document.getElementById('riskSet_block'); if (b) b.checked = window._risk.trainBlock === true;
+};
+window.riskSaveSettings = async () => {
+    const c = window.riskCtx(), jur = document.getElementById('riskSet_jur')?.value || 'jo';
+    if (!window.RISK_JUR_LABEL[jur]) return;
+    if (c.role === 'master') { window._risk.jurisdiction = jur; window.showNotif('✅ Reference changed for this manager session only - تم تغيير المرجعية لجلسة المدير الحالية فقط', 'success'); window.riskCloseSettings(); return; }
+    if (c.role !== 'owner') return;
+    const h = Number(document.getElementById('riskSet_hours')?.value), good = Number(document.getElementById('riskSet_good')?.value) || 90, warn = Number(document.getElementById('riskSet_warn')?.value) || 75, block = document.getElementById('riskSet_block')?.checked === true;
+    if (!h || h < 1 || h > 168) return window.showNotif('Duration must be between 1 and 168 hours - المدة بين ساعة و168 ساعة', 'error');
+    if (!(warn >= 1 && warn < good && good <= 100)) return window.showNotif('Thresholds: improvement must be lower than compliant (max 100) - حد التحسين أقل من حد المطابقة (الأقصى 100)', 'error');
+    const keys = Array.from(new Set([c.leaderId].concat(window._myScopeKeys || []))).filter(Boolean).slice(0, 400);
+    try {
+        const batch = writeBatch(db);
+        keys.forEach(k => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'risk_ctx', k), { validityHours: h, jurisdiction: jur, auditGood: good, auditWarn: warn, trainBlock: block, updatedAt: Date.now() }, { merge: true }));
+        await batch.commit();
+        Object.assign(window._risk, { validityHours: h, jurisdiction: jur, auditGood: good, auditWarn: warn, trainBlock: block });
+        window.showNotif('✅ Settings saved for ' + keys.length + ' company leaders - حُفظت الإعدادات لقادة الشركة', 'success');
+        window.riskCloseSettings(); if (window._risk.tab === 'audit') window.riskAuRender();
+    } catch (e) { console.error('risk settings', e); window.showNotif('Could not save, check permissions - تعذر الحفظ، تحقق من الصلاحيات', 'error'); }
+};
+
 // ===== Dark / Light Mode Engine =====
 window.toggleTheme = () => {
     const isLight = document.body.classList.toggle('light-mode');
@@ -12739,10 +13412,11 @@ ${r.notes ? `📝 *ملاحظات:* ${r.notes}` : ''}
 window.listenLeaderEmergencies = async (subKey) => {
     const _evKeys = (window.isCompanyOwner === true && window.getMyScopeKeys) ? ((await window.getMyScopeKeys()) || [subKey]).slice(0, 30) : [subKey];
     try {
+      _evKeys.forEach(_k => {
         const q = query(
             collection(db, 'artifacts', appId, 'public', 'data', 'reports'),
             where('type', '==', 'emergency'),
-            where('parentKey', 'in', _evKeys),
+            where('parentKey', '==', _k),
             where('status', '==', 'new')
         );
         onSnapshot(q, snap => {
@@ -12753,7 +13427,7 @@ window.listenLeaderEmergencies = async (subKey) => {
                     if (d.memberKey && d.memberKey === window.activeKey) return;   // لا تُنبّه صاحب البلاغ نفسه
                     if (age < 30000) { // فقط البلاغات الجديدة خلال 30 ثانية
                 if (d.priority !== 'high') window.showNotif(`📡 بلاغ ميداني من ${d.memberName} — ${d.materialName || d.material || ''}`, "error");
-
+ 
                         // إضافة شارة على زر البلاغات
                         const badge = document.getElementById('emergencyBadge');
                         if (badge) { badge.classList.remove('hidden'); }
@@ -12761,6 +13435,7 @@ window.listenLeaderEmergencies = async (subKey) => {
                 }
             });
         });
+      });
     } catch(e) { console.warn('Emergency listener failed:', e); }
 };
 
