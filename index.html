@@ -15069,6 +15069,70 @@ window.coLoadPayments = async (id) => {
     }
 };
 
+
+
+
+
+// ===== تقييم المخاطر: تخطيط القائمة الجانبية (الطبقة الأخيرة: تحل محل طبقات التبويب القديمة) =====
+// كل وحدة تظهر في القائمة فقط إذا كانت دالة عرضها موجودة؛ فإضافة وحدة جديدة لاحقاً تظهر تلقائياً.
+window.RISK_SIDE_ICONS = { dash: '📊', permits: '📋', ra: '⚠️', inc: '🚨', audit: '🔍', capa: '🛠️', training: '🎓', ppe: '🦺', emergency: '🚑', myrec: '🗂️' };
+window.riskTabVisible = (t) => {
+    if (t.render && typeof window[t.render] !== 'function') return false;
+    const mgr = window.riskCtx().role !== 'member';
+    return t.memberOnly ? !mgr : (!t.mgr || mgr);
+};
+window.riskSideToggle = () => document.getElementById('riskSide')?.classList.toggle('open');
+window.riskSideClose = () => document.getElementById('riskSide')?.classList.remove('open');
+
+window.riskToolsRefresh = () => {
+    const el = document.getElementById('riskTools'); if (!el) return;
+    const role = window.riskCtx().role, items = [];
+    if (role === 'master') items.push(['📚', 'مكتبة الأخطار', 'Hazard Library', 'window.riskLibOpen()']);
+    items.push(['📖', 'القاموس', 'Glossary', 'window.riskGlossOpen()']);
+    if (role === 'owner' || role === 'master') items.push(['⚙️', 'إعدادات التصاريح', 'Settings', 'window.riskOpenSettings()']);
+    el.innerHTML = items.map(([ic, ar, en, fn]) => `<button onclick="${fn}" class="rk-item"><span class="rk-ic">${ic}</span><span class="rk-lb">${ar}<small>${en}</small></span></button>`).join('');
+};
+
+window.riskTabsRefresh = () => {
+    const nav = document.getElementById('riskTabs'); if (!nav) return;
+    const cur = window._risk.tab;
+    nav.innerHTML = window.RISK_TABS.filter(window.riskTabVisible).map(t => {
+        const n = t.badge ? (t.badge() || 0) : 0, on = cur === t.k;
+        const parts = String(t.label || '').split(' - '), en = parts[0], ar = parts.slice(1).join(' - ') || parts[0];
+        return `<button onclick="window.riskTabSet('${t.k}')" class="rk-item${on ? ' on' : ''}"><span class="rk-ic">${window.RISK_SIDE_ICONS[t.k] || '•'}</span><span class="rk-lb">${ar}<small>${en}</small></span>${n ? `<span class="rk-badge">${n}</span>` : ''}</button>`;
+    }).join('');
+    const ct = window.RISK_TABS.find(t => t.k === cur);
+    if (ct) {
+        const parts = String(ct.label || '').split(' - ');
+        const ti = document.getElementById('riskTitle'), te = document.getElementById('riskTitleEn');
+        if (ti) ti.textContent = parts.slice(1).join(' - ') || parts[0];
+        if (te) te.textContent = parts[0];
+    }
+    window.riskToolsRefresh();
+    if (cur === 'dash' && typeof window.riskDashRender === 'function') window.riskDashRender();
+};
+
+window.riskTabSet = (k) => {
+    let tab = window.RISK_TABS.find(t => t.k === k);
+    if (!tab || !window.riskTabVisible(tab)) { k = 'permits'; tab = window.RISK_TABS.find(t => t.k === k); }
+    window._risk.tab = k;
+    window.RISK_TABS.forEach(t => document.getElementById(t.panel)?.classList.toggle('hidden', t.k !== k));
+    window.riskTabsRefresh();
+    if (tab && tab.render && typeof window[tab.render] === 'function') window[tab.render]();
+    const c = document.getElementById('riskContent'); if (c) c.scrollTop = 0;
+    window.riskSideClose();
+};
+
+window.riskTabsInit = () => {
+    const box = document.getElementById('riskContent'); if (!box) return;
+    window.RISK_TABS.forEach(t => {
+        if (document.getElementById(t.panel)) return;
+        const el = document.createElement('div'); el.id = t.panel; el.className = 'rk-panel hidden'; box.appendChild(el);
+    });
+    if (!window._risk.tabInit) { window._risk.tabInit = true; window._risk.tab = window.riskCtx().role !== 'member' ? 'dash' : 'permits'; }
+    window.riskTabSet(window._risk.tab);
+};
+
 </script>
 
 
@@ -19883,33 +19947,97 @@ body.light-mode #winTeam.app-window{--tm-side:#ffffff;--tm-s:#ffffff;--tm-s2:#ee
 
 
 
-<!-- ===== تقييم مخاطر · تصاريح العمل — الدفعة 1 ===== -->
-<div id="winRiskPermits" class="app-window bg-[#080b12] text-right" style="padding:0;">
-    <div class="w-full h-full flex flex-col">
-        <div class="relative flex items-center justify-between px-6 py-4 shrink-0" style="background:linear-gradient(90deg,rgba(249,115,22,0.16),rgba(249,115,22,0.03) 65%,transparent);border-bottom:1px solid rgba(249,115,22,0.2);">
-            <button onclick="window.riskClose()" class="text-slate-300 text-sm font-black px-4 py-2 rounded-xl" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);">↩ رجوع</button>
-            <div class="text-right">
-                <p class="text-white font-black text-lg">تقييم مخاطر · تصاريح العمل</p>
-                <p class="text-orange-400/70 text-[11px] font-mono uppercase tracking-widest">Risk Assessment &amp; Permit to Work</p>
-            </div>
-        </div>
-        <div class="flex-1 overflow-y-auto p-5">
-            <div id="riskStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
-            <div class="flex items-center justify-between mb-3 gap-3">
-                <button onclick="window.riskNewPermit()" class="px-5 py-3 rounded-xl font-black text-sm text-black" style="background:linear-gradient(135deg,#f97316,#fbbf24);">➕ طلب تصريح جديد</button>
-                <div class="flex items-center gap-2">
-                    <button onclick="window.riskGlossOpen()" class="px-3 py-2 rounded-xl text-[11px] font-black text-slate-200" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);">📖 القاموس</button>                    
-<button id="riskLibBtn" onclick="window.riskLibOpen()" class="hidden px-3 py-2 rounded-xl text-[11px] font-black text-cyan-200" style="background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.35);">📚 المكتبة</button>                    
-<button id="riskSettingsBtn" onclick="window.riskOpenSettings()" class="hidden px-3 py-2 rounded-xl text-[11px] font-black text-orange-200" style="background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.35);">⚙️ إعدادات الشركة</button>
-                    <p id="riskScopeLabel" class="text-slate-500 text-xs font-black"></p>
+<style>
+/* ===== نافذة تقييم المخاطر: قائمة جانبية بألوان نظام HSE ===== */
+#winRiskPermits.risk-hse { background:#f1f6fa; color:#0b2540; }
+#winRiskPermits .rk-shell { display:flex; flex-direction:row; width:100%; height:100%; direction:rtl; }
+#winRiskPermits .rk-side { width:250px; flex-shrink:0; background:#0e2a47; color:#fff; display:flex; flex-direction:column; overflow-y:auto; padding:18px 12px; }
+#winRiskPermits .rk-brand { display:flex; align-items:center; gap:10px; padding:4px 6px 16px; }
+#winRiskPermits .rk-logo { width:44px; height:44px; border-radius:12px; background:#fff; color:#0e2a47; font-weight:900; font-size:15px; display:flex; align-items:center; justify-content:center; }
+#winRiskPermits .rk-brand-t { font-weight:900; font-size:15px; color:#fff; line-height:1.2; }
+#winRiskPermits .rk-brand-s { font-size:9.5px; color:#9fb4c9; letter-spacing:.04em; }
+#winRiskPermits .rk-sec { font-size:10px; font-weight:800; color:#7f98b0; margin:14px 8px 6px; }
+#winRiskPermits .rk-nav { display:flex; flex-direction:column; gap:3px; }
+#winRiskPermits .rk-item { display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border-radius:10px; color:#dbe7f2; background:transparent; text-align:right; font-weight:800; font-size:13px; transition:background .15s; }
+#winRiskPermits .rk-item:hover { background:#173a5e; }
+#winRiskPermits .rk-item.on { background:#1f4468; color:#fff; }
+#winRiskPermits .rk-ic { font-size:16px; width:22px; text-align:center; flex-shrink:0; }
+#winRiskPermits .rk-lb { flex:1; display:flex; flex-direction:column; line-height:1.25; }
+#winRiskPermits .rk-lb small { font-size:9.5px; font-weight:600; color:#8aa4bd; direction:ltr; text-align:right; }
+#winRiskPermits .rk-badge { background:#ef4444; color:#fff; font-size:10px; font-weight:900; min-width:20px; height:20px; border-radius:999px; display:flex; align-items:center; justify-content:center; padding:0 6px; }
+#winRiskPermits .rk-foot { margin-top:auto; padding:14px 8px 4px; font-size:10px; color:#9fb4c9; display:flex; align-items:center; gap:7px; font-weight:700; }
+#winRiskPermits .rk-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; flex-shrink:0; }
+#winRiskPermits .rk-main { flex:1; min-width:0; display:flex; flex-direction:column; background:#f1f6fa; }
+#winRiskPermits .rk-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 24px; background:#fff; border-bottom:1px solid #e1eaf1; flex-shrink:0; }
+#winRiskPermits .rk-head-r { display:flex; align-items:center; gap:12px; }
+#winRiskPermits .rk-kicker { font-size:10px; color:#6b8299; font-weight:700; direction:ltr; text-align:right; }
+#winRiskPermits .rk-title { font-size:22px; font-weight:900; color:#0b2540; line-height:1.2; }
+#winRiskPermits .rk-close { padding:9px 16px; border-radius:10px; background:#f1f6fa; border:1px solid #d6e2ec; color:#0b2540; font-weight:800; font-size:12px; }
+#winRiskPermits .rk-menu { display:none; width:40px; height:40px; border-radius:10px; background:#0e2a47; color:#fff; font-size:18px; align-items:center; justify-content:center; }
+#winRiskPermits .rk-content { flex:1; overflow-y:auto; }
+#winRiskPermits .rk-panel { padding:22px 24px; }
+#winRiskPermits .rk-primary { padding:11px 20px; border-radius:10px; background:#1f76bd; color:#fff; font-weight:800; font-size:13px; }
+@media (max-width: 767px) {
+  #winRiskPermits .rk-side { position:fixed; right:0; top:0; bottom:0; z-index:10070; transform:translateX(100%); transition:transform .25s; width:270px; }
+  #winRiskPermits .rk-side.open { transform:none; box-shadow:-12px 0 40px rgba(0,0,0,.35); }
+  #winRiskPermits .rk-menu { display:flex; }
+  #winRiskPermits .rk-panel { padding:16px; }
+  #winRiskPermits .rk-head { padding:12px 14px; }
+}
+/* تحويل ألوان المحتوى الداكن القديم إلى ألوان المثال الفاتحة */
+#winRiskPermits .rk-main [style*="background:rgba(255,255,255,0.0"] { background:#fff !important; }
+#winRiskPermits .rk-main [style*="border:1px solid rgba(255,255,255"] { border-color:#dbe5ee !important; }
+#winRiskPermits .rk-main .text-white { color:#0b2540 !important; }
+#winRiskPermits .rk-main .text-slate-100, #winRiskPermits .rk-main .text-slate-200, #winRiskPermits .rk-main .text-slate-300 { color:#334e68 !important; }
+#winRiskPermits .rk-main .text-slate-400, #winRiskPermits .rk-main .text-slate-500, #winRiskPermits .rk-main .text-slate-600 { color:#6b8299 !important; }
+#winRiskPermits .rk-main [class*="text-amber-"], #winRiskPermits .rk-main [class*="text-yellow-"] { color:#b45309 !important; }
+#winRiskPermits .rk-main [class*="text-orange-"] { color:#c2410c !important; }
+#winRiskPermits .rk-main [class*="text-cyan-"], #winRiskPermits .rk-main [class*="text-sky-"] { color:#0369a1 !important; }
+#winRiskPermits .rk-main [class*="text-emerald-"], #winRiskPermits .rk-main [class*="text-green-"], #winRiskPermits .rk-main [class*="text-lime-"] { color:#047857 !important; }
+#winRiskPermits .rk-main [class*="text-rose-"], #winRiskPermits .rk-main [class*="text-red-"] { color:#be123c !important; }
+#winRiskPermits .rk-main [class*="text-indigo-"], #winRiskPermits .rk-main [class*="text-violet-"], #winRiskPermits .rk-main [class*="text-purple-"] { color:#4338ca !important; }
+#winRiskPermits .rk-main [class*="bg-black"] { background:#fff !important; color:#0b2540 !important; border-color:#cbd5e1 !important; }
+</style>
+<div id="winRiskPermits" class="app-window risk-hse text-right" style="padding:0;">
+    <div class="rk-shell">
+        <aside id="riskSide" class="rk-side">
+            <div class="rk-brand">
+                <div class="rk-logo">RA</div>
+                <div>
+                    <p class="rk-brand-t">تقييم المخاطر</p>
+                    <p class="rk-brand-s">Risk · Safety · Permits</p>
                 </div>
             </div>
-            <div id="riskFilters" class="flex flex-wrap gap-2 mb-3"></div>
-            <div id="riskList" class="grid gap-3 md:grid-cols-2"></div>
-        </div>
+            <p class="rk-sec">مساحة العمل</p>
+            <nav id="riskTabs" class="rk-nav"></nav>
+            <p class="rk-sec">أدوات</p>
+            <nav id="riskTools" class="rk-nav"></nav>
+            <div class="rk-foot"><span class="rk-dot"></span><span id="riskScopeLabel"></span></div>
+        </aside>
+        <main class="rk-main">
+            <header class="rk-head">
+                <div class="rk-head-r">
+                    <button class="rk-menu" onclick="window.riskSideToggle()">☰</button>
+                    <div>
+                        <p id="riskTitleEn" class="rk-kicker">Risk Assessment &amp; Permit to Work</p>
+                        <h2 id="riskTitle" class="rk-title">تقييم المخاطر</h2>
+                    </div>
+                </div>
+                <button onclick="window.riskClose()" class="rk-close">✕ إغلاق</button>
+            </header>
+            <div id="riskContent" class="rk-content">
+                <div id="riskPermitsBox" class="rk-panel">
+                    <div id="riskStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
+                    <div class="flex items-center justify-between mb-3 gap-3">
+                        <button onclick="window.riskNewPermit()" class="rk-primary">➕ طلب تصريح جديد</button>
+                    </div>
+                    <div id="riskFilters" class="flex flex-wrap gap-2 mb-3"></div>
+                    <div id="riskList" class="grid gap-3 md:grid-cols-2"></div>
+                </div>
+            </div>
+        </main>
     </div>
 </div>
-
 <div id="riskWizModal" class="hidden fixed inset-0 z-[10050] items-center justify-center p-4" style="background:rgba(4,6,12,0.82);backdrop-filter:blur(6px);" onclick="window.riskWizClose()">
     <div class="w-full max-w-lg rounded-[24px] p-5 text-right max-h-[92vh] overflow-y-auto" style="background:#0c111c;border:1px solid rgba(249,115,22,0.3);" onclick="event.stopPropagation()">
         <div class="flex items-center justify-between mb-3">
