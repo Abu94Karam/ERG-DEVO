@@ -7192,7 +7192,7 @@ window._myScopeKeys = await window.getMyScopeKeys();
 const reportsListenerRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
 const reportsListenerQuery = (window.userRole === 'master')
     ? query(reportsListenerRef)
-    : query(teamRef, where("parentKey", "==", window.activeKey)))
+    : query(reportsListenerRef, where("parentKey", "==", window.activeKey));
 window._reportsUnsub = onSnapshot(reportsListenerQuery, window._reportsHandler = (snapshot) => {
     
     snapshot.docChanges().forEach((change) => {
