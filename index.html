@@ -15358,6 +15358,728 @@ if (!window.RISK_TABS.some(t => t.k === 'haz')) {
 
 
 
+// ===== الخطوة 2 من سلسلة البوابات: تقييم المخاطر (Risk Assessment) — مصفوفة 5×5 + هرم الضوابط + اعتماد حسب الخطر المتبقي =====
+window.RISK_RA_LIK = [['Rare', 'نادر'], ['Unlikely', 'غير محتمل'], ['Possible', 'محتمل'], ['Likely', 'مرجح'], ['Almost certain', 'شبه مؤكد']];
+window.RISK_RA_SEV = [['Negligible', 'طفيفة'], ['Minor', 'بسيطة'], ['Moderate', 'متوسطة'], ['Major', 'كبيرة'], ['Catastrophic', 'كارثية']];
+window.RISK_RA_CTRL_LV = { elim: ['Elimination', 'الإزالة'], subs: ['Substitution', 'الاستبدال'], eng: ['Engineering', 'ضوابط هندسية'], adm: ['Administrative', 'ضوابط إدارية'], ppe: ['PPE', 'معدات الوقاية'] };
+window.RISK_RA_LV = {
+    low:      { en: 'Low',      ar: 'منخفض', c: '#047857', bg: '#e7f6ee' },
+    medium:   { en: 'Medium',   ar: 'متوسط', c: '#b45309', bg: '#fff4e5' },
+    high:     { en: 'High',     ar: 'مرتفع', c: '#c2410c', bg: '#ffece0' },
+    critical: { en: 'Critical', ar: 'حرج',   c: '#b91c1c', bg: '#fdecec' }
+};
+window.RISK_RA_REVIEW_DAYS = { low: 365, medium: 365, high: 180, critical: 90 };
+// ضوابط مقترحة لكل خطر: [المستوى، English، العربية]
+window.RISK_HAZ_CTRL = {
+    slips: [['eng', 'Install non-slip flooring and drainage', 'تركيب أرضيات مانعة للانزلاق وتصريف مناسب'], ['adm', 'Clean spills immediately and keep walkways clear', 'تنظيف الانسكابات فوراً وإبقاء الممرات خالية'], ['ppe', 'Wear slip-resistant safety footwear', 'ارتداء أحذية سلامة مانعة للانزلاق']],
+    height: [['elim', 'Do the work at ground level where possible', 'تنفيذ العمل على مستوى الأرض متى أمكن'], ['eng', 'Use guardrails, scaffolds or MEWPs instead of ladders', 'استخدام درابزين أو سقالات أو منصات رفع بدل السلالم'], ['ppe', 'Full-body harness with inspected anchor points', 'حزام جسم كامل مع نقاط تثبيت مفحوصة']],
+    electrical: [['elim', 'Isolate and de-energise before work (LOTO)', 'عزل مصدر الكهرباء وفصله قبل العمل (LOTO)'], ['eng', 'Use RCD protection and earthed equipment', 'استخدام حماية التيار المتبقي ومعدات مؤرضة'], ['adm', 'Allow only authorised electricians to work', 'السماح للكهربائيين المعتمدين فقط بالعمل']],
+    machinery: [['eng', 'Fit fixed guards and emergency stops', 'تركيب حواجز ثابتة وأزرار إيقاف طارئ'], ['adm', 'Train operators and apply lockout during maintenance', 'تدريب المشغلين وتطبيق العزل أثناء الصيانة'], ['ppe', 'Wear fitted clothing, gloves and eye protection', 'ارتداء ملابس مناسبة وقفازات وحماية للعين']],
+    manual: [['eng', 'Use trolleys, hoists or lifting aids', 'استخدام عربات أو رافعات أو وسائل مساعدة'], ['adm', 'Share heavy loads between two or more workers', 'تقاسم الأحمال الثقيلة بين عاملين أو أكثر'], ['adm', 'Train workers in safe lifting technique', 'تدريب العاملين على أسلوب الرفع الآمن']],
+    chemical: [['subs', 'Substitute with a less hazardous product', 'الاستبدال بمنتج أقل خطورة'], ['adm', 'Keep SDS available and label all containers', 'توفير صحائف السلامة وتوسيم الحاويات'], ['ppe', 'Wear suitable gloves, goggles and respirator', 'ارتداء قفازات ونظارات وكمامة مناسبة']],
+    fire: [['elim', 'Remove combustibles from the work area', 'إزالة المواد القابلة للاشتعال من منطقة العمل'], ['eng', 'Provide fire extinguishers and fire blankets nearby', 'توفير طفايات وبطانيات إطفاء قريبة'], ['adm', 'Issue a hot-work permit with a fire watch', 'إصدار تصريح أعمال ساخنة مع مراقب حريق']],
+    confined: [['elim', 'Do the work from outside the space if possible', 'تنفيذ العمل من خارج المكان إن أمكن'], ['eng', 'Ventilate and test the atmosphere before entry', 'التهوية وفحص الجو قبل الدخول'], ['adm', 'Assign an attendant and prepare a rescue plan', 'تعيين مراقب وإعداد خطة إنقاذ']],
+    noise: [['subs', 'Choose quieter tools or equipment', 'اختيار أدوات أو معدات أقل ضجيجاً'], ['eng', 'Enclose or isolate the noise source', 'عزل مصدر الضجيج أو حجبه'], ['ppe', 'Wear suitable hearing protection', 'ارتداء واقيات سمع مناسبة']],
+    lighting: [['eng', 'Install adequate temporary or fixed lighting', 'تركيب إضاءة كافية مؤقتة أو ثابتة'], ['adm', 'Inspect lighting before each shift', 'فحص الإضاءة قبل كل وردية'], ['ppe', 'Use head torches in dark areas', 'استخدام كشافات رأس في الأماكن المظلمة']],
+    temperature: [['adm', 'Schedule work in cooler hours and rotate workers', 'جدولة العمل في ساعات أبرد وتدوير العاملين'], ['eng', 'Provide shade, cooling or heating facilities', 'توفير مظلات وتبريد أو تدفئة'], ['adm', 'Provide drinking water and rest breaks', 'توفير مياه شرب وفترات راحة']],
+    radiation: [['elim', 'Use non-radiating methods where possible', 'استخدام طرق غير مشعة متى أمكن'], ['eng', 'Apply shielding and restrict access to the area', 'استخدام حواجز واقية وتقييد الدخول للمنطقة'], ['adm', 'Limit exposure time and monitor doses', 'تقليل زمن التعرض ومراقبة الجرعات']],
+    biological: [['eng', 'Provide handwashing and disinfection facilities', 'توفير مرافق غسل اليدين والتعقيم'], ['adm', 'Vaccinate and train workers on hygiene', 'تحصين العاملين وتدريبهم على النظافة'], ['ppe', 'Wear gloves, masks and protective clothing', 'ارتداء قفازات وكمامات وملابس واقية']],
+    dust: [['eng', 'Use wet methods and local exhaust ventilation', 'استخدام الطرق الرطبة وشفط موضعي'], ['adm', 'Limit the number of workers in the dusty area', 'تقليل عدد العاملين في المنطقة المغبرة'], ['ppe', 'Wear a suitable respirator (FFP/P)', 'ارتداء كمامة تنفس مناسبة (FFP/P)']],
+    vibration: [['subs', 'Use low-vibration tools', 'استخدام أدوات قليلة الاهتزاز'], ['adm', 'Rotate tasks and limit trigger time', 'تدوير المهام وتقليل زمن التشغيل'], ['ppe', 'Use anti-vibration gloves', 'استخدام قفازات مضادة للاهتزاز']],
+    ergonomic: [['eng', 'Adjust workstation height and layout', 'ضبط ارتفاع وتخطيط مكان العمل'], ['adm', 'Schedule micro-breaks and task rotation', 'جدولة استراحات قصيرة وتدوير المهام'], ['adm', 'Train workers on correct posture', 'تدريب العاملين على الوضعية الصحيحة']],
+    stress: [['adm', 'Balance workload and plan realistic deadlines', 'موازنة عبء العمل ووضع مواعيد واقعية'], ['adm', 'Provide supervisor support and open communication', 'توفير دعم المشرف وقنوات تواصل مفتوحة'], ['adm', 'Provide rest periods and welfare facilities', 'توفير فترات راحة ومرافق رعاية']],
+    falling: [['eng', 'Install toe boards, debris nets and exclusion zones', 'تركيب حواجز قدم وشبكات ومناطق محظورة'], ['adm', 'Secure tools and materials when working at height', 'تثبيت الأدوات والمواد عند العمل على ارتفاع'], ['ppe', 'Wear safety helmets with chin straps', 'ارتداء خوذات سلامة بحزام للذقن']],
+    traffic: [['eng', 'Separate vehicles and pedestrians with barriers', 'فصل المركبات عن المشاة بحواجز'], ['adm', 'Use a traffic management plan and banksmen', 'استخدام خطة إدارة مرور وموجّهين'], ['ppe', 'Wear high-visibility clothing', 'ارتداء ملابس عاكسة عالية الوضوح']],
+    violence: [['eng', 'Improve access control and security measures', 'تحسين التحكم بالدخول وإجراءات الأمن'], ['adm', 'Provide conflict-handling training and reporting channels', 'تدريب على التعامل مع النزاعات وقنوات إبلاغ'], ['adm', 'Avoid lone working in high-risk situations', 'تجنب العمل المنفرد في المواقف عالية الخطورة']],
+    housekeeping: [['adm', 'Apply a daily clean-as-you-go routine', 'تطبيق روتين تنظيف يومي أثناء العمل'], ['eng', 'Provide waste bins and designated storage areas', 'توفير حاويات نفايات ومناطق تخزين مخصصة'], ['adm', 'Keep walkways and exits clear at all times', 'إبقاء الممرات والمخارج خالية دائماً']]
+};
+
+// ---- دوال الحساب والحالة (تُستعمل أيضاً في اللوحة وبطاقات الإجراءات التصحيحية) ----
+window.riskRaLevel = (s) => s <= 4 ? 'low' : (s <= 9 ? 'medium' : (s <= 16 ? 'high' : 'critical'));
+window.riskRaPill = (lv) => {
+    const m = window.RISK_RA_LV[lv] || { en: lv || '-', ar: '', c: '#475569', bg: '#eef3f8' };
+    return `<span class="rk-pill" style="background:${m.bg};color:${m.c}">${window.esc(m.en)}${m.ar ? ' - ' + window.esc(m.ar) : ''}</span>`;
+};
+window.riskRaBadge = (priority) => window.riskRaPill(priority);
+window.riskRaStatus = (a) => a.status === 'approved' ? ((a.reviewDue || 0) <= Date.now() ? 'review_due' : 'approved') : (a.status || 'pending');
+window.riskRaState = () => {
+    window._risk.ra = window._risk.ra || { view: 'list', f: 'all', draft: null, detailId: null };
+    return window._risk.ra;
+};
+// تقييمات معتمدة سارية يمكن ربطها بتصريح (للقائد نفسه)
+window.riskRaApprovedList = () => {
+    const c = window.riskCtx(), seen = {}, all = [].concat(window._risk.assessments || [], window._risk.raLeaderApproved || []);
+    return all.filter(a => a.status === 'approved' && (a.reviewDue || 0) > Date.now() && a.leaderId === c.leaderId && !seen[a.id] && (seen[a.id] = true));
+};
+
+// ---- بناء السجل (دالة نقية مطابقة لقواعد risk_assessments) ----
+window.riskRaBuild = (d, c, now) => {
+    const rows = d.rows.map(r => {
+        const h = window.RISK_HAZ.find(x => x.k === r.hk) || {}, sc = r.L * r.S, rs = r.rL * r.rS;
+        return {
+            hk: r.hk, hz: h.en || r.hk, hzAr: h.ar || '', L: r.L, S: r.S, score: sc, level: window.riskRaLevel(sc),
+            ctrls: r.ctrls.map(x => ({ lv: x.lv, t: String(x.t).trim().slice(0, 300) })),
+            rL: r.rL, rS: r.rS, rScore: rs, rLevel: window.riskRaLevel(rs)
+        };
+    });
+    const inh = Math.max(...rows.map(r => r.score)), res = Math.max(...rows.map(r => r.rScore));
+    const inhLv = window.riskRaLevel(inh), resLv = window.riskRaLevel(res);
+    const need = resLv === 'low' ? 'auto' : (resLv === 'medium' ? 'leader' : (resLv === 'high' ? 'owner' : 'master'));
+    const self = resLv === 'low' || (resLv === 'medium' && (c.role === 'leader' || c.role === 'owner')) || (resLv === 'high' && c.role === 'owner');
+    const data = {
+        refNo: 'RA-' + new Date(now).getFullYear() + '-' + String(now).slice(-6),
+        companyId: c.companyId || '', leaderId: c.leaderId,
+        requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        activity: String(d.activity).trim().slice(0, 200), location: String(d.location).trim().slice(0, 120),
+        workTypeKey: d.workTypeKey || '', persons: String(d.persons || '').trim().slice(0, 200),
+        owner: String(d.owner || '').trim().slice(0, 100), due: String(d.due || '').slice(0, 20),
+        rows, inherentScore: inh, inherentLevel: inhLv, residualScore: res, residualLevel: resLv,
+        needRole: need, status: self ? 'approved' : 'pending', createdAt: now,
+        hazId: d.hazId, hazNo: d.hazNo || ''
+    };
+    if (self) {
+        data.approvedAt = now;
+        data.approvedBy = resLv === 'low' ? 'auto' : c.name;
+        data.approvedByRole = resLv === 'low' ? 'auto' : c.role;
+        data.reviewDue = now + window.RISK_RA_REVIEW_DAYS[resLv] * 86400000;
+    }
+    return data;
+};
+
+// ---- تنسيقات إضافية ----
+window.riskInjectCss2 = () => {
+    if (document.getElementById('rkExtraCss2')) return;
+    const st = document.createElement('style'); st.id = 'rkExtraCss2';
+    st.textContent = `
+#winRiskPermits .rk-sel{background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;font-size:12px;color:#0b2540;font-weight:700;outline:none;max-width:100%}
+#winRiskPermits .rk-inp{background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:12.5px;color:#0b2540;font-weight:600;outline:none;width:100%}
+#winRiskPermits .rk-inp:focus,#winRiskPermits .rk-sel:focus{border-color:#1f76bd}
+#winRiskPermits .rk-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+#winRiskPermits .rk-lab{font-size:10.5px;font-weight:800;color:#486581;margin-bottom:3px;display:block}
+#winRiskPermits .rk-ctrl{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+#winRiskPermits .rk-sug{font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:999px;background:#eef6fc;border:1px dashed #8fb4d4;color:#1f5f94;text-align:right}
+#winRiskPermits .rk-x{width:28px;height:28px;border-radius:8px;background:#fdecec;color:#b91c1c;font-weight:900;flex-shrink:0}
+#winRiskPermits .rk-matrix{border-collapse:collapse;font-size:10px;font-weight:900;text-align:center}
+#winRiskPermits .rk-matrix td,#winRiskPermits .rk-matrix th{width:34px;height:26px;border:2px solid #fff;color:#0b2540}
+#winRiskPermits .rk-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+#winRiskPermits .rk-tbl th{background:#eef3f8;color:#334e68;font-weight:900;padding:7px 8px;text-align:right;border-bottom:1px solid #dbe5ee}
+#winRiskPermits .rk-tbl td{padding:8px;border-bottom:1px solid #eef3f8;vertical-align:top;color:#0b2540}`;
+    document.head.appendChild(st);
+};
+
+// ---- الاستماع للتقييمات ----
+window.riskRaListen = () => {
+    window.riskScopedListen('risk_assessments', 'own', list => {
+        window._risk.assessments = list; window.riskTabsRefresh();
+        if (window._risk.tab === 'ra') window.riskRaRender();
+    }, 'raUnsubs');
+    // العضو يرى تقييمات قائده المعتمدة (لاختيارها في التصريح)
+    (window._risk.raUnsubs2 || []).forEach(u => { try { u(); } catch (e) {} });
+    window._risk.raUnsubs2 = [];
+    const c = window.riskCtx();
+    if (c.role === 'member' && c.leaderId) {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'risk_assessments'), where('leaderId', '==', c.leaderId), where('status', '==', 'approved'));
+        window._risk.raUnsubs2.push(onSnapshot(q, s => { window._risk.raLeaderApproved = s.docs.map(d => ({ id: d.id, ...d.data() })); }, e => console.warn('ra approved', e)));
+    }
+};
+const _riskShowPrev12 = window.riskOnShow;
+window.riskOnShow = async () => { await _riskShowPrev12(); window.riskRaListen(); };
+const _riskUnlistenPrev12 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev12(); ['raUnsubs', 'raUnsubs2'].forEach(k => { (window._risk[k] || []).forEach(u => { try { u(); } catch (e) {} }); window._risk[k] = []; }); };
+
+// ---- المسودة ----
+window.riskRaNewDraft = (s) => ({
+    hazId: s ? s.id : '', hazNo: s ? (s.refNo || '') : '',
+    activity: s ? (s.task || '') : '', location: s ? (s.location || '') : '', workTypeKey: '', persons: '', owner: '', due: '',
+    rows: s ? (s.hazards || []).map(hk => ({ hk, L: 3, S: 3, rL: 3, rS: 3, rM: false, ctrls: [] })) : []
+});
+window.riskRaStart = (s) => {
+    const R = window.riskRaState();
+    R.draft = window.riskRaNewDraft(s); R.view = 'new';
+    window.riskTabSet('ra');
+};
+window.riskRaNew = () => { const R = window.riskRaState(); R.draft = window.riskRaNewDraft(null); R.view = 'new'; window.riskRaRender(); };
+window.riskRaPickStep = (id) => {
+    const s = (window._risk.steps || []).find(x => x.id === id);
+    if (!window.riskStepValid(s)) return window.showNotif('Clearance expired - الإذن منتهٍ', 'error');
+    const R = window.riskRaState(); R.draft = window.riskRaNewDraft(s); window.riskRaRender();
+};
+window.riskRaCancel = () => { const R = window.riskRaState(); R.view = 'list'; R.draft = null; R.detailId = null; window.riskRaRender(); };
+window.riskRaF = (k, v) => { window.riskRaState().draft[k] = v; };
+window.riskRaRow = (i, k, v) => {
+    const r = window.riskRaState().draft.rows[i]; r[k] = Number(v);
+    if ((k === 'L' || k === 'S') && !r.rM) { r.rL = r.L; r.rS = r.S; }
+    if (k === 'rL' || k === 'rS') r.rM = true;
+    window.riskRaRender();
+};
+window.riskRaAddCtrl = (i, lv, t) => { window.riskRaState().draft.rows[i].ctrls.push({ lv: lv || 'eng', t: t || '' }); window.riskRaRender(); };
+window.riskRaSug = (i, j) => {
+    const r = window.riskRaState().draft.rows[i], s = (window.RISK_HAZ_CTRL[r.hk] || [])[j]; if (!s) return;
+    window.riskRaAddCtrl(i, s[0], s[1] + ' - ' + s[2]);
+};
+window.riskRaCtrlSet = (i, j, k, v) => { window.riskRaState().draft.rows[i].ctrls[j][k] = v; };
+window.riskRaDelCtrl = (i, j) => { window.riskRaState().draft.rows[i].ctrls.splice(j, 1); window.riskRaRender(); };
+window.riskRaDelRow = (i) => { const d = window.riskRaState().draft; d.rows.splice(i, 1); window.riskRaRender(); };
+
+// ---- العرض ----
+window.riskRaRender = () => {
+    const p = document.getElementById('riskRaPanel'); if (!p) return;
+    window.riskInjectCss(); window.riskInjectCss2();
+    const R = window.riskRaState();
+    if (R.view === 'new' && R.draft) return window.riskRaRenderForm(p);
+    if (R.view === 'detail') return window.riskRaRenderDetail(p);
+    return window.riskRaRenderList(p);
+};
+window.riskRaRenderList = (p) => {
+    const E = window.esc, R = window.riskRaState(), all = window._risk.assessments || [];
+    const fl = [['all', 'All - الكل'], ['pending', 'Pending - بانتظار الاعتماد'], ['approved', 'Approved - معتمد'], ['review_due', 'Review due - المراجعة مستحقة'], ['rejected', 'Rejected - مرفوض']];
+    const list = all.filter(a => R.f === 'all' || window.riskRaStatus(a) === R.f);
+    const stPill = (a) => { const s = window.riskRaStatus(a), m = { pending: ['Pending - بانتظار الاعتماد', '#b45309', '#fff4e5'], approved: ['Approved - معتمد', '#047857', '#e7f6ee'], review_due: ['Review due - المراجعة مستحقة', '#c2410c', '#ffece0'], rejected: ['Rejected - مرفوض', '#b91c1c', '#fdecec'] }[s] || [s, '#475569', '#eef3f8']; return `<span class="rk-pill" style="background:${m[2]};color:${m[1]}">${m[0]}</span>`; };
+    const matrix = (() => {
+        const col = (s) => ({ low: '#bfe6cf', medium: '#fde7b0', high: '#fbc6a3', critical: '#f5a3a3' })[window.riskRaLevel(s)];
+        let h = '<table class="rk-matrix"><tr><th></th>' + [1, 2, 3, 4, 5].map(s => `<th>S${s}</th>`).join('') + '</tr>';
+        for (let l = 5; l >= 1; l--) h += `<tr><th>L${l}</th>` + [1, 2, 3, 4, 5].map(s => `<td style="background:${col(l * s)}">${l * s}</td>`).join('') + '</tr>';
+        return h + '</table>';
+    })();
+    p.innerHTML = `
+        <div class="rk-card">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
+                <div><p class="rk-h1">Step 2 · Risk Assessment - الخطوة 2 · تقييم المخاطر</p>
+                <p class="rk-sub">Score = Likelihood × Severity. The residual risk decides who approves. - الدرجة = الاحتمالية × الشدة، والخطر المتبقي يحدد جهة الاعتماد.</p></div>
+                <button class="rk-btn" onclick="window.riskRaNew()">➕ New assessment - تقييم جديد</button>
+            </div>
+            <div class="rk-chain">${window.RISK_CHAIN.map(s => `<div class="rk-step${s.n === 2 ? ' cur' : (s.n < 2 ? ' done' : '')}"><div class="s0">STEP ${s.n} · الخطوة ${s.n}</div><div class="s1">${E(s.en)}</div><div class="s2">${E(s.ar)}</div></div>`).join('')}</div>
+        </div>
+        <div class="rk-chips">${fl.map(([k, l]) => `<button class="rk-chip${R.f === k ? ' on' : ''}" onclick="window.riskRaState().f='${k}';window.riskRaRender()">${E(l)}</button>`).join('')}</div>
+        <div class="rk-card">${list.length ? list.map(a => `
+            <div class="rk-row">
+                <div style="min-width:0"><p class="rk-en" style="font-size:12.5px">${E(a.refNo || a.id)} · ${E(a.activity || '')}</p>
+                <p class="rk-ar" style="color:#486581">${E(a.location || '')} · ${E(a.requesterName || '')}${a.reviewDue ? ' · Review - مراجعة: ' + new Date(a.reviewDue).toLocaleDateString('ar-SA') : ''}</p></div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${window.riskRaPill(a.residualLevel)}${stPill(a)}
+                    <button class="rk-btn2" onclick="window.riskRaState().view='detail';window.riskRaState().detailId='${a.id}';window.riskRaRender()">Open - فتح</button></div>
+            </div>`).join('') : '<p class="rk-sub">No assessments - لا توجد تقييمات</p>'}</div>
+        <div class="rk-card"><p class="rk-h1" style="font-size:13px">Risk matrix - مصفوفة المخاطر</p><div style="overflow-x:auto;margin-top:8px">${matrix}</div>
+            <p class="rk-sub" style="margin-top:8px">1–4 Low - منخفض · 5–9 Medium - متوسط · 10–16 High - مرتفع · 17–25 Critical - حرج</p></div>`;
+};
+
+window.riskRaRenderForm = (p) => {
+    const E = window.esc, R = window.riskRaState(), d = R.draft;
+    if (!d.hazId) {
+        const ok = (window._risk.steps || []).filter(s => s.stepKey === 'hazid' && window.riskStepValid(s));
+        p.innerHTML = `<div class="rk-card"><p class="rk-h1">New assessment - تقييم جديد</p>
+            <p class="rk-sub">Choose a valid Step 1 clearance first. - اختر أولاً إذن الخطوة 1 ساري المفعول.</p>
+            ${ok.length ? ok.map(s => `<div class="rk-row"><div><p class="rk-en" style="font-size:12.5px">${E(s.refNo || s.id)} · ${E(s.location || '')}</p><p class="rk-ar" style="color:#486581">${E(s.task || '')} · ${(s.hazards || []).length} hazards - أخطار</p></div>
+                <button class="rk-btn2" onclick="window.riskRaPickStep('${s.id}')">Use - استخدام</button></div>`).join('')
+                : `<p class="rk-sub" style="margin:10px 0">No valid clearance. Complete Step 1 first. - لا يوجد إذن ساري، أكمل الخطوة 1 أولاً.</p><button class="rk-btn" onclick="window.riskTabSet('haz')">🔎 Go to Step 1 - الذهاب للخطوة 1</button>`}
+            <div style="margin-top:12px"><button class="rk-btn2" onclick="window.riskRaCancel()">← Back - رجوع</button></div></div>`;
+        return;
+    }
+    const lik = (sel, f, i) => `<select class="rk-sel" onchange="window.riskRaRow(${i},'${f}',this.value)">${window.RISK_RA_LIK.map((x, n) => `<option value="${n + 1}"${sel === n + 1 ? ' selected' : ''}>${n + 1} · ${x[0]} - ${x[1]}</option>`).join('')}</select>`;
+    const sev = (sel, f, i) => `<select class="rk-sel" onchange="window.riskRaRow(${i},'${f}',this.value)">${window.RISK_RA_SEV.map((x, n) => `<option value="${n + 1}"${sel === n + 1 ? ' selected' : ''}>${n + 1} · ${x[0]} - ${x[1]}</option>`).join('')}</select>`;
+    const rowsHtml = d.rows.map((r, i) => {
+        const h = window.RISK_HAZ.find(x => x.k === r.hk) || {}, sc = r.L * r.S, rs = r.rL * r.rS;
+        const sugs = (window.RISK_HAZ_CTRL[r.hk] || []).map((s, j) => `<button class="rk-sug" onclick="window.riskRaSug(${i},${j})">+ ${E(s[1])}<br>${E(s[2])}</button>`).join('');
+        const ctrls = r.ctrls.map((c, j) => `<div class="rk-ctrl"><select class="rk-sel" onchange="window.riskRaCtrlSet(${i},${j},'lv',this.value)">${Object.entries(window.RISK_RA_CTRL_LV).map(([k, v]) => `<option value="${k}"${c.lv === k ? ' selected' : ''}>${v[0]} - ${v[1]}</option>`).join('')}</select>
+            <input class="rk-inp" value="${E(c.t)}" oninput="window.riskRaCtrlSet(${i},${j},'t',this.value)" placeholder="Control measure - الضابط"><button class="rk-x" onclick="window.riskRaDelCtrl(${i},${j})">✕</button></div>`).join('');
+        return `<div class="rk-card">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+                <div><p class="rk-en">${h.ic || ''} ${E(h.en || r.hk)}</p><p class="rk-ar">${E(h.ar || '')}</p></div>
+                <button class="rk-x" title="Remove - حذف" onclick="window.riskRaDelRow(${i})">✕</button>
+            </div>
+            <p class="rk-lab" style="margin-top:10px">① Inherent risk (before controls) - الخطر الكامن (قبل الضوابط) ${window.riskRaPill(window.riskRaLevel(sc))} <b>${sc}</b></p>
+            <div class="rk-two"><div><span class="rk-lab">Likelihood - الاحتمالية</span>${lik(r.L, 'L', i)}</div><div><span class="rk-lab">Severity - الشدة</span>${sev(r.S, 'S', i)}</div></div>
+            <p class="rk-lab" style="margin-top:12px">② Controls (hierarchy) - الضوابط (هرم الضوابط)</p>
+            ${ctrls}<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"><button class="rk-btn2" onclick="window.riskRaAddCtrl(${i})">+ Add control - إضافة ضابط</button></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${sugs}</div>
+            <p class="rk-lab" style="margin-top:12px">③ Residual risk (after controls) - الخطر المتبقي (بعد الضوابط) ${window.riskRaPill(window.riskRaLevel(rs))} <b>${rs}</b></p>
+            <div class="rk-two"><div><span class="rk-lab">Likelihood - الاحتمالية</span>${lik(r.rL, 'rL', i)}</div><div><span class="rk-lab">Severity - الشدة</span>${sev(r.rS, 'rS', i)}</div></div>
+        </div>`;
+    }).join('');
+    const res = d.rows.length ? Math.max(...d.rows.map(r => r.rL * r.rS)) : 0, resLv = res ? window.riskRaLevel(res) : 'low';
+    const c = window.riskCtx();
+    const self = resLv === 'low' || (resLv === 'medium' && (c.role === 'leader' || c.role === 'owner')) || (resLv === 'high' && c.role === 'owner');
+    const who = { low: 'Auto - تلقائي', medium: 'Team leader - قائد الفريق', high: 'Company owner - مالك الشركة', critical: 'General manager - المدير العام' }[resLv];
+    const wt = (window.RISK_WORK_TYPES || []).map(t => `<option value="${t.key}"${d.workTypeKey === t.key ? ' selected' : ''}>${E(t.label)}</option>`).join('');
+    p.innerHTML = `
+        <div class="rk-card"><p class="rk-h1">New assessment - تقييم جديد · ${E(d.hazNo)}</p>
+            <div class="rk-two" style="margin-top:10px">
+                <div><span class="rk-lab">Activity - النشاط *</span><input class="rk-inp" value="${E(d.activity)}" oninput="window.riskRaF('activity',this.value)"></div>
+                <div><span class="rk-lab">Location - الموقع *</span><input class="rk-inp" value="${E(d.location)}" oninput="window.riskRaF('location',this.value)"></div>
+                <div><span class="rk-lab">Work type - نوع العمل</span><select class="rk-sel" style="width:100%" onchange="window.riskRaF('workTypeKey',this.value)"><option value="">—</option>${wt}</select></div>
+                <div><span class="rk-lab">Persons exposed - المعرَّضون</span><input class="rk-inp" value="${E(d.persons)}" oninput="window.riskRaF('persons',this.value)"></div>
+                <div><span class="rk-lab">Responsible - المسؤول</span><input class="rk-inp" value="${E(d.owner)}" oninput="window.riskRaF('owner',this.value)"></div>
+                <div><span class="rk-lab">Due date - موعد التنفيذ</span><input class="rk-inp" type="date" value="${E(d.due)}" oninput="window.riskRaF('due',this.value)"></div>
+            </div></div>
+        ${rowsHtml || '<div class="rk-card"><p class="rk-sub">No hazards - لا توجد أخطار</p></div>'}
+        <div class="rk-bar">
+            <div><p class="rk-en" style="font-size:13px">Overall residual risk: ${window.RISK_RA_LV[resLv].en} (${res})</p>
+            <p class="rk-ar" style="color:#486581">الخطر المتبقي الإجمالي: ${window.RISK_RA_LV[resLv].ar} · ${self ? 'Self-approval - اعتماد ذاتي' : 'Approval by - الاعتماد من: ' + who}</p></div>
+            <div style="display:flex;gap:8px"><button class="rk-btn2" onclick="window.riskRaCancel()">Cancel - إلغاء</button>
+            <button class="rk-btn" onclick="window.riskRaSubmit()">${self ? '✅ Approve & issue - اعتماد وإصدار' : '📨 Submit for approval - إرسال للاعتماد'}</button></div>
+        </div>`;
+};
+
+// ---- الحفظ ----
+window.riskRaSubmit = async () => {
+    const R = window.riskRaState(), d = R.draft, c = window.riskCtx();
+    if (!d) return;
+    if (c.role === 'master') return window.showNotif('Assessments are created by field accounts - يُنشئ التقييم حساب ميداني', 'error');
+    const step = (window._risk.steps || []).find(s => s.id === d.hazId);
+    if (!window.riskStepValid(step)) return window.showNotif('Step 1 clearance is not valid - إذن الخطوة 1 غير ساري', 'error');
+    if (d.activity.trim().length < 2 || d.location.trim().length < 2) return window.showNotif('Activity and location are required - النشاط والموقع مطلوبان', 'error');
+    if (!d.rows.length) return window.showNotif('Add at least one hazard - أضف خطراً واحداً على الأقل', 'error');
+    for (const r of d.rows) {
+        const sc = r.L * r.S, rs = r.rL * r.rS, h = window.RISK_HAZ.find(x => x.k === r.hk) || {};
+        if (rs > sc) return window.showNotif('Residual risk cannot exceed inherent risk - الخطر المتبقي لا يتجاوز الكامن: ' + (h.ar || r.hk), 'error');
+        if (sc >= 5 && !r.ctrls.some(x => String(x.t).trim().length >= 3)) return window.showNotif('Add at least one control - أضف ضابطاً واحداً على الأقل: ' + (h.ar || r.hk), 'error');
+        if (r.ctrls.some(x => String(x.t).trim().length < 3)) return window.showNotif('Complete or remove empty controls - أكمل الضوابط الفارغة أو احذفها', 'error');
+    }
+    const data = window.riskRaBuild(d, c, Date.now());
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_assessments', 'RA-' + data.createdAt), data);
+        window.logActivity?.('risk_ra', 'تقييم مخاطر ' + data.refNo);
+        window.showNotif((data.status === 'approved' ? '✅ Assessment approved - اعتُمد التقييم ' : '📨 Sent for approval - أُرسل للاعتماد ') + data.refNo, 'success');
+        R.view = 'list'; R.draft = null; window.riskRaRender();
+    } catch (e) {
+        console.warn('riskRaSubmit', e);
+        window.showNotif('❌ Could not save (check rules) - تعذر الحفظ، راجع القواعد', 'error');
+    }
+};
+
+// ---- التفاصيل والاعتماد ----
+window.riskRaRenderDetail = (p) => {
+    const E = window.esc, R = window.riskRaState(), a = (window._risk.assessments || []).find(x => x.id === R.detailId);
+    if (!a) { R.view = 'list'; return window.riskRaRenderList(p); }
+    const st = window.riskRaStatus(a), canAct = window.riskCanApprove(a);
+    const rows = (a.rows || []).map(r => `<tr><td><div class="rk-en" style="font-size:12px">${E(r.hz || r.hk)}</div><div class="rk-ar" style="font-size:11.5px">${E(r.hzAr || '')}</div></td>
+        <td>${window.riskRaPill(r.level)} ${r.score}</td>
+        <td>${(r.ctrls || []).map(x => `<div style="margin-bottom:3px"><b>${E((window.RISK_RA_CTRL_LV[x.lv] || [x.lv])[0])}</b>: ${E(x.t)}</div>`).join('') || '—'}</td>
+        <td>${window.riskRaPill(r.rLevel)} ${r.rScore}</td></tr>`).join('');
+    p.innerHTML = `
+        <div class="rk-card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <div><p class="rk-h1">${E(a.refNo || a.id)} · ${E(a.activity || '')}</p><p class="rk-sub">${E(a.location || '')} · ${E(a.requesterName || '')} · Hazard clearance - إذن الأخطار: ${E(a.hazNo || '—')}</p></div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${window.riskRaPill(a.residualLevel)}<span class="rk-pill" style="background:#eef3f8;color:#334e68">${E(st)}</span></div></div>
+            ${a.persons ? `<p class="rk-sub">Persons - المعرَّضون: ${E(a.persons)}</p>` : ''}${a.owner ? `<p class="rk-sub">Responsible - المسؤول: ${E(a.owner)}${a.due ? ' · ' + E(a.due) : ''}</p>` : ''}
+            ${a.reviewDue ? `<p class="rk-sub">Review due - المراجعة: ${new Date(a.reviewDue).toLocaleDateString('ar-SA')} · Approved by - اعتمده: ${E(a.approvedBy || '')}</p>` : ''}
+            ${a.rejectReason ? `<p class="rk-sub" style="color:#b91c1c">Rejected - مرفوض: ${E(a.rejectReason)}</p>` : ''}</div>
+        <div class="rk-card" style="overflow-x:auto"><table class="rk-tbl"><tr><th>Hazard - الخطر</th><th>Inherent - الكامن</th><th>Controls - الضوابط</th><th>Residual - المتبقي</th></tr>${rows}</table></div>
+        <div class="rk-bar"><button class="rk-btn2" onclick="window.riskRaCancel()">← Back - رجوع</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${canAct ? `<input id="riskRaRejectReason" class="rk-inp" style="width:200px" placeholder="Reject reason - سبب الرفض"><button class="rk-btn2" style="color:#b91c1c" onclick="window.riskRaReject('${a.id}')">Reject - رفض</button><button class="rk-btn" onclick="window.riskRaApprove('${a.id}')">✅ Approve - اعتماد</button>` : ''}
+            ${st === 'approved' ? `<button class="rk-btn" onclick="window.riskRaUse('${a.id}')">Step 6 · Permit to work → تصريح العمل</button>` : ''}
+            </div></div>`;
+};
+window.riskRaApprove = async (id) => {
+    const a = (window._risk.assessments || []).find(x => x.id === id);
+    if (!window.riskCanApprove(a)) return window.showNotif('Not authorised - لا تملك صلاحية الاعتماد', 'error');
+    const c = window.riskCtx(), now = Date.now();
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_assessments', id), {
+            status: 'approved', approvedAt: now, approvedBy: c.name, approvedByRole: c.role,
+            reviewDue: now + window.RISK_RA_REVIEW_DAYS[a.residualLevel] * 86400000
+        });
+        window.showNotif('✅ Approved - تم الاعتماد ' + (a.refNo || ''), 'success');
+        window.riskRaCancel();
+    } catch (e) { console.warn('riskRaApprove', e); window.showNotif('❌ Could not approve - تعذر الاعتماد', 'error'); }
+};
+window.riskRaReject = async (id) => {
+    const a = (window._risk.assessments || []).find(x => x.id === id);
+    if (!window.riskCanApprove(a)) return window.showNotif('Not authorised - لا تملك صلاحية الرفض', 'error');
+    const reason = (document.getElementById('riskRaRejectReason')?.value || '').trim();
+    if (reason.length < 3) return window.showNotif('Reject reason required - سبب الرفض مطلوب', 'error');
+    const c = window.riskCtx();
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_assessments', id), {
+            status: 'rejected', rejectReason: reason, rejectedAt: Date.now(), approvedBy: c.name, approvedByRole: c.role
+        });
+        window.showNotif('Rejected - تم الرفض', 'success');
+        window.riskRaCancel();
+    } catch (e) { console.warn('riskRaReject', e); window.showNotif('❌ Could not reject - تعذر الرفض', 'error'); }
+};
+window.riskRaUse = (id) => { window._risk.wizRaId = id; window.riskNewPermit(); };
+
+// ---- الخطوة 6: ربط التصريح بتقييم معتمد (للأعمال المتوسطة فما فوق) ----
+const _riskWizReadPrev14 = window.riskWizRead;
+window.riskWizRead = () => {
+    _riskWizReadPrev14();
+    const w = window._risk.wiz, s = document.getElementById('riskF_ra');
+    if (w && s) w.raId = s.value;
+};
+const _riskWizRenderPrev14 = window.riskWizRender;
+window.riskWizRender = () => {
+    _riskWizRenderPrev14();
+    const w = window._risk.wiz; if (!w || w.step !== 2) return;
+    const t = window.riskWizType(); if (!t || t.level === 'low' || document.getElementById('riskRaPick')) return;
+    const list = window.riskRaApprovedList();
+    if (!w.raId && window._risk.wizRaId && list.some(a => a.id === window._risk.wizRaId)) w.raId = window._risk.wizRaId;
+    const opts = list.map(a => `<option value="${a.id}"${w.raId === a.id ? ' selected' : ''}>${window.esc(a.refNo)} · ${window.esc(a.activity || '')} · ${window.RISK_RA_LV[a.residualLevel] ? window.RISK_RA_LV[a.residualLevel].en : ''}</option>`).join('');
+    const box = `<div id="riskRaPick" class="mb-3 rounded-xl p-3" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.35);">
+        <p class="text-sky-200 text-xs font-black mb-2">🛡️ Approved risk assessment (required) - تقييم مخاطر معتمد (مطلوب) *</p>
+        ${list.length ? `<select id="riskF_ra" class="erg-input lux-field-input text-right w-full"><option value="">— Select - اختر —</option>${opts}</select>`
+            : '<p class="text-amber-300 text-xs font-bold">No approved assessment. Complete Steps 1–2 first. - لا يوجد تقييم معتمد، أكمل الخطوتين 1 و2 أولاً.</p>'}</div>`;
+    document.getElementById('riskWizBody')?.insertAdjacentHTML('afterbegin', box);
+};
+const _riskWizNextPrev14 = window.riskWizNext;
+window.riskWizNext = () => {
+    const w = window._risk.wiz;
+    if (w && w.step === 2) {
+        window.riskWizRead();
+        const t = window.riskWizType();
+        if (t && t.level !== 'low' && !window.riskRaApprovedList().some(a => a.id === w.raId)) return window.showNotif('Select an approved risk assessment - اختر تقييم مخاطر معتمداً', 'error');
+    }
+    _riskWizNextPrev14();
+};
+const _riskNewPermitPrev14 = window.riskNewPermit;
+window.riskNewPermit = () => { _riskNewPermitPrev14(); const w = window._risk.wiz; if (w && window._risk.wizRaId) w.raId = window._risk.wizRaId; window._risk.wizRaId = ''; };
+
+// نسخة riskSubmit مع assessmentId (القواعد تشترطه لغير المنخفض)
+window.riskSubmit = async () => {
+    const w = window._risk.wiz, t = window.riskWizType();
+    if (!w || !t) return;
+    const ov = w.isOverride === true;
+    const bad = w.conds.filter(x => x.s === 'no').length;
+    if (w.conds.some(x => !x.s)) return window.showNotif('توجد شروط بلا إجابة', 'error');
+    if (bad && !ov) return window.showNotif('توجد شروط غير مستوفاة', 'error');
+    if (ov && (w.override || '').trim().length < 10) return window.showNotif('سبب التجاوز مطلوب', 'error');
+    const ra = window.riskRaApprovedList().find(a => a.id === w.raId);
+    if (t.level !== 'low' && !ra) return window.showNotif('Select an approved risk assessment - اختر تقييم مخاطر معتمداً', 'error');
+    const c = window.riskCtx(), now = Date.now();
+    const self = ov ? window.riskAuthOverride(t.level, c.role) : window.riskAuth(t.level, c.role);
+    const hrs = Number(window._risk.validityHours) || window.RISK_DEFAULT_VALIDITY_H;
+    const need = ov ? (t.level === 'critical' ? 'master' : 'owner')
+        : (t.level === 'low' ? 'auto' : (t.level === 'medium' ? 'leader' : (t.level === 'high' ? 'owner' : 'master')));
+    const data = {
+        permitNo: 'PTW-' + new Date().getFullYear() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        companyId: c.companyId, leaderId: c.leaderId,
+        requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        workTypeKey: t.key, workTypeLabel: t.label, level: t.level, needRole: need,
+        location: w.location.trim(), task: w.task.trim(), description: w.desc.trim(), workers: w.workers.trim(),
+        conditions: w.conds.map(x => ({ text: x.t, status: x.s })),
+        validityHours: hrs, createdAt: now
+    };
+    if (ra) { data.assessmentId = ra.id; data.assessmentNo = ra.refNo || ''; }
+    if (ov) { data.overrideRequested = true; data.overrideReason = w.override.trim(); }
+    if (self) {
+        data.status = 'approved'; data.issuedAt = now; data.approvedAt = now; data.expiresAt = now + hrs * 3600000;
+        data.approvedBy = (t.level === 'low' && !ov) ? 'auto' : c.name; data.approvedByRole = (t.level === 'low' && !ov) ? 'auto' : c.role;
+    } else {
+        data.status = 'pending';
+    }
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'risk_permits'), data);
+        window.riskWizClose();
+        window.showNotif(self ? '✅ صدر التصريح ' + data.permitNo : '📨 أُرسل الطلب للاعتماد', 'success');
+    } catch (e) {
+        console.error('risk submit', e);
+        window.showNotif('تعذر حفظ التصريح، تحقق من الصلاحيات', 'error');
+    }
+};
+
+
+
+// ===== الخطوات 3 و4 و5 من سلسلة البوابات: JSA + إجراء العمل الآمن + فحص معدات الوقاية (محرك قوائم فحص ثنائي اللغة) =====
+// بند: [المعرّف، English، العربية، علامات: c = حرج (لا يُقبل N/A) | n = يُقبل N/A]
+window.RISK_CK = {
+    jsa: { key: 'jsa', no: 3, pre: 'JSA', tab: 'ck_jsa', next: 'swp', jobSteps: true,
+        title: ['Job Safety Analysis (JSA)', 'تحليل سلامة المهمة (JSA)'],
+        intro: ['Break the job into steps, identify the hazard of each step and assign its control.', 'قسّم المهمة إلى خطوات، وحدّد خطر كل خطوة، وعيّن ضابطها.'],
+        sections: [
+            { id: 'A', c: '#1f76bd', t: ['Preparation', 'التحضير'], i: [
+                ['a1', 'Risk assessment / JSA prepared and communicated', 'تم إعداد تقييم المخاطر / تحليل سلامة المهمة وإبلاغه', 'c'],
+                ['a2', 'Job broken down into sequential steps', 'تم تقسيم المهمة إلى خطوات متسلسلة', 'c'],
+                ['a3', 'Hazards identified for every step', 'تم تحديد الأخطار لكل خطوة', 'c'],
+                ['a4', 'Controls assigned following the hierarchy of controls', 'تم تحديد الضوابط وفق هرم الضوابط', 'c'],
+                ['a5', 'A responsible person is assigned for each control', 'تم تعيين مسؤول عن كل ضابط', '']] },
+            { id: 'B', c: '#16a34a', t: ['Team briefing', 'إحاطة الفريق'], i: [
+                ['b1', 'Toolbox talk conducted and documented', 'تم عقد اجتماع سلامة قبل العمل وتوثيقه', 'c'],
+                ['b2', 'All workers understand their roles and stop-work authority', 'يفهم جميع العاملين أدوارهم وصلاحية إيقاف العمل', 'c'],
+                ['b3', 'Workers understand emergency alarms and evacuation routes', 'يفهم العاملون إنذارات الطوارئ ومسارات الإخلاء', ''],
+                ['b4', 'Language or communication barriers have been addressed', 'تمت معالجة عوائق اللغة أو التواصل', 'n']] },
+            { id: 'C', c: '#d97706', t: ['Site conditions', 'ظروف الموقع'], i: [
+                ['c1', 'Weather, lighting and access conditions assessed', 'تم تقييم الطقس والإضاءة وظروف الوصول', ''],
+                ['c2', 'Simultaneous activities nearby are coordinated', 'تم تنسيق الأنشطة المتزامنة القريبة', 'n'],
+                ['c3', 'Emergency access and escape routes are clear', 'مداخل الطوارئ ومسارات الهروب خالية', 'c']] },
+            { id: 'D', c: '#7c3aed', t: ['Review', 'المراجعة'], i: [
+                ['d1', 'JSA will be reviewed if the task or conditions change', 'سيُراجع التحليل عند تغيّر المهمة أو الظروف', ''],
+                ['d2', 'Lessons from similar previous tasks were considered', 'أُخذت في الاعتبار دروس مهام مشابهة سابقة', 'n']] }
+        ] },
+    swp: { key: 'swp', no: 4, pre: 'SWP', tab: 'ck_swp', next: 'ppe',
+        title: ['Safe Work Procedure (SWP)', 'إجراء العمل الآمن (SWP)'],
+        intro: ['Confirm the written procedure, controls, competence and emergency arrangements before work starts.', 'تأكد من الإجراء المكتوب والضوابط والكفاءة وترتيبات الطوارئ قبل بدء العمل.'],
+        sections: [
+            { id: 'A', c: '#1f76bd', t: ['Documentation', 'التوثيق'], i: [
+                ['a1', 'Method statement approved for high-risk activities', 'تم اعتماد بيان طريقة العمل للأنشطة عالية الخطورة', 'c'],
+                ['a2', 'Site-specific EHS plan and emergency arrangements available', 'خطة السلامة الخاصة بالموقع وترتيبات الطوارئ متوفرة', 'c'],
+                ['a3', 'Safe work procedure communicated to all workers', 'تم إبلاغ العاملين بإجراء العمل الآمن', 'c'],
+                ['a4', 'Safety data sheets (SDS) available for hazardous chemicals', 'صحائف بيانات السلامة (SDS) متوفرة للمواد الكيميائية الخطرة', 'n']] },
+            { id: 'B', c: '#ea580c', t: ['Sequence and controls', 'التسلسل والضوابط'], i: [
+                ['b1', 'Step-by-step sequence and hold points are defined', 'تسلسل الخطوات ونقاط التوقف محددة', 'c'],
+                ['b2', 'Tools, equipment and access means are inspected and fit for use', 'الأدوات والمعدات ووسائل الوصول مفحوصة وصالحة للاستخدام', 'c'],
+                ['b3', 'Isolation, lockout and tagout applied before relevant work', 'تم تطبيق العزل والقفل والوسم قبل الأعمال المعنية', 'n'],
+                ['b4', 'Exclusion zones and barricades are in place', 'مناطق الحظر والحواجز قائمة', '']] },
+            { id: 'C', c: '#16a34a', t: ['Competence and supervision', 'الكفاءة والإشراف'], i: [
+                ['c1', 'Workers are trained and competent for the assigned tasks', 'العاملون مدرَّبون ومؤهلون للمهام المسندة', 'c'],
+                ['c2', 'Authorized operators and riggers are identified and verified', 'المشغلون والمعلقون المعتمدون محددون ومتحقق منهم', 'n'],
+                ['c3', 'A competent supervisor is present during the work', 'مشرف مؤهل موجود أثناء العمل', 'c']] },
+            { id: 'D', c: '#dc2626', t: ['Emergency and stop-work', 'الطوارئ وإيقاف العمل'], i: [
+                ['d1', 'First aiders and rescue arrangements are available', 'المسعفون وترتيبات الإنقاذ متوفرة', 'c'],
+                ['d2', 'Unsafe work is stopped and immediate hazards are controlled', 'يُوقف العمل غير الآمن وتُضبط الأخطار الفورية', 'c'],
+                ['d3', 'Stop-work conditions are defined and understood', 'شروط إيقاف العمل محددة ومفهومة', '']] }
+        ] },
+    ppe: { key: 'ppe', no: 5, pre: 'PPE', tab: 'ck_ppe', next: 'ptw',
+        title: ['PPE Compliance Check', 'فحص الالتزام بمعدات الوقاية'],
+        intro: ['Verify the right protective equipment is available, fitted and in good condition.', 'تحقق من توفر معدات الوقاية المناسبة ومقاسها وسلامتها.'],
+        sections: [
+            { id: 'A', c: '#f59e0b', t: ['Protective equipment', 'معدات الوقاية'], i: [
+                ['a1', 'Safety helmets and safety footwear worn correctly', 'تُلبس خوذات السلامة وأحذية السلامة بشكل صحيح', 'c'],
+                ['a2', 'Suitable eye and face protection provided', 'توفير حماية مناسبة للعين والوجه', 'c'],
+                ['a3', 'Task-appropriate gloves and respiratory protection used', 'استخدام قفازات وحماية تنفسية مناسبة للمهمة', 'c'],
+                ['a4', 'High-visibility clothing worn where required', 'ارتداء ملابس عاكسة حيث يلزم', 'n'],
+                ['a5', 'Hearing protection provided where noise is high', 'توفير واقيات سمع حيث الضجيج عالٍ', 'n'],
+                ['a6', 'Full-body harness and fall-arrest equipment inspected', 'فحص حزام الجسم الكامل ومعدات إيقاف السقوط', 'n']] },
+            { id: 'B', c: '#1f76bd', t: ['Condition and training', 'الحالة والتدريب'], i: [
+                ['b1', 'PPE is suitable, serviceable and replaced when defective', 'معدات الوقاية مناسبة وصالحة وتُستبدل عند التلف', 'c'],
+                ['b2', 'PPE size and fit are correct for each worker', 'مقاس معدات الوقاية مناسب لكل عامل', ''],
+                ['b3', 'Workers are trained in the use and care of PPE', 'العاملون مدرَّبون على استخدام معدات الوقاية والعناية بها', '']] }
+        ] }
+};
+window.RISK_CK_VALID_DAYS = 7;
+
+// ---- إدارة الحالة ----
+window.riskCkState = (k) => {
+    window._risk.ck = window._risk.ck || {};
+    window._risk.ck[k] = window._risk.ck[k] || { raId: '', items: {}, jobSteps: [], notes: '' };
+    return window._risk.ck[k];
+};
+window.riskCkItems = (k) => window.RISK_CK[k].sections.reduce((a, s) => a.concat(s.i.map(x => ({ id: x[0], en: x[1], ar: x[2], crit: x[3] === 'c', sec: s.id }))), []);
+// صلاحية الاكتمال: كل البنود مُجاب عنها، لا NOT OK، والحرجة لا تقبل N/A
+window.riskCkCheck = (k, st) => {
+    const items = window.riskCkItems(k), cfg = window.RISK_CK[k];
+    if (!st.raId) return { ok: false, msg: 'Select an approved risk assessment - اختر تقييم مخاطر معتمداً' };
+    for (const it of items) {
+        const a = st.items[it.id];
+        if (!a || !a.s) return { ok: false, msg: 'Answer all items - أجب عن كل البنود' };
+        if (a.s === 'no') return { ok: false, msg: 'Resolve NOT OK items before issuing - عالج البنود غير المستوفاة قبل الإصدار' };
+        if (a.s === 'na' && it.crit) return { ok: false, msg: 'A critical item cannot be N/A - البند الحرج لا يقبل N/A' };
+    }
+    if (cfg.jobSteps) {
+        const good = st.jobSteps.filter(r => (r.s || '').trim().length >= 3 && (r.h || '').trim().length >= 3 && (r.c || '').trim().length >= 3);
+        if (!good.length) return { ok: false, msg: 'Add at least one complete job step - أضف خطوة مهمة واحدة مكتملة على الأقل' };
+        if (good.length !== st.jobSteps.length) return { ok: false, msg: 'Complete or remove empty job steps - أكمل خطوات المهمة الفارغة أو احذفها' };
+    }
+    return { ok: true, msg: '' };
+};
+window.riskCkCounts = (k, st) => {
+    let ok = 0, no = 0, na = 0;
+    window.riskCkItems(k).forEach(it => { const a = st.items[it.id]; if (a && a.s === 'ok') ok++; else if (a && a.s === 'no') no++; else if (a && a.s === 'na') na++; });
+    return { ok, no, na, score: (ok + no) ? Math.round(ok / (ok + no) * 100) : 100 };
+};
+// بناء سجل الإذن (دالة نقية مطابقة لقواعد risk_steps)
+window.riskCkBuild = (k, st, ra, c, now) => {
+    const cfg = window.RISK_CK[k], n = window.riskCkCounts(k, st);
+    const data = {
+        refNo: cfg.pre + '-' + new Date(now).getFullYear() + '-' + String(now).slice(-6),
+        stepKey: k, companyId: c.companyId || '', leaderId: c.leaderId,
+        requesterId: c.uid, requesterName: c.name, requesterRole: c.role,
+        location: String(ra.location || '').slice(0, 120), task: String(ra.activity || '').slice(0, 200),
+        assessmentId: ra.id, hazId: ra.hazId || '',
+        items: window.riskCkItems(k).map(it => { const a = st.items[it.id]; const o = { id: it.id, s: a.s }; if (a.n && String(a.n).trim()) o.n = String(a.n).trim().slice(0, 200); return o; }),
+        okCount: n.ok, noCount: n.no, naCount: n.na, score: n.score,
+        notes: String(st.notes || '').trim().slice(0, 500),
+        status: 'issued', createdAt: now, validUntil: now + window.RISK_CK_VALID_DAYS * 86400000
+    };
+    if (cfg.jobSteps) data.jobSteps = st.jobSteps.slice(0, 12).map(r => ({ s: r.s.trim().slice(0, 200), h: r.h.trim().slice(0, 200), c: r.c.trim().slice(0, 300) }));
+    return data;
+};
+
+// ---- تنسيقات ----
+window.riskInjectCss3 = () => {
+    if (document.getElementById('rkExtraCss3')) return;
+    const st = document.createElement('style'); st.id = 'rkExtraCss3';
+    st.textContent = `
+#winRiskPermits .rk-sect{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;color:#fff;font-weight:900;font-size:12.5px;margin:14px 0 4px}
+#winRiskPermits .rk-ck{padding:10px 2px;border-bottom:1px solid #eef3f8}
+#winRiskPermits .rk-ck-b{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+#winRiskPermits .rk-yn{padding:6px 14px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;font-size:11px;font-weight:900;color:#475569}
+#winRiskPermits .rk-yn.ok{background:#e7f6ee;border-color:#047857;color:#047857}
+#winRiskPermits .rk-yn.no{background:#fdecec;border-color:#b91c1c;color:#b91c1c}
+#winRiskPermits .rk-yn.na{background:#eef3f8;border-color:#64748b;color:#334e68}
+#winRiskPermits .rk-req{color:#b91c1c;font-weight:900}`;
+    document.head.appendChild(st);
+};
+
+// ---- المعالجات ----
+window.riskCkStart = (k, raId) => { window.riskCkState(k).raId = raId; window.riskTabSet(window.RISK_CK[k].tab); };
+window.riskCkSelRa = (k, id) => { window.riskCkState(k).raId = id; window.riskCkRender(k); };
+window.riskCkSet = (k, id, s) => { const st = window.riskCkState(k); st.items[id] = Object.assign(st.items[id] || {}, { s }); window.riskCkRender(k); };
+window.riskCkNote = (k, id, v) => { const st = window.riskCkState(k); st.items[id] = Object.assign(st.items[id] || {}, { n: v }); };
+window.riskCkNotes = (k, v) => { window.riskCkState(k).notes = v; };
+window.riskCkJs = (k, i, f, v) => { window.riskCkState(k).jobSteps[i][f] = v; };
+window.riskCkJsAdd = (k) => { window.riskCkState(k).jobSteps.push({ s: '', h: '', c: '' }); window.riskCkRender(k); };
+window.riskCkJsDel = (k, i) => { window.riskCkState(k).jobSteps.splice(i, 1); window.riskCkRender(k); };
+window.riskCkJsPrefill = (k) => {
+    const st = window.riskCkState(k), ra = window.riskRaApprovedList().find(a => a.id === st.raId); if (!ra) return;
+    st.jobSteps = (ra.rows || []).map(r => ({ s: '', h: (r.hz || '') + ' - ' + (r.hzAr || ''), c: (r.ctrls || []).map(x => x.t).join(' | ').slice(0, 300) }));
+    window.riskCkRender(k);
+};
+window.riskCkReset = (k) => { window._risk.ck[k] = { raId: window.riskCkState(k).raId, items: {}, jobSteps: [], notes: '' }; window.riskCkRender(k); };
+
+// ---- العرض ----
+window.riskCkRender = (k) => {
+    const cfg = window.RISK_CK[k], panel = document.getElementById('riskCk' + k.charAt(0).toUpperCase() + k.slice(1) + 'Panel'); if (!panel) return;
+    window.riskInjectCss(); window.riskInjectCss2(); window.riskInjectCss3();
+    const E = window.esc, st = window.riskCkState(k);
+    const ras = window.riskRaApprovedList(), ra = ras.find(a => a.id === st.raId);
+    if (st.raId && !ra) st.raId = '';
+    const chain = window.RISK_CHAIN.map(s => `<div class="rk-step${s.n === cfg.no ? ' cur' : (s.n < cfg.no ? ' done' : '')}"><div class="s0">STEP ${s.n} · الخطوة ${s.n}</div><div class="s1">${E(s.en)}</div><div class="s2">${E(s.ar)}</div></div>`).join('');
+    const head = `<div class="rk-card"><p class="rk-h1">Step ${cfg.no} · ${E(cfg.title[0])} - الخطوة ${cfg.no} · ${E(cfg.title[1])}</p>
+        <p class="rk-sub">${E(cfg.intro[0])} - ${E(cfg.intro[1])}</p><div class="rk-chain">${chain}</div></div>`;
+    const raSel = `<div class="rk-card"><span class="rk-lab">Approved risk assessment - تقييم المخاطر المعتمد *</span>
+        ${ras.length ? `<select class="rk-sel" style="width:100%" onchange="window.riskCkSelRa('${k}',this.value)"><option value="">— Select - اختر —</option>${ras.map(a => `<option value="${a.id}"${a.id === st.raId ? ' selected' : ''}>${E(a.refNo)} · ${E(a.activity || '')} · ${E((window.RISK_RA_LV[a.residualLevel] || {}).en || '')}</option>`).join('')}</select>`
+            : `<p class="rk-sub" style="margin:8px 0">No approved risk assessment. Complete Steps 1–2 first. - لا يوجد تقييم معتمد، أكمل الخطوتين 1 و2 أولاً.</p><button class="rk-btn" onclick="window.riskTabSet('ra')">⚠️ Go to Step 2 - الذهاب للخطوة 2</button>`}</div>`;
+    if (!ra) { panel.innerHTML = head + raSel + window.riskCkRecent(k); return; }
+    const answered = window.riskCkItems(k).filter(it => (st.items[it.id] || {}).s).length, total = window.riskCkItems(k).length;
+    const sections = cfg.sections.map(sec => `<div class="rk-sect" style="background:${sec.c}">${sec.id}. ${E(sec.t[0])} - ${E(sec.t[1])}</div><div class="rk-card" style="margin-bottom:6px;padding-top:4px;padding-bottom:4px">
+        ${sec.i.map(x => {
+            const a = st.items[x[0]] || {}, crit = x[3] === 'c';
+            return `<div class="rk-ck"><p class="rk-en" style="font-size:12.5px">${E(x[1])}${crit ? ' <span class="rk-req">*</span>' : ''}</p><p class="rk-ar" style="font-size:12px">${E(x[2])}</p>
+                <div class="rk-ck-b"><button class="rk-yn${a.s === 'ok' ? ' ok' : ''}" onclick="window.riskCkSet('${k}','${x[0]}','ok')">OK - مستوفى</button>
+                <button class="rk-yn${a.s === 'no' ? ' no' : ''}" onclick="window.riskCkSet('${k}','${x[0]}','no')">NOT OK - غير مستوفى</button>
+                <button class="rk-yn${a.s === 'na' ? ' na' : ''}" onclick="window.riskCkSet('${k}','${x[0]}','na')">N/A - لا ينطبق</button></div>
+                ${a.s === 'no' || a.s === 'na' ? `<input class="rk-inp" style="margin-top:6px" value="${E(a.n || '')}" oninput="window.riskCkNote('${k}','${x[0]}',this.value)" placeholder="Observation - الملاحظة">` : ''}</div>`;
+        }).join('')}</div>`).join('');
+    const js = cfg.jobSteps ? `<div class="rk-card"><p class="rk-h1" style="font-size:13.5px">Job steps - خطوات المهمة</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="rk-btn2" onclick="window.riskCkJsAdd('${k}')">+ Add step - إضافة خطوة</button><button class="rk-btn2" onclick="window.riskCkJsPrefill('${k}')">📥 Prefill from the assessment - تعبئة من التقييم</button></div>
+        ${st.jobSteps.map((r, i) => `<div class="rk-two" style="margin-bottom:8px;align-items:end"><div><span class="rk-lab">Step - الخطوة ${i + 1}</span><input class="rk-inp" value="${E(r.s)}" oninput="window.riskCkJs('${k}',${i},'s',this.value)"></div>
+            <div><span class="rk-lab">Hazard - الخطر</span><input class="rk-inp" value="${E(r.h)}" oninput="window.riskCkJs('${k}',${i},'h',this.value)"></div>
+            <div><span class="rk-lab">Control - الضابط</span><input class="rk-inp" value="${E(r.c)}" oninput="window.riskCkJs('${k}',${i},'c',this.value)"></div>
+            <div><button class="rk-x" onclick="window.riskCkJsDel('${k}',${i})">✕</button></div></div>`).join('') || '<p class="rk-sub">No steps yet - لا توجد خطوات بعد</p>'}</div>` : '';
+    const n = window.riskCkCounts(k, st), chk = window.riskCkCheck(k, st);
+    const bar = `<div class="rk-card"><span class="rk-lab">Notes - ملاحظات</span><input class="rk-inp" value="${E(st.notes)}" oninput="window.riskCkNotes('${k}',this.value)"></div>
+        <div class="rk-bar"><div><p class="rk-en" style="font-size:13px">Answered ${answered}/${total} · OK ${n.ok} · NOT OK ${n.no} · N/A ${n.na} · Compliance ${n.score}%</p>
+            <p class="rk-ar" style="color:#486581">${chk.ok ? 'جاهز لإصدار الإذن - Ready to issue' : E(chk.msg)}</p></div>
+            <div style="display:flex;gap:8px"><button class="rk-btn2" onclick="window.riskCkReset('${k}')">Reset - تصفير</button>
+            <button class="rk-btn" ${chk.ok ? '' : 'disabled'} onclick="window.riskCkIssue('${k}')">🔓 Issue Step ${cfg.no} Clearance - إصدار إذن الخطوة ${cfg.no}</button></div></div>`;
+    panel.innerHTML = head + raSel + `<div class="rk-card" style="background:#f7fafc"><p class="rk-en" style="font-size:12.5px">${E(ra.refNo)} · ${E(ra.activity || '')}</p><p class="rk-ar" style="color:#486581">${E(ra.location || '')} · ${window.riskRaPill(ra.residualLevel)}</p></div>` + js + sections + bar + window.riskCkRecent(k);
+};
+window.riskCkRecent = (k) => {
+    const E = window.esc, cfg = window.RISK_CK[k], c = window.riskCtx();
+    const list = window.riskStepsAll().filter(s => s.stepKey === k && s.leaderId === c.leaderId).sort((a, b) => b.createdAt - a.createdAt).slice(0, 8);
+    const rows = list.map(s => { const ok = window.riskStepValid(s);
+        return `<div class="rk-row"><div><p class="rk-en" style="font-size:12.5px">${E(s.refNo || s.id)} · ${E(s.task || '')}</p><p class="rk-ar" style="color:#486581">${E(s.location || '')} · ${E(s.requesterName || '')} · ${s.score != null ? s.score + '%' : ''}</p></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="rk-pill ${ok ? 'ok' : 'no'}">${ok ? 'Valid until - ساري حتى ' + new Date(s.validUntil).toLocaleDateString('ar-SA') : 'Expired - منتهٍ'}</span>
+        ${ok ? `<button class="rk-btn2" onclick="window.riskCkNext('${k}','${s.assessmentId}')">${cfg.next === 'ptw' ? 'Next: Step 6 · Permit → التالي: تصريح العمل' : 'Next: Step ' + (cfg.no + 1) + ' → التالي'}</button>` : ''}</div></div>`; }).join('');
+    return `<div class="rk-card" style="margin-top:14px"><p class="rk-h1" style="font-size:14px">Recent clearances - الأذونات الأخيرة</p>${rows || '<p class="rk-sub">None yet - لا توجد بعد</p>'}</div>`;
+};
+window.riskCkNext = (k, raId) => {
+    const nx = window.RISK_CK[k].next;
+    if (nx === 'ptw') { window._risk.wizRaId = raId; return window.riskNewPermit(); }
+    window.riskCkStart(nx, raId);
+};
+window.riskCkIssue = async (k) => {
+    const st = window.riskCkState(k), c = window.riskCtx();
+    if (c.role === 'master') return window.showNotif('Clearances are issued by field accounts - الإذن يصدره حساب ميداني', 'error');
+    const chk = window.riskCkCheck(k, st); if (!chk.ok) return window.showNotif(chk.msg, 'error');
+    const ra = window.riskRaApprovedList().find(a => a.id === st.raId); if (!ra) return window.showNotif('Assessment is no longer valid - التقييم لم يعد ساري', 'error');
+    const data = window.riskCkBuild(k, st, ra, c, Date.now());
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'risk_steps', k.toUpperCase() + '-' + data.createdAt), data);
+        window.logActivity?.('risk_step', 'إذن الخطوة ' + window.RISK_CK[k].no + ': ' + data.refNo);
+        window.showNotif('✅ Clearance issued - تم إصدار الإذن ' + data.refNo, 'success');
+        window._risk.ck[k] = { raId: st.raId, items: {}, jobSteps: [], notes: '' };
+        window.riskCkRender(k);
+    } catch (e) { console.warn('riskCkIssue', e); window.showNotif('❌ Could not issue (check rules) - تعذر الإصدار، راجع القواعد', 'error'); }
+};
+window.riskCkJsaRender = () => window.riskCkRender('jsa');
+window.riskCkSwpRender = () => window.riskCkRender('swp');
+window.riskCkPpeRender = () => window.riskCkRender('ppe');
+
+// ---- أذونات القائد المرئية للعضو + دمج القوائم ----
+window.riskStepsAll = () => {
+    const seen = {}; return [].concat(window._risk.steps || [], window._risk.stepsLeader || []).filter(s => !seen[s.id] && (seen[s.id] = true));
+};
+const _riskHazListenPrev15 = window.riskHazListen;
+window.riskHazListen = () => {
+    _riskHazListenPrev15();
+    (window._risk.stepUnsubs2 || []).forEach(u => { try { u(); } catch (e) {} });
+    window._risk.stepUnsubs2 = [];
+    const c = window.riskCtx();
+    if (c.role === 'member' && c.leaderId) {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'risk_steps'), where('leaderId', '==', c.leaderId), where('status', '==', 'issued'));
+        window._risk.stepUnsubs2.push(onSnapshot(q, s => { window._risk.stepsLeader = s.docs.map(d => ({ id: d.id, ...d.data() })); }, e => console.warn('steps leader', e)));
+    }
+};
+const _riskUnlistenPrev15 = window.riskUnlisten;
+window.riskUnlisten = () => { _riskUnlistenPrev15(); (window._risk.stepUnsubs2 || []).forEach(u => { try { u(); } catch (e) {} }); window._risk.stepUnsubs2 = []; };
+
+// ---- الخطوة 6: التصريح يتطلب إذني JSA وSWP وPPE ساريين لنفس التقييم ----
+window.riskChainFor = (raId) => {
+    const c = window.riskCtx(), all = window.riskStepsAll(), out = {};
+    ['jsa', 'swp', 'ppe'].forEach(k => {
+        out[k] = all.filter(s => s.stepKey === k && s.assessmentId === raId && s.leaderId === c.leaderId && window.riskStepValid(s) && (s.noCount || 0) === 0)
+            .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+    });
+    return out;
+};
+window.riskWizChainHtml = (raId) => {
+    if (!raId) return '';
+    const ch = window.riskChainFor(raId), E = window.esc;
+    const row = (k, lab) => ch[k] ? `<p class="text-emerald-300 text-[11px] font-bold">✓ ${lab} — ${E(ch[k].refNo)}</p>` : `<p class="text-rose-300 text-[11px] font-bold">✗ ${lab} — missing - مفقود</p>`;
+    return row('jsa', 'Step 3 JSA - الخطوة 3 تحليل سلامة المهمة') + row('swp', 'Step 4 SWP - الخطوة 4 إجراء العمل الآمن') + row('ppe', 'Step 5 PPE - الخطوة 5 معدات الوقاية');
+};
+window.riskWizRaChange = (v) => { const w = window._risk.wiz; if (!w) return; w.raId = v; const b = document.getElementById('riskRaChain'); if (b) b.innerHTML = window.riskWizChainHtml(v); };
+const _riskWizRenderPrev15 = window.riskWizRender;
+window.riskWizRender = () => {
+    _riskWizRenderPrev15();
+    const w = window._risk.wiz; if (!w || w.step !== 2) return;
+    const sel = document.getElementById('riskF_ra'); if (!sel) return;
+    sel.setAttribute('onchange', 'window.riskWizRaChange(this.value)');
+    if (!document.getElementById('riskRaChain')) sel.insertAdjacentHTML('afterend', '<div id="riskRaChain" class="mt-2"></div>');
+    document.getElementById('riskRaChain').innerHTML = window.riskWizChainHtml(w.raId);
+};
+const _riskWizNextPrev15 = window.riskWizNext;
+window.riskWizNext = () => {
+    const w = window._risk.wiz;
+    if (w && w.step === 2) {
+        window.riskWizRead();
+        const t = window.riskWizType();
+        if (t && t.level !== 'low' && w.raId) {
+            const ch = window.riskChainFor(w.raId), miss = ['jsa', 'swp', 'ppe'].filter(k => !ch[k]);
+            if (miss.length) return window.showNotif('Complete steps first - أكمل الخطوات أولاً: ' + miss.map(k => k.toUpperCase()).join(' · '), 'error');
+        }
+    }
+    _riskWizNextPrev15();
+};
+// إضافة معرّفات الإذنين إلى التصريح عند الحفظ
+const _riskSubmitPrev15 = window.riskSubmit;
+window.riskSubmit = async () => {
+    const w = window._risk.wiz, t = window.riskWizType();
+    if (w && t && t.level !== 'low') {
+        const ch = window.riskChainFor(w.raId);
+        if (!ch.jsa || !ch.swp || !ch.ppe) return window.showNotif('Complete steps 3–5 first - أكمل الخطوات 3 إلى 5 أولاً', 'error');
+        window._risk._permitExtra = { jsaId: ch.jsa.id, jsaNo: ch.jsa.refNo || '', swpId: ch.swp.id, swpNo: ch.swp.refNo || '', ppeId: ch.ppe.id, ppeNo: ch.ppe.refNo || '' };
+    } else window._risk._permitExtra = null;
+    return _riskSubmitPrev15();
+};
+
+// ---- تسجيل التبويبات الثلاثة بعد «تقييم المخاطر» ----
+window.RISK_SIDE_ICONS.ck_jsa = '📝'; window.RISK_SIDE_ICONS.ck_swp = '📘'; window.RISK_SIDE_ICONS.ck_ppe = '🧤';
+(() => {
+    const at = window.RISK_TABS.findIndex(t => t.k === 'ra'), pos = at >= 0 ? at + 1 : window.RISK_TABS.length;
+    const add = [
+        { k: 'ck_jsa', label: 'Step 3 · JSA - ٣ · تحليل سلامة المهمة', panel: 'riskCkJsaPanel', render: 'riskCkJsaRender' },
+        { k: 'ck_swp', label: 'Step 4 · SWP - ٤ · إجراء العمل الآمن', panel: 'riskCkSwpPanel', render: 'riskCkSwpRender' },
+        { k: 'ck_ppe', label: 'Step 5 · PPE Check - ٥ · فحص معدات الوقاية', panel: 'riskCkPpePanel', render: 'riskCkPpeRender' }
+    ].filter(n => !window.RISK_TABS.some(t => t.k === n.k));
+    window.RISK_TABS.splice(pos, 0, ...add);
+})();
+// زر «التالي» في تفاصيل التقييم يقود الآن إلى الخطوة 3
+window.riskRaUse = (id) => window.riskCkStart('jsa', id);
+const _riskRaDetailPrev15 = window.riskRaRenderDetail;
+window.riskRaRenderDetail = (p) => {
+    _riskRaDetailPrev15(p);
+    const b = p.querySelector('button[onclick^="window.riskRaUse"]'); if (b) b.textContent = 'Next: Step 3 · JSA → التالي: تحليل سلامة المهمة';
+};
 
 // ===== الخطوة 2 من سلسلة البوابات: تقييم المخاطر (Risk Assessment) — مصفوفة 5×5 + هرم الضوابط + اعتماد حسب الخطر المتبقي =====
 window.RISK_RA_LIK = [['Rare', 'نادر'], ['Unlikely', 'غير محتمل'], ['Possible', 'محتمل'], ['Likely', 'مرجح'], ['Almost certain', 'شبه مؤكد']];
@@ -15759,6 +16481,7 @@ window.riskSubmit = async () => {
         validityHours: hrs, createdAt: now
     };
     if (ra) { data.assessmentId = ra.id; data.assessmentNo = ra.refNo || ''; }
+    if (window._risk._permitExtra) Object.assign(data, window._risk._permitExtra);
     if (ov) { data.overrideRequested = true; data.overrideReason = w.override.trim(); }
     if (self) {
         data.status = 'approved'; data.issuedAt = now; data.approvedAt = now; data.expiresAt = now + hrs * 3600000;
