@@ -16081,6 +16081,114 @@ window.riskRaRenderDetail = (p) => {
     const b = p.querySelector('button[onclick^="window.riskRaUse"]'); if (b) b.textContent = 'Next: Step 3 · JSA → التالي: تحليل سلامة المهمة';
 };
 
+
+
+
+
+// ===== قالب تدقيق المقاولين EHS (74 بنداً في 12 قسماً — A إلى L) مضمَّن في الملف، ثنائي اللغة =====
+// يعمل مع وحدة التدقيق الموجودة (نموذج المشروع، OK/NOT OK/N/A، الملاحظة والإجراء التصحيحي، إنشاء CAPA، المراجعة، PDF).
+// إن وُجدت أقسام في Firestore (مجموعة risk_audit) تُفضَّل على المضمَّن.
+window.RISK_AUDIT_DEFAULT = [
+    { letter: 'A', title: 'Documentation and Statutory Compliance - التوثيق والامتثال النظامي', items: [
+        'Contractor approval and valid work authorization verified - تم التحقق من اعتماد المقاول وسريان تفويض العمل',
+        'Applicable registrations, licences and statutory records verified - تم التحقق من التسجيلات والتراخيص والسجلات النظامية المطلوبة',
+        'Site-specific EHS plan and emergency arrangements available - خطة السلامة الخاصة بالموقع وترتيبات الطوارئ متوفرة',
+        'Risk assessment / JSA prepared and communicated - تم إعداد تقييم المخاطر / تحليل سلامة المهمة وإبلاغه',
+        'Method statement approved for high-risk activities - بيان طريقة العمل معتمد للأنشطة عالية الخطورة',
+        'Required work permit valid and displayed at the worksite - تصريح العمل المطلوب ساري ومعروض في موقع العمل',
+        'Safety data sheets (SDS) available for hazardous chemicals - صحائف بيانات السلامة (SDS) متوفرة للمواد الكيميائية الخطرة',
+        'Insurance, worker records and training documentation verified - تم التحقق من التأمين وسجلات العاملين وتوثيق التدريب'] },
+    { letter: 'B', title: 'Training and Worker Competency - التدريب وكفاءة العاملين', items: [
+        'Site safety induction completed before deployment - اكتمل التعريف بسلامة الموقع قبل المباشرة',
+        'Workers trained and competent for assigned tasks - العاملون مدرَّبون ومؤهلون للمهام المسندة إليهم',
+        'Authorized operators and riggers identified and verified - المشغلون والمعلقون المعتمدون محددون ومتحقق منهم',
+        'Toolbox talks conducted and documented - اجتماعات السلامة قبل العمل تُعقد وتُوثَّق',
+        'First aiders and emergency response personnel identified - المسعفون وأفراد الاستجابة للطوارئ محددون',
+        'Workers understand emergency alarms and evacuation routes - يفهم العاملون إنذارات الطوارئ ومسارات الإخلاء'] },
+    { letter: 'C', title: 'PPE Compliance - الالتزام بمعدات الوقاية الشخصية', items: [
+        'Safety helmets and safety footwear worn correctly - خوذات السلامة وأحذية السلامة تُلبس بشكل صحيح',
+        'Suitable eye and face protection provided - توفير حماية مناسبة للعين والوجه',
+        'Task-appropriate gloves and respiratory protection used - استخدام قفازات وحماية تنفسية مناسبة للمهمة',
+        'High-visibility clothing worn where required - ارتداء ملابس عاكسة حيث يلزم',
+        'Full-body harness and fall-arrest equipment inspected - فحص حزام الجسم الكامل ومعدات إيقاف السقوط',
+        'PPE suitable, serviceable and replaced when defective - معدات الوقاية مناسبة وصالحة وتُستبدل عند التلف'] },
+    { letter: 'D', title: 'Work at Height and Scaffolding - العمل على ارتفاع والسقالات', items: [
+        'Work at height permit and risk controls in place where required - تصريح العمل على ارتفاع وضوابط المخاطر قائمة حيث يلزم',
+        'Scaffolds inspected and released by a competent person - السقالات مفحوصة ومعتمدة للاستخدام من شخص مؤهل',
+        'Guardrails, platforms, toe boards and safe access provided - توفير درابزين ومنصات وحواجز قدم ووصول آمن',
+        'Openings and floor edges protected - الفتحات وحواف الأرضيات محمية',
+        'Suitable anchor points and fall-protection arrangements verified - التحقق من نقاط التثبيت وترتيبات الحماية من السقوط',
+        'Ladders suitable, secured and used safely - السلالم مناسبة ومثبتة وتُستخدم بأمان'] },
+    { letter: 'E', title: 'Lifting Operations and Equipment - عمليات الرفع والمعدات', items: [
+        'Lifting plan prepared and approved for critical lifts as required - خطة الرفع معدة ومعتمدة للرفعات الحرجة عند الاقتضاء',
+        'Crane and lifting accessories have valid inspection records - الرافعة وملحقات الرفع لها سجلات فحص سارية',
+        'Slings, shackles and hooks checked before use - فحص الحبال والمشابك والخطاطيف قبل الاستخدام',
+        'Competent operator, rigger and signaller assigned - تعيين مشغل ومعلّق وموجّه إشارة مؤهلين',
+        'Load capacity, ground stability and exclusion zone verified - التحقق من سعة الحمولة وثبات الأرض ومنطقة الحظر',
+        'No personnel permitted beneath suspended loads - ممنوع وجود أي شخص تحت الأحمال المعلقة'] },
+    { letter: 'F', title: 'Electrical Safety and LOTO - السلامة الكهربائية وعزل الطاقة (LOTO)', items: [
+        'Temporary electrical installations inspected and protected - التمديدات الكهربائية المؤقتة مفحوصة ومحمية',
+        'Earthing and residual-current protection provided (as applicable) - توفير التأريض وحماية التيار المتبقي (حسب الاقتضاء)',
+        'Cables, plugs and portable tools in good condition - الكابلات والقوابس والأدوات المحمولة بحالة جيدة',
+        'Panels secured, identified and accessible (where applicable) - اللوحات مؤمّنة ومعرّفة ويمكن الوصول إليها (حيث ينطبق)',
+        'Isolation, lockout and tagout applied before relevant work - تطبيق العزل والقفل والوسم قبل الأعمال المعنية',
+        'Only authorized personnel undertake electrical work - الأعمال الكهربائية ينفذها المصرح لهم فقط'] },
+    { letter: 'G', title: 'Hot Work and Fire Prevention - الأعمال الساخنة والوقاية من الحريق', items: [
+        'Hot-work permit and gas testing completed - تصريح الأعمال الساخنة واختبار الغاز مكتملان',
+        'Combustibles removed or protected from sparks - المواد القابلة للاشتعال مزالة أو محمية من الشرر',
+        'Fire extinguishers available and accessible - طفايات الحريق متوفرة ويمكن الوصول إليها',
+        'Welding equipment, hoses and flashback protection checked - فحص معدات اللحام والخراطيم وحماية ارتداد اللهب',
+        'Gas cylinders secured, identified and segregated - اسطوانات الغاز مثبتة ومعرّفة ومفصولة'] },
+    { letter: 'H', title: 'Confined Space and Excavation - الأماكن المغلقة والحفر', items: [
+        'Confined-space permit, isolation and entry authorization verified - التحقق من تصريح المكان المغلق والعزل وإذن الدخول',
+        'Atmosphere tested with calibrated equipment - فحص الجو بأجهزة معايَرة',
+        'Attendant, communication and rescue arrangements in place - المراقب والاتصال وترتيبات الإنقاذ قائمة',
+        'Excavations assessed for underground services and collapsible hazards - تقييم الحفريات من حيث الخدمات الجوفية وأخطار الانهيار',
+        'Safe access, barricading and protective systems provided - توفير وصول آمن وحواجز وأنظمة حماية',
+        'Plant, vehicle and material loads kept away from excavation edges - إبعاد المعدات والمركبات وأحمال المواد عن حواف الحفر'] },
+    { letter: 'I', title: 'Housekeeping and Site Conditions - النظافة والترتيب وظروف الموقع', items: [
+        'Access routes and emergency exits unobstructed - طرق الوصول ومخارج الطوارئ غير مسدودة',
+        'Materials stored safely and waste removed regularly - المواد مخزنة بأمان والمخلفات تُزال بانتظام',
+        'Openings, pits and hazardous areas barricaded - الفتحات والحفر والمناطق الخطرة محاطة بحواجز',
+        'Adequate lighting and safe access provided - توفير إضاءة كافية ووصول آمن',
+        'Vehicles and pedestrians separated where practicable - فصل المركبات عن المشاة حيثما أمكن',
+        'Tools, hoses and cables in good condition and properly stored - الأدوات والخراطيم والكابلات بحالة جيدة ومخزنة بشكل صحيح',
+        'Spills and leaks cleaned immediately - تنظيف الانسكابات والتسريبات فوراً'] },
+    { letter: 'J', title: 'Emergency Preparedness and Health - الاستعداد للطوارئ والصحة', items: [
+        'Emergency contacts and alarm instructions displayed - أرقام الطوارئ وتعليمات الإنذار معروضة',
+        'First-aid facilities and trained first aiders available - مرافق الإسعاف الأولي ومسعفون مدرَّبون متوفرون',
+        'Muster points and escape routes identified - نقاط التجمع ومسارات الهروب محددة',
+        'Drinking water, toilets and welfare facilities provided - توفير مياه الشرب ودورات المياه ومرافق الرعاية',
+        'Heat stress, fatigue and weather-related risks controlled - ضبط مخاطر الإجهاد الحراري والإرهاق والطقس',
+        'Incidents and near misses reported and investigated - الحوادث والحوادث الوشيكة تُبلَّغ ويُحقَّق فيها'] },
+    { letter: 'K', title: 'Environmental Management - الإدارة البيئية', items: [
+        'Waste segregated and disposed through approved arrangements - فصل النفايات والتخلص منها بترتيبات معتمدة',
+        'Hazardous materials and waste stored with containment - تخزين المواد والنفايات الخطرة مع احتواء',
+        'Spill kits, washdown/water collection areas in place - توفير أدوات احتواء الانسكاب ومناطق جمع مياه الغسيل',
+        'Dust, noise and emissions controlled as applicable - ضبط الغبار والضجيج والانبعاثات حسب الاقتضاء',
+        'No unauthorized discharge or release to drain or soil - لا تصريف أو تسرب غير مصرح به إلى المجاري أو التربة',
+        'Environmental incidents reported and corrective action recorded - الحوادث البيئية تُبلَّغ ويُسجَّل الإجراء التصحيحي'] },
+    { letter: 'L', title: 'Supervision and Corrective Action - الإشراف والإجراءات التصحيحية', items: [
+        'Competent contractor supervisor present during work - مشرف المقاول المؤهل موجود أثناء العمل',
+        'Daily work coordination and toolbox communication effective - فعالية التنسيق اليومي واجتماعات السلامة',
+        'Previous audit findings closed with evidence - إغلاق ملاحظات التدقيق السابقة بالأدلة',
+        'Unsafe work stopped and immediate hazards controlled - إيقاف العمل غير الآمن وضبط الأخطار الفورية',
+        'Corrective actions have owners and target completion dates - الإجراءات التصحيحية لها مسؤولون وتواريخ إنجاز مستهدفة',
+        'Contractor EHS performance reviewed by project management - مراجعة أداء المقاول في السلامة من إدارة المشروع'] }
+];
+// إن لم توجد أقسام في Firestore (مثلاً بعد تنظيف القاعدة) تُستعمل المضمَّنة فوراً دون استيراد
+window.riskAuditDefaults = () => window.RISK_AUDIT_DEFAULT.map(c => ({ id: 'builtin-' + c.letter, letter: c.letter, title: c.title, items: c.items.slice(), builtin: true }));
+const _riskLoadAuditCatsPrev16 = window.riskLoadAuditCats;
+window.riskLoadAuditCats = async () => {
+    if (!window._risk.auditCats || !window._risk.auditCats.length) window._risk.auditCats = window.riskAuditDefaults();
+    await _riskLoadAuditCatsPrev16();
+    if (!window._risk.auditCats || !window._risk.auditCats.length) window._risk.auditCats = window.riskAuditDefaults();
+};
+window._risk.auditCats = window._risk.auditCats && window._risk.auditCats.length ? window._risk.auditCats : window.riskAuditDefaults();
+
+
+
+
 // ===== الخطوة 2 من سلسلة البوابات: تقييم المخاطر (Risk Assessment) — مصفوفة 5×5 + هرم الضوابط + اعتماد حسب الخطر المتبقي =====
 window.RISK_RA_LIK = [['Rare', 'نادر'], ['Unlikely', 'غير محتمل'], ['Possible', 'محتمل'], ['Likely', 'مرجح'], ['Almost certain', 'شبه مؤكد']];
 window.RISK_RA_SEV = [['Negligible', 'طفيفة'], ['Minor', 'بسيطة'], ['Moderate', 'متوسطة'], ['Major', 'كبيرة'], ['Catastrophic', 'كارثية']];
